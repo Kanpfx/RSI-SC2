@@ -1,52 +1,29 @@
 import json
 
 from rsi.evolution.state import redact, save_json
-from rsi.tools.bash import Commands
-from rsi.tools.edit import Editor
-from rsi.tools.git import Git
-from rsi.tools.sc2_api import lookup_sc2_api
+from rsi.tools.bash import TOOLS as BASH_TOOLS, Commands, smoke_test
+from rsi.tools.edit import TOOLS as EDIT_TOOLS, Editor
+from rsi.tools.git import TOOLS as GIT_TOOLS, Git
+from rsi.tools.sc2_api import TOOLS as API_TOOLS, lookup_sc2_api
 
 
-def schema(name, description, properties, required):
-    return {"type": "function", "function": {
-        "name": name, "description": description,
-        "parameters": {"type": "object", "properties": properties,
-                       "required": required, "additionalProperties": False}}}
-
-
-STRING = {"type": "string"}
-TOOLS = [
-    schema("lookup_sc2_api", "Read installed burnysc2 API signature, docs and source; use BotAI.build or build", {"symbol": STRING}, ["symbol"]),
-    schema("view_file", "Read a project text file", {"path": STRING}, ["path"]),
-    schema("search_text", "Literal text search in project files", {"text": STRING, "path": STRING}, ["text", "path"]),
-    schema("replace_text", "Replace exactly one occurrence in bot/", {"path": STRING, "old": STRING, "new": STRING}, ["path", "old", "new"]),
-    schema("write_file", "Write a UTF-8 file under bot/", {"path": STRING, "content": STRING}, ["path", "content"]),
-    schema("run_command", "Run a fixed compile/import/smoke command or rg -n -- PATTERN PATH",
-           {"argv": {"type": "array", "items": STRING}}, ["argv"]),
-    schema("git_view", "Inspect Git status or bot diff", {"action": {"type": "string", "enum": ["status", "diff"]}}, ["action"]),
-]
+TOOLS = EDIT_TOOLS + BASH_TOOLS + GIT_TOOLS + API_TOOLS
 
 
 class Agent:
-    def __init__(self, llm, max_steps=20, timeout=60):
-        self.llm, self.max_steps, self.timeout = llm, max_steps, timeout
+    def __init__(self, llm, max_steps=20, timeout=60, smoke=smoke_test):
+        self.llm, self.max_steps, self.timeout, self.smoke = llm, max_steps, timeout, smoke
 
-    def run(self, root, prompt, context, log_path):
-        editor, commands, git = Editor(root), Commands(root, self.timeout), Git(root)
-        parent = git.current_commit()
+    def run(self, root, prompt, context, log_path, feedback_dir=None):
+        editor, git = Editor(root, feedback_dir), Git(root)
+        commands = Commands(root, self.timeout, git.current_commit(), self.smoke)
         messages = [{"role": "system", "content": prompt},
-                    {"role": "user", "content": json.dumps(context, ensure_ascii=False)}]
-        handlers = {name: getattr(editor, name) for name in ("view_file", "search_text", "replace_text", "write_file")}
-        handlers["run_command"] = commands.run_command
-        handlers["lookup_sc2_api"] = lookup_sc2_api
-
-        def git_view(action):
-            if action not in ("status", "diff"):
-                raise ValueError("Only Git status/diff are available")
-            return getattr(git, action)()
-
-        handlers["git_view"] = git_view
-        tool_failed = False
+                    {"role": "user", "content": json.dumps(
+                        {**context, "feedback_files": editor.search("feedback")}, ensure_ascii=False)}]
+        handlers = {"read_file": editor.read_file, "search": editor.search,
+                    "apply_patch": editor.apply_patch, "run_command": commands.run_command,
+                    "finish": commands.finish, "git_view": git.git_view,
+                    "lookup_sc2_api": lookup_sc2_api}
         try:
             for step in range(self.max_steps):
                 message = self.llm.complete(messages, TOOLS)
@@ -55,25 +32,25 @@ class Agent:
                 messages.append(message)
                 calls = message.get("tool_calls") or []
                 if not calls:
-                    changes = git.check_bot_only(parent)
-                    if tool_failed or not changes:
-                        raise ValueError("Tool call failed or candidate made no changes")
-                    return {"ok": True, "steps": step + 1, "summary": message.get("content") or ""}
+                    messages.append({"role": "user", "content": "Continue using tools, or call finish with your change summary."})
                 for call in calls:
+                    name = call["function"]["name"]
                     try:
-                        function = call["function"]
-                        arguments = json.loads(function["arguments"])
+                        arguments = json.loads(call["function"]["arguments"])
                         if not isinstance(arguments, dict):
                             raise ValueError("Tool arguments must be an object")
-                        result = handlers[function["name"]](**arguments)
+                        if name == "finish" and len(calls) != 1:
+                            raise ValueError("Call finish alone, after all edits")
+                        result = handlers[name](**arguments)
                     except Exception as exc:
-                        tool_failed = True
                         result = {"error": redact(f"{type(exc).__name__}: {exc}")}
                     messages.append({"role": "tool", "tool_call_id": call["id"],
                                      "content": redact(json.dumps(result, ensure_ascii=False))})
+                    if name == "finish" and result.get("ok"):
+                        return {"ok": True, "steps": step + 1, "summary": arguments["summary"], "smoke": commands.checks}
                 save_json(log_path, messages)
             raise ValueError("Agent exhausted max_steps")
         except Exception as exc:
-            return {"ok": False, "error": redact(f"{type(exc).__name__}: {exc}")}
+            return {"ok": False, "error": redact(f"{type(exc).__name__}: {exc}"), "smoke": commands.checks}
         finally:
             save_json(log_path, messages)

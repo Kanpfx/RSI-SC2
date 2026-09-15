@@ -53,6 +53,19 @@ def check_sc2(config):
     return {"sc2": str(executable), "map": str(map_file)}
 
 
+TELEMETRY_FILE = "telemetry.json"
+
+
+def read_telemetry(game_dir, output, number):
+    """Archive Bot-defined logs without interpreting their contents."""
+    filename = f"game_{number:02d}.telemetry.json"
+    try:
+        shutil.copyfile(Path(game_dir) / TELEMETRY_FILE, Path(output) / filename)
+    except OSError as exc:
+        return {"file": None, "error": f"{type(exc).__name__}: {exc}"}
+    return {"file": filename, "error": None}
+
+
 class Evaluator:
     def __init__(self, config, config_path):
         self.config = config["evaluation"]
@@ -91,6 +104,7 @@ class Evaluator:
         except (OSError, ValueError, KeyError, TypeError) as exc:
             record = {"result": "crash", "crashed": True, "error": str(exc)}
         record["duration"] = duration
+        record["telemetry"] = read_telemetry(game_dir, output, number)
         save_json(result_path, record)
         print(f"  {node['id']} game {number}/{self.config['games']}: {record['result']}", flush=True)
         return record

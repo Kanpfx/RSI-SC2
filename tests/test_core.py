@@ -9,12 +9,10 @@ import psutil
 import pytest
 
 from rsi.agent.runner import Agent
-from rsi.analysis.analyzer import analyze
 from rsi.config import load_config
 from rsi.evaluation.metadata import summarize
 from rsi.evaluation.runner import Evaluator
 from rsi.evolution.archive import Archive
-from rsi.evolution.search import select_parents
 from rsi.evolution.state import read_json, save_json
 from rsi.loop import Evolution
 from rsi.process import child_env, run_process
@@ -43,19 +41,30 @@ def repo(tmp_path):
     return root
 
 
+def patch_text(path, old, new, line=1, destination=None):
+    source = "/dev/null" if old is None else "a/" + path
+    target = "/dev/null" if new is None else "b/" + (destination or path)
+    before, after = (old or "").splitlines(), (new or "").splitlines()
+    old_start, new_start = (line if before else line - 1), (line if after else line - 1)
+    return (f"--- {source}\n+++ {target}\n"
+            f"@@ -{old_start},{len(before)} +{new_start},{len(after)} @@\n"
+            + "".join("-" + value + "\n" for value in before)
+            + "".join("+" + value + "\n" for value in after))
+
+
 def test_editor_boundaries_and_replacement(repo):
     editor = Editor(repo)
     for path in ("../escape.py", "/tmp/escape.py", "C:/escape.py", "bot/../../escape.py",
                  "bot\\main.py", "rsi/loop.py", "bot/.git/config"):
         with pytest.raises(ValueError):
-            editor.write_file(path, "bad")
-    editor.write_file("bot/new.py", "hello hello")
-    with pytest.raises(ValueError, match="exactly once"):
-        editor.replace_text("bot/new.py", "hello", "bye")
-    editor.replace_text("bot/new.py", "hello hello", "world")
-    assert editor.search_text("world", "bot/new.py")[0]["line"] == 1
+            editor.apply_patch(patch_text(path, None, "bad"))
+    editor.apply_patch(patch_text("bot/new.py", None, "hello hello"))
+    with pytest.raises(ValueError, match="does not match"):
+        editor.apply_patch(patch_text("bot/new.py", "hello", "bye"))
+    editor.apply_patch(patch_text("bot/new.py", "hello hello", "world"))
+    assert editor.search("bot/new.py", "world")[0]["line"] == 1
     with pytest.raises(ValueError):
-        editor.view_file(".env")
+        editor.read_file(".env")
 
 
 def test_editor_rejects_symlink(repo, tmp_path):
@@ -67,7 +76,7 @@ def test_editor_rejects_symlink(repo, tmp_path):
     except OSError:
         pytest.skip("OS does not permit creating symlinks")
     with pytest.raises(ValueError, match="Symlink"):
-        Editor(repo).write_file("bot/link.py", "bad")
+        Editor(repo).apply_patch(patch_text("bot/link.py", None, "bad"))
     assert target.read_text(encoding="utf-8") == "untouched"
 
 
@@ -107,11 +116,11 @@ class ScriptedLLM:
 
 
 def test_agent_roundtrip_and_no_changes(repo, tmp_path):
-    done = {"role": "assistant", "content": "Done"}
+    done = call("finish", {"summary": "Earlier attack"})
     llm = ScriptedLLM([
-        call("view_file", {"path": "bot/main.py"}),
-        call("replace_text", {"path": "bot/modules/strategy/strategy_config.py",
-                              "old": "attack_threshold = 12", "new": "attack_threshold = 10"}, "call_2"), done])
+        call("read_file", {"path": "bot/main.py"}),
+        call("apply_patch", {"patch": patch_text("bot/modules/strategy/strategy.py",
+                              "attack_threshold = 12", "attack_threshold = 10")}, "call_2"), done])
     result = Agent(llm).run(repo, "test", {}, tmp_path / "agent.json")
     assert result["ok"]
     assert llm.requests[1][-1]["role"] == "tool"
@@ -120,29 +129,20 @@ def test_agent_roundtrip_and_no_changes(repo, tmp_path):
     assert llm.requests[2][-1]["tool_call_id"] == "call_2"
     Git(repo).add()
     Git(repo).commit("Accept test edit")
-    result = Agent(ScriptedLLM([done])).run(repo, "test", {}, tmp_path / "empty.json")
-    assert not result["ok"] and "no changes" in result["error"]
+    result = Agent(ScriptedLLM([done]), max_steps=1).run(repo, "test", {}, tmp_path / "empty.json")
+    assert not result["ok"]
+    assert "no changes" in read_json(tmp_path / "empty.json")[-1]["content"]
 
 
 def test_agent_limit_and_bad_tool(repo, tmp_path):
-    read = call("view_file", {"path": "bot/main.py"})
+    read = call("read_file", {"path": "bot/main.py"})
     result = Agent(ScriptedLLM([read]), max_steps=1).run(repo, "test", {}, tmp_path / "limit.json")
     assert not result["ok"] and "max_steps" in result["error"]
-    broken = call("write_file", {"path": "rsi/loop.py", "content": "bad"})
+    broken = call("apply_patch", {"patch": patch_text("rsi/loop.py", None, "bad")})
     result = Agent(ScriptedLLM([broken, {"role": "assistant", "content": "done"}])).run(
         repo, "test", {}, tmp_path / "bad.json")
     assert not result["ok"]
     assert "error" in read_json(tmp_path / "bad.json")[3]["content"]
-
-
-def test_analyzer_retry_and_failure(tmp_path):
-    invalid = {"role": "assistant", "content": "not json"}
-    valid = {"role": "assistant", "content": json.dumps({"problem": "slow", "candidates": ["a", "b"]})}
-    llm = ScriptedLLM([invalid, valid])
-    assert analyze(llm, "test", {}, 2, tmp_path / "analysis.json")["candidates"] == ["a", "b"]
-    assert len(llm.requests) == 2
-    with pytest.raises(ValueError, match="twice"):
-        analyze(ScriptedLLM([invalid, invalid]), "test", {}, 2, tmp_path / "bad.json")
 
 
 def make_node(identifier, wins, depth=1, order=0, crash=0, expanded=False):
@@ -156,7 +156,9 @@ def test_archive_and_search(tmp_path):
                  make_node("deep", 3, depth=2), make_node("late", 3, order=2),
                  make_node("early", 3, order=1), make_node("history", 3, depth=0)]:
         archive.add(node)
-    assert [node["id"] for node in select_parents(archive.nodes, 2)] == ["history", "early"]
+    assert [node["id"] for node in archive.parents(2)] == ["history", "early"]
+    assert archive.ranked()[0]["id"] == "expanded"
+    assert all(node["crashes"] == 0 for node in archive.ranked())
     assert Archive(archive.path).nodes == archive.nodes
     with pytest.raises(ValueError, match="five"):
         archive.add({**make_node("invalid", 1), "games": 4})
@@ -204,7 +206,7 @@ def test_git_parent_isolation_and_boundary(repo):
     git.create_worktree(first, "candidate/first", seed)
     git.create_worktree(second, "candidate/second", seed)
     try:
-        Editor(first).write_file("bot/only_first.py", "x = 1\n")
+        Editor(first).apply_patch(patch_text("bot/only_first.py", None, "x = 1"))
         candidate = Git(first)
         assert candidate.check_bot_only(seed) == ["bot/only_first.py"]
         candidate.add()
@@ -226,16 +228,20 @@ def test_git_parent_isolation_and_boundary(repo):
 
 class EvolutionLLM:
     def complete(self, messages, tools=None):
-        if tools is None:
-            return {"role": "assistant", "content": json.dumps({
-                "problem": "Slow pressure", "candidates": ["Earlier attack", "Earlier supply"]})}
-        if messages[-1]["role"] == "tool":
-            return {"role": "assistant", "content": "Updated one strategy parameter"}
+        assert tools is not None
         context = json.loads(messages[1]["content"])
-        old, new = (("attack_threshold = 12", "attack_threshold = 10")
-                    if context["assigned_direction"] == "Earlier attack"
+        assert "sources" not in context and "bot/main.py" in context["files"]
+        assert "evaluation" not in context and context["parent"]["games"] == 5
+        assert context["lineage"][-1]["id"] == context["parent"]["id"]
+        assert "feedback/metadata.json" in context["feedback_files"]
+        first = context["attempt"] == 1
+        if messages[-1]["role"] == "tool":
+            return call("finish", {"summary": "Earlier attack" if first else "Earlier supply"})
+        if not first and not context["failed_attempts"]:
+            assert context["siblings"][0]["direction"] == "Earlier attack"
+        old, new = (("attack_threshold = 12", "attack_threshold = 10") if first
                     else ("supply_buffer = 4", "supply_buffer = 6"))
-        return call("replace_text", {"path": "bot/modules/strategy/strategy_config.py", "old": old, "new": new})
+        return call("apply_patch", {"patch": patch_text("bot/modules/strategy/strategy.py", old, new, 1 if first else 2)})
 
 
 class FakeEvaluator:
@@ -260,7 +266,7 @@ def test_one_round_complete_loop(repo):
     for candidate in (first, second):
         assert git.run("rev-parse", f"{candidate['commit']}^") == seed["commit"]
         changed = git.run("diff", "--name-only", seed["commit"], candidate["commit"]).splitlines()
-        assert changed == ["bot/modules/strategy/strategy_config.py"]
+        assert changed == ["bot/modules/strategy/strategy.py"]
     state = read_json(evolution.output / "state.json")
     assert state["status"] == "completed" and state["frontier"] == [first["id"], second["id"]]
     assert summary["best"]["id"] == first["id"]
@@ -291,16 +297,16 @@ def test_smoke_failure_is_not_evaluated(repo):
     summary = evolution.run()
     assert summary["evaluated_nodes"] == 1 and summary["failed_attempts"] == 2
     assert len(evolution.archive.nodes) == 1 and evolution.archive.nodes[0]["expanded"]
-    assert all(item["stage"] == "smoke" and item["commit"] is None for item in evolution.failures)
+    assert all(item["stage"] == "agent" and item["commit"] is None for item in evolution.failures)
     assert read_json(evolution.output / "state.json")["frontier"] == []
 
 
 def test_agent_sc2_lookup_roundtrip(repo, tmp_path):
     llm = ScriptedLLM([
         call("lookup_sc2_api", {"symbol": "BotAI.build"}),
-        call("replace_text", {"path": "bot/modules/strategy/strategy_config.py",
-                              "old": "attack_threshold = 12", "new": "attack_threshold = 10"}, "call_2"),
-        {"role": "assistant", "content": "Done"},
+        call("apply_patch", {"patch": patch_text("bot/modules/strategy/strategy.py",
+                              "attack_threshold = 12", "attack_threshold = 10")}, "call_2"),
+        call("finish", {"summary": "Earlier attack"}),
     ])
     result = Agent(llm).run(repo, "test", {}, tmp_path / "api-agent.json")
     assert result["ok"]
@@ -344,3 +350,104 @@ def test_parallel_setup_failure_cancels_other_games(tmp_path, monkeypatch):
         evaluator.evaluate(tmp_path, {}, tmp_path / "results")
     assert sorted(cancelled) == [1, 2, 3, 4]
     assert not (tmp_path / "results/metadata.json").exists()
+
+
+def test_editor_module_reorganization(repo):
+    editor = Editor(repo)
+    editor.apply_patch(patch_text("bot/new.py", None, "first\nsecond"))
+    assert editor.read_file("bot/new.py")["text"] == "first\nsecond\n"
+    editor.apply_patch(patch_text("bot/new.py", "first\nsecond", "first\nsecond", destination="bot/sub/module.py"))
+    assert "bot/sub/module.py" in editor.search("bot/sub")
+    assert not (repo / "bot/new.py").exists()
+    for source, destination in (("bot/main.py", "rsi/new.py"), ("rsi/loop.py", "bot/new.py"),
+                                ("bot/main.py", "bot/sub/module.py")):
+        with pytest.raises(ValueError):
+            editor.apply_patch(patch_text(source, "old", "new", destination=destination))
+    with pytest.raises(ValueError):
+        editor.apply_patch(patch_text("rsi/loop.py", "old", None))
+    editor.apply_patch(patch_text("bot/sub/module.py", "first\nsecond", None))
+    assert editor.search("bot/sub") == []
+
+
+def test_agent_recovers_from_tool_and_smoke_errors(repo, tmp_path):
+    llm = ScriptedLLM([
+        call("read_file", {"path": "bot/missing.py"}),
+        call("apply_patch", {"patch": patch_text("bot/new.py", None, "invalid python!")}),
+        call("finish", {"summary": "New module"}),
+        call("apply_patch", {"patch": patch_text("bot/new.py", "invalid python!", "value = 1")}),
+        call("finish", {"summary": "New module"}),
+    ])
+    result = Agent(llm).run(repo, "test", {}, tmp_path / "recover.json")
+    assert result["ok"] and result["smoke"]["ok"]
+    assert "error" in json.loads(llm.requests[1][-1]["content"])
+    assert not json.loads(llm.requests[3][-1]["content"])["ok"]
+
+
+def test_agent_feedback_is_read_only_and_scoped(repo, tmp_path):
+    feedback = tmp_path / "feedback"
+    feedback.mkdir()
+    save_json(feedback / "metadata.json", {"wins": 2})
+    save_json(feedback / "agent.json", {"private": True})
+    llm = ScriptedLLM([
+        call("read_file", {"path": "feedback/../agent.json"}),
+        call("read_file", {"path": "feedback/agent.json"}),
+        call("read_file", {"path": "feedback/metadata.json"}),
+    ])
+    result = Agent(llm, max_steps=3).run(repo, "test", {}, tmp_path / "feedback-agent.json", feedback)
+    assert not result["ok"]
+    messages = read_json(tmp_path / "feedback-agent.json")
+    replies = [json.loads(message["content"]) for message in messages if message["role"] == "tool"]
+    assert "error" in replies[0] and "error" in replies[1]
+    assert json.loads(replies[2]["text"])["wins"] == 2
+    assert replies[2]["next_offset"] is None
+
+
+def test_finish_must_be_alone(repo, tmp_path):
+    message = call("finish", {"summary": "Done"})
+    message["tool_calls"] += call("apply_patch", {"patch": patch_text("bot/new.py", None, "value = 1")})["tool_calls"]
+    llm = ScriptedLLM([message, call("finish", {"summary": "New module"})])
+    result = Agent(llm).run(repo, "test", {}, tmp_path / "finish.json")
+    assert result["ok"]
+    assert "Call finish alone" in llm.requests[1][-2]["content"]
+
+
+def test_patch_validates_all_sections_before_writing(repo):
+    editor = Editor(repo)
+    valid = patch_text("bot/new.py", None, "value = 1")
+    invalid = patch_text("bot/main.py", "missing context", "replacement")
+    with pytest.raises(ValueError, match="does not match"):
+        editor.apply_patch(valid + invalid)
+    assert not (repo / "bot/new.py").exists()
+    with pytest.raises(ValueError):
+        editor.apply_patch(valid + patch_text("feedback/metadata.json", None, "{}"))
+    assert not (repo / "bot/new.py").exists()
+    with pytest.raises(ValueError, match="conflict"):
+        editor.apply_patch(valid + patch_text("bot/new.py/child.py", None, "x = 1"))
+    assert not (repo / "bot/new.py").exists()
+    editor.apply_patch(valid + patch_text("bot/second.py", None, "value = 2"))
+    assert (repo / "bot/new.py").read_text().strip() == "value = 1"
+    assert (repo / "bot/second.py").read_text().strip() == "value = 2"
+
+
+def test_patch_multiple_hunks_and_no_final_newline(repo):
+    editor = Editor(repo)
+    (repo / "bot/new.py").write_text("a\nb\nc\nd\ne", encoding="utf-8")
+    patch = ("--- a/bot/new.py\n+++ b/bot/new.py\n"
+             "@@ -1,2 +1,3 @@\n a\n-b\n+B\n+extra\n"
+             "@@ -4,2 +5,2 @@\n d\n-e\n\\ No newline at end of file\n"
+             "+E\n\\ No newline at end of file\n")
+    editor.apply_patch(patch)
+    assert (repo / "bot/new.py").read_text(encoding="utf-8") == "a\nB\nextra\nc\nd\nE"
+
+
+def test_file_reads_continue_and_search_feedback(repo, tmp_path):
+    feedback = tmp_path / "feedback"
+    feedback.mkdir()
+    value = "x" * 13000
+    (feedback / "game_01.process.json").write_text(value, encoding="utf-8")
+    editor = Editor(repo, feedback)
+    assert editor.search("feedback") == ["feedback/game_01.process.json"]
+    first = editor.read_file("feedback/game_01.process.json")
+    second = editor.read_file("feedback/game_01.process.json", first["next_offset"])
+    assert first["text"] + second["text"] == value and second["next_offset"] is None
+    assert editor.search("bot", "SeedBot")[0]["path"] == "bot/main.py"

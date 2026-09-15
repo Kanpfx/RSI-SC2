@@ -1,6 +1,6 @@
 from sc2.ids.unit_typeid import UnitTypeId as U
 
-from bot.modules.strategy.strategy_config import supply_buffer
+from bot.modules.strategy import supply_buffer
 
 
 async def manage(bot):

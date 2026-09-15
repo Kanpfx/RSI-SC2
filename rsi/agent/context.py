@@ -1,16 +1,14 @@
 from rsi.tools.edit import Editor
 
 
-def parent_context(root, node, archive):
-    editor = Editor(root)
-    sources = {}
-    for file in sorted((editor.root / "bot").rglob("*.py")):
-        name = file.relative_to(editor.root).as_posix()
-        sources[name] = editor.view_file(name)
-    lineage = []
-    current = node
-    by_id = {item["id"]: item for item in archive.nodes}
-    while current:
-        lineage.append({key: current[key] for key in ("id", "parent_id", "direction", "wins", "crashes")})
-        current = by_id.get(current["parent_id"])
-    return {"parent": node, "lineage": list(reversed(lineage)), "sources": sources}
+def parent_context(root, parent, archive, failures):
+    return {
+        "entrypoint": "bot/main.py",
+        "files": Editor(root).search(),
+        "parent": parent,
+        "lineage": archive.lineage(parent),
+        "siblings": [
+            {key: node[key] for key in ("direction", "wins", "losses", "ties", "crashes")}
+            for node in archive.nodes if node["parent_id"] == parent["id"]],
+        "failed_attempts": [item for item in failures if item["parent_id"] == parent["id"]],
+    }

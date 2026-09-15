@@ -1,6 +1,14 @@
 from pathlib import Path
 
 from rsi.process import run_process
+from rsi.tools import schema
+
+
+TOOLS = [
+    schema("git_view", "Inspect Git status or bot diff",
+           {"action": {"type": "string", "enum": ["status", "diff"]}}, ["action"],
+           [{"action": "diff"}]),
+]
 
 
 class Git:
@@ -13,6 +21,11 @@ class Git:
             raise RuntimeError(f"git {args[0]}: {result['stderr']}")
         return result["stdout"].rstrip("\r\n")
 
+    def git_view(self, action):
+        if action not in ("status", "diff"):
+            raise ValueError("Only Git status/diff are available")
+        return getattr(self, action)()
+
     def status(self):
         return self.run("status", "--porcelain", "--untracked-files=all")
 
@@ -22,21 +35,12 @@ class Git:
     def current_commit(self):
         return self.run("rev-parse", "HEAD")
 
-    def create_branch(self, name, parent):
-        self.run("branch", name, parent)
-
-    def checkout(self, name):
-        self.run("checkout", name)
-
     def add(self):
         self.run("add", "-A", "--", "bot")
 
     def commit(self, message):
         self.run("commit", "-m", message)
         return self.current_commit()
-
-    def merge_ff(self, branch):
-        self.run("merge", "--ff-only", branch)
 
     def create_worktree(self, path, branch, parent):
         self.run("worktree", "add", "-b", branch, str(path), parent)

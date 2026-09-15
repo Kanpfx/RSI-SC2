@@ -1,6 +1,14 @@
 """Read installed burnysc2 definitions without importing or executing its code."""
 import ast
 import importlib.metadata
+from rsi.tools import STRING, schema
+
+
+TOOLS = [
+    schema("lookup_sc2_api", "Read installed SC2 API signature, docs and source. "
+           "Use a qualified symbol; try the method name alone for inherited methods",
+           {"symbol": STRING}, ["symbol"], [{"symbol": "BotAI.build"}]),
+]
 
 
 MAX_SOURCE = 12000
