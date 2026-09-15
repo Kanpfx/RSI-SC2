@@ -39,10 +39,17 @@ class Evolution:
         self.analyze_prompt = (self.root / "prompts/analyze.md").read_text(encoding="utf-8")
         self.improve_prompt = (self.root / "prompts/improve.md").read_text(encoding="utf-8")
 
+    def usage(self):
+        statistics = getattr(self.llm, "statistics", None)
+        return statistics() if callable(statistics) else None
+
     def state(self, status, round_number, error=None):
         frontier = select_parents(self.archive.nodes, self.config["search"]["beam_width"])
         save_json(self.output / "state.json", {"run_id": self.run_id, "status": status,
                   "round": round_number, "frontier": [node["id"] for node in frontier], "error": error})
+        usage = self.usage()
+        if usage is not None:
+            save_json(self.output / "usage.json", usage)
 
     def node(self, parent=None, direction="Seed"):
         number = self.counter
@@ -146,7 +153,7 @@ class Evolution:
             ranked = eligible(self.archive.nodes)
             summary = {"run_id": self.run_id, "output": str(self.output),
                        "evaluated_nodes": len(self.archive.nodes), "failed_attempts": len(self.failures),
-                       "best": ranked[0] if ranked else None}
+                       "best": ranked[0] if ranked else None, "usage": self.usage()}
             save_json(self.output / "summary.json", summary)
             self.state("completed", round_number)
             return summary

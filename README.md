@@ -27,6 +27,8 @@ $env:LLM_API_KEY = '<你的 API key>'
 
 `LLM_BASE_URL` 可指向兼容服务，未设置则使用 SDK 默认地址。不在代码中固定模型。接口按照 [OpenAI 官方工具调用文档](https://developers.openai.com/api/docs/guides/function-calling)实现，服务必须支持 `tools`、`tool_calls` 和 `tool_call_id`。
 
+可选设置 `LLM_PRICE_INPUT_PER_MILLION` 和 `LLM_PRICE_OUTPUT_PER_MILLION`（每百万 token 单价，按服务商计价币种）。两者都设置时，本次实验的 `usage.json` 会给出费用估算；未设置时 `cost` 为 `null`，只统计 tokens。价格按输入输出两类平摊计算，不计缓存折扣或阶梯定价。
+
 ## 启动
 
 运行前需要项目自己的 Git 仓库、初始提交和已有 Git 身份。此实现交付时已初始化；复制为全新目录时执行：
@@ -69,6 +71,7 @@ runs/<run_id>/
   environment.json     环境与 Seed commit
   archive.json         所有已评测节点、血缘和战绩
   state.json           轮数、状态和下一批 Parent
+  usage.json           累计 LLM 调用次数、tokens 与费用估算（每步刷新）
   failures.json        生成、测试等失败的候选（有失败时创建）
   summary.json         最佳节点、commit、分支和结果目录
   nodes/<node_id>/
