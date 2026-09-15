@@ -131,3 +131,13 @@ printed on completion. Git, Archive, Evolution State and formal runs/ are untouc
 Optional: `--config path/to/config.yaml`. No LLM key is required.
 Directory snapshots record `commit: null`; `--ref` records the resolved commit.
 Exit code 0 means no crashes; exit code 1 means setup failure or crashes.
+
+
+### Parallel evaluation
+
+Formal evaluation and the manual Benchmark both run the five games concurrently,
+starting one every 3 seconds (approximately 0, 3, 6, 9, 12 seconds). Each game
+uses its own Bot copy, working directory, temporary directory and result files.
+SC2 chooses an available API port dynamically. Results remain in game-number order;
+Git, Archive and evolution updates remain sequential. Interrupting evaluation
+cancels its active game process trees. Speedup depends on available CPU and RAM.

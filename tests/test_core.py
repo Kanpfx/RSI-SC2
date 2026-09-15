@@ -2,6 +2,7 @@ import copy
 import json
 import shutil
 import sys
+import threading
 from pathlib import Path
 
 import psutil
@@ -163,14 +164,22 @@ def test_archive_and_search(tmp_path):
 
 def test_evaluation_five_records(tmp_path, monkeypatch):
     config = load_config(ROOT / "config/mvp.yaml")
-    index = 0
+    (tmp_path / "bot").mkdir()
+    (tmp_path / "bot/main.py").write_text("# snapshot", encoding="utf-8")
+    barrier = threading.Barrier(5)
+    launches, intervals = {}, []
+    monkeypatch.setattr("rsi.evaluation.runner.time.sleep", intervals.append)
 
-    def process(argv, cwd, timeout):
-        nonlocal index
-        index += 1
-        if index == 5:
+    def process(argv, cwd, timeout, env, cancel_event):
+        number = int(Path(argv[-1]).stem.split("_")[1])
+        launches[number] = (cwd, env["TEMP"])
+        assert env["TEMP"] == env["TMP"] == env["TMPDIR"]
+        assert cwd != tmp_path and (cwd / "bot/main.py").read_text() == "# snapshot"
+        (cwd / "bot/runtime.txt").write_text(str(number))
+        barrier.wait(timeout=10)  # All five processes must overlap.
+        if number == 5:
             return {"stdout": "", "stderr": "", "exit_code": -1, "timed_out": True}
-        result = "win" if index < 3 else "loss" if index < 4 else "tie"
+        result = "win" if number < 3 else "loss" if number < 4 else "tie"
         save_json(Path(argv[-1]), {"result": result, "crashed": False, "error": None})
         return {"stdout": "", "stderr": "", "exit_code": 0, "timed_out": False}
 
@@ -178,7 +187,11 @@ def test_evaluation_five_records(tmp_path, monkeypatch):
     result = Evaluator(config, tmp_path / "config.json").evaluate(
         tmp_path, {"id": "node", "parent_id": None, "commit": "abc"}, tmp_path / "results")
     assert (result["wins"], result["losses"], result["ties"], result["crashes"]) == (2, 1, 1, 1)
-    assert result["games"] == 5
+    assert result["games"] == 5 and intervals == [3, 3, 3, 3]
+    assert [item["result"] for item in result["results"]] == ["win", "win", "loss", "tie", "crash"]
+    assert len({cwd for cwd, _ in launches.values()}) == 5
+    assert len({temp for _, temp in launches.values()}) == 5
+    assert not (tmp_path / "bot/runtime.txt").exists()
     assert "exceeded" in result["results"][-1]["error"]
 
 
@@ -296,3 +309,38 @@ def test_agent_sc2_lookup_roundtrip(repo, tmp_path):
     api = json.loads(reply["content"])
     assert api["status"] == "found" and api["async"]
     assert api["symbol"] == "sc2.bot_ai.BotAI.build"
+
+
+def test_cancel_kills_game_process_tree(tmp_path):
+    cancel = threading.Event()
+    timer = threading.Timer(2, cancel.set)
+    code = ("import subprocess,sys,time,pathlib; "
+            "p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)']); "
+            "pathlib.Path('child.pid').write_text(str(p.pid)); time.sleep(30)")
+    timer.start()
+    try:
+        with pytest.raises(InterruptedError, match="cancelled"):
+            run_process([sys.executable, "-c", code], tmp_path, timeout=30, cancel_event=cancel)
+    finally:
+        timer.cancel()
+    assert not psutil.pid_exists(int((tmp_path / "child.pid").read_text()))
+
+
+def test_parallel_setup_failure_cancels_other_games(tmp_path, monkeypatch):
+    evaluator = Evaluator(load_config(ROOT / "config/mvp.yaml"), tmp_path / "config.json")
+    barrier = threading.Barrier(5)
+    cancelled = []
+    monkeypatch.setattr("rsi.evaluation.runner.time.sleep", lambda seconds: None)
+
+    def game(number, worktree, node, output, cancel_event):
+        barrier.wait(timeout=5)
+        if number == 5:
+            raise RuntimeError("setup failed")
+        assert cancel_event.wait(timeout=5)
+        cancelled.append(number)
+
+    monkeypatch.setattr(evaluator, "_game", game)
+    with pytest.raises(RuntimeError, match="setup failed"):
+        evaluator.evaluate(tmp_path, {}, tmp_path / "results")
+    assert sorted(cancelled) == [1, 2, 3, 4]
+    assert not (tmp_path / "results/metadata.json").exists()

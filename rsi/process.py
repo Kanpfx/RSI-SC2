@@ -1,5 +1,6 @@
 import os
 import subprocess
+import time
 
 import psutil
 
@@ -30,7 +31,7 @@ def terminate_tree(process):
     psutil.wait_procs(children, timeout=5)
 
 
-def run_process(argv, cwd, timeout, env=None):
+def run_process(argv, cwd, timeout, env=None, cancel_event=None):
     process = psutil.Popen(
         [str(arg) for arg in argv], cwd=cwd, env=env or child_env(),
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -39,7 +40,21 @@ def run_process(argv, cwd, timeout, env=None):
     )
     timed_out = False
     try:
-        stdout, stderr = process.communicate(timeout=timeout)
+        if cancel_event is None:
+            stdout, stderr = process.communicate(timeout=timeout)
+        else:
+            deadline = time.monotonic() + timeout
+            while True:
+                if cancel_event.is_set():
+                    raise InterruptedError("Evaluation cancelled")
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(argv, timeout)
+                try:
+                    stdout, stderr = process.communicate(timeout=min(0.2, remaining))
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
     except subprocess.TimeoutExpired:
         timed_out = True
         terminate_tree(process)
