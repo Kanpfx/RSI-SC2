@@ -12,8 +12,8 @@ class Archive:
     def add(self, node):
         if any(item["id"] == node["id"] for item in self.nodes):
             raise ValueError(f"Duplicate node: {node['id']}")
-        if node["games"] != 10 or sum(node[key] for key in ("wins", "losses", "ties", "crashes")) != 10:
-            raise ValueError("Archive requires exactly ten evaluated games")
+        if node["games"] != 5 or sum(node[key] for key in ("wins", "losses", "ties", "crashes")) != 5:
+            raise ValueError("Archive requires exactly five evaluated games")
         self.nodes.append(node)
         self.save()
 

@@ -27,6 +27,12 @@ def preflight(root, config):
             raise RuntimeError(f"Configure Git {key} before running evolution") from exc
     if git.status():
         raise RuntimeError("Commit project changes before running evolution (Git worktree must be clean)")
+    return {"python": sys.executable, "commit": commit, **check_sc2(config),
+            "versions": {name: importlib.metadata.version(name)
+                         for name in ("burnysc2", "openai", "PyYAML", "pytest", "psutil")}}
+
+
+def check_sc2(config):
     try:
         from sc2 import maps
         from sc2.paths import Paths
@@ -41,9 +47,7 @@ def preflight(root, config):
             raise RuntimeError(f"SC2 map missing or empty: {map_file}")
     except (SystemExit, KeyError, OSError, ValueError) as exc:
         raise RuntimeError(f"SC2 preflight failed; check SC2PATH and map: {exc}") from exc
-    return {"python": sys.executable, "commit": commit, "sc2": str(executable), "map": str(map_file),
-            "versions": {name: importlib.metadata.version(name)
-                         for name in ("burnysc2", "openai", "PyYAML", "pytest", "psutil")}}
+    return {"sc2": str(executable), "map": str(map_file)}
 
 
 class Evaluator:
@@ -60,7 +64,7 @@ class Evaluator:
             result_path = output / f"game_{number:02d}.json"
             start = time.monotonic()
             result = run_process(
-                [sys.executable, "-I", worker, "--worktree", Path(worktree).resolve(),
+                [sys.executable, "-I", "-B", worker, "--worktree", Path(worktree).resolve(),
                  "--config", self.config_path, "--output", result_path.resolve()],
                 cwd=worktree, timeout=self.config["game_timeout_sec"],
             )

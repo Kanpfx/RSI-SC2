@@ -1,6 +1,6 @@
 # SC2-RSI MVP
 
-最小可工作的 StarCraft II Bot 自进化系统。固定 RSI 框架通过真实 LLM 工具调用修改 `bot/`，每个版本评测 10 局，使用 Git 保存版本，通过 Archive + Beam Search 选择后续父节点。
+最小可工作的 StarCraft II Bot 自进化系统。固定 RSI 框架通过真实 LLM 工具调用修改 `bot/`，每个版本评测 5 局，使用 Git 保存版本，通过 Archive + Beam Search 选择后续父节点。
 
 ## 安装
 
@@ -55,10 +55,10 @@ git commit -m 'Initial SC2-RSI implementation'
 ### 固定实验设置
 
 - 默认地图 `AbyssalReefLE`，位于本机 SC2 的 `Maps/` 下；需要换地图时，在实验开始前修改配置并提交。
-- 10 局、非实时、Terran vs Terran、VeryHard（等级 7）、RandomBuild。第一版校验并固定这些设置。
-- `max_generations: 5` 表示 **5 轮扩展**，Seed 深度为 0；`beam_width: 2`、`branch_factor: 2`。全部成功时最多评测 19 个节点，共 190 局。
+- 5 局、非实时、Terran vs Terran、VeryHard（等级 7）、RandomBuild。第一版校验并固定这些设置。
+- `max_generations: 5` 表示 **5 轮扩展**，Seed 深度为 0；`beam_width: 2`、`branch_factor: 2`。全部成功时最多评测 19 个节点，共 95 局。
 - 每局默认 1800 秒**墙钟时间**上限，超时计为崩溃并终止本局进程树；不增加游戏内平局时限。
-- 保持游戏默认随机性，未新增固定随机种子。10 局是共同评测协议，不保证逐局随机情形相同；同分以深度、创建顺序决定，不宣称统计显著性。
+- 保持游戏默认随机性，未新增固定随机种子。5 局是共同评测协议，不保证逐局随机情形相同；同分以深度、创建顺序决定，不宣称统计显著性。
 - 启动前必须提交代码和配置修改；框架会冻结本次配置，并记录解释器、依赖版本、SC2 和地图路径。
 
 ## 运行产物
@@ -78,12 +78,12 @@ runs/<run_id>/
     agent_result.json
     smoke.json
     metadata.json
-    game_01.json ... game_10.json
-    game_01.process.json ... game_10.process.json
+    game_01.json ... game_05.json
+    game_01.process.json ... game_05.process.json
   worktrees/           临时工作目录，完成或失败后清理
 ```
 
-评测先 Smoke Test、再 Git Commit、再 10 局。每局 `result` 为 `win/loss/tie/crash`，`duration` 为秒，另有 `crashed/error`；四类计数总和为 10。框架会捕获 SC2 库记录的错误，避免将启动异常返回的 Defeat 当作正常输局。
+评测先 Smoke Test、再 Git Commit、再 5 局。每局 `result` 为 `win/loss/tie/crash`，`duration` 为秒，另有 `crashed/error`；四类计数总和为 5。框架会捕获 SC2 库记录的错误，避免将启动异常返回的 Defeat 当作正常输局。
 
 每个版本保存在 `candidate/<run_id>_nNNNN` 分支。候选独立从 Parent commit 创建 worktree，不改动主工作目录、不自动合并。评测差的节点也保留；有崩溃的节点不参与排名。父节点只扩展一次，每轮从**整个历史 Archive**中选择尚未扩展的最佳节点。
 
@@ -105,6 +105,29 @@ runs/<run_id>/
 .\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider tests/test_core.py tests/test_bot_smoke.py
 ```
 
-覆盖写入边界、命令限制与超时清理、工具回传、模型输出错误、10 局汇总、Archive 排序、Git 父版本隔离，以及一轮完整控制流程。闭环测试用替代 LLM 和评测器，执行真实编辑、Git 提交和 Smoke Test，不连接模型、不启动 SC2。
+覆盖写入边界、命令限制与超时清理、工具回传、模型输出错误、5 局汇总、Archive 排序、Git 父版本隔离，以及一轮完整控制流程。闭环测试用替代 LLM 和评测器，执行真实编辑、Git 提交和 Smoke Test，不连接模型、不启动 SC2。
 
 交付不包含真实对局战绩；Bot 的实际游戏表现和模型服务兼容性需要配置后单独运行确认。没有 Memory、RAG、多 Agent、训练、复杂搜索或框架自修改。
+
+
+## Manual Bot Benchmark
+
+Run explicitly; pytest, Smoke Test and the RSI loop do not invoke this script.
+Each invocation runs 5 real games using the same config, Evaluator and metadata
+as formal evaluation. Results remain in a separate system temporary directory
+printed on completion. Git, Archive, Evolution State and formal runs/ are untouched.
+
+```powershell
+# Current bot/, including uncommitted edits
+.\.venv\Scripts\python.exe tests/bot_benchmark.py
+
+# A directory containing main.py exporting SeedBot
+.\.venv\Scripts\python.exe tests/bot_benchmark.py --bot-dir E:/Bots/my-version/bot
+
+# Read-only export of a commit or branch; no checkout
+.\.venv\Scripts\python.exe tests/bot_benchmark.py --ref HEAD
+```
+
+Optional: `--config path/to/config.yaml`. No LLM key is required.
+Directory snapshots record `commit: null`; `--ref` records the resolved commit.
+Exit code 0 means no crashes; exit code 1 means setup failure or crashes.

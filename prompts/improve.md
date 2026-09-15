@@ -12,3 +12,9 @@ Allowed run_command argv values:
 ["rg", "-n", "--", "PATTERN", "bot"]
 Run the fixed smoke pytest after your edit; fix code failures before finishing.
 Finish with a concise summary of the one main change, expected effect, and checks.
+
+Before adding or using an uncertain SC2 API, call lookup_sc2_api to check its
+signature, whether it is async, its docstring and source in the installed version.
+Use a qualified name (BotAI.build, Unit.train) or a method name (build). If several
+matches are returned, query the full symbol. Inherited methods are listed under
+their defining class; search by method name if a class-qualified lookup is missing.

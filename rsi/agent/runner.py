@@ -4,6 +4,7 @@ from rsi.evolution.state import redact, save_json
 from rsi.tools.bash import Commands
 from rsi.tools.edit import Editor
 from rsi.tools.git import Git
+from rsi.tools.sc2_api import lookup_sc2_api
 
 
 def schema(name, description, properties, required):
@@ -15,6 +16,7 @@ def schema(name, description, properties, required):
 
 STRING = {"type": "string"}
 TOOLS = [
+    schema("lookup_sc2_api", "Read installed burnysc2 API signature, docs and source; use BotAI.build or build", {"symbol": STRING}, ["symbol"]),
     schema("view_file", "Read a project text file", {"path": STRING}, ["path"]),
     schema("search_text", "Literal text search in project files", {"text": STRING, "path": STRING}, ["text", "path"]),
     schema("replace_text", "Replace exactly one occurrence in bot/", {"path": STRING, "old": STRING, "new": STRING}, ["path", "old", "new"]),
@@ -36,6 +38,7 @@ class Agent:
                     {"role": "user", "content": json.dumps(context, ensure_ascii=False)}]
         handlers = {name: getattr(editor, name) for name in ("view_file", "search_text", "replace_text", "write_file")}
         handlers["run_command"] = commands.run_command
+        handlers["lookup_sc2_api"] = lookup_sc2_api
 
         def git_view(action):
             if action not in ("status", "diff"):

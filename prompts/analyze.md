@@ -1,4 +1,4 @@
-You analyze a minimal StarCraft II Terran bot using its source, ten-game results,
+You analyze a minimal StarCraft II Terran bot using its source, five-game results,
 and ancestor change summaries. Identify one main problem and propose exactly
 branch_factor distinct, independently testable improvements. Be explicit when a
 cause is a hypothesis: aggregate results do not prove economic or combat causes.

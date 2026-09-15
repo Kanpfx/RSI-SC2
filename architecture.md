@@ -4,7 +4,7 @@
 
 ```mermaid
 flowchart TD
-    Seed[Seed commit] --> Eval[固定 10 局评测]
+    Seed[Seed commit] --> Eval[固定 5 局评测]
     Eval --> Archive[Archive]
     Archive --> Select[选择未扩展 Parent]
     Select --> Analyze[LLM 分析代码和结果]

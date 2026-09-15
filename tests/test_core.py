@@ -145,40 +145,40 @@ def test_analyzer_retry_and_failure(tmp_path):
 
 
 def make_node(identifier, wins, depth=1, order=0, crash=0, expanded=False):
-    return {"id": identifier, "wins": wins, "losses": 10 - wins - crash, "ties": 0,
-            "crashes": crash, "games": 10, "generation": depth, "created_order": order, "expanded": expanded}
+    return {"id": identifier, "wins": wins, "losses": 5 - wins - crash, "ties": 0,
+            "crashes": crash, "games": 5, "generation": depth, "created_order": order, "expanded": expanded}
 
 
 def test_archive_and_search(tmp_path):
     archive = Archive(tmp_path / "archive.json")
-    for node in [make_node("crashed", 9, crash=1), make_node("expanded", 9, expanded=True),
-                 make_node("deep", 6, depth=2), make_node("late", 6, order=2),
-                 make_node("early", 6, order=1), make_node("history", 6, depth=0)]:
+    for node in [make_node("crashed", 4, crash=1), make_node("expanded", 4, expanded=True),
+                 make_node("deep", 3, depth=2), make_node("late", 3, order=2),
+                 make_node("early", 3, order=1), make_node("history", 3, depth=0)]:
         archive.add(node)
     assert [node["id"] for node in select_parents(archive.nodes, 2)] == ["history", "early"]
     assert Archive(archive.path).nodes == archive.nodes
-    with pytest.raises(ValueError, match="ten"):
-        archive.add({**make_node("invalid", 1), "games": 9})
+    with pytest.raises(ValueError, match="five"):
+        archive.add({**make_node("invalid", 1), "games": 4})
 
 
-def test_evaluation_ten_records(tmp_path, monkeypatch):
+def test_evaluation_five_records(tmp_path, monkeypatch):
     config = load_config(ROOT / "config/mvp.yaml")
     index = 0
 
     def process(argv, cwd, timeout):
         nonlocal index
         index += 1
-        if index == 10:
+        if index == 5:
             return {"stdout": "", "stderr": "", "exit_code": -1, "timed_out": True}
-        result = "win" if index < 5 else "loss" if index < 9 else "tie"
+        result = "win" if index < 3 else "loss" if index < 4 else "tie"
         save_json(Path(argv[-1]), {"result": result, "crashed": False, "error": None})
         return {"stdout": "", "stderr": "", "exit_code": 0, "timed_out": False}
 
     monkeypatch.setattr("rsi.evaluation.runner.run_process", process)
     result = Evaluator(config, tmp_path / "config.json").evaluate(
         tmp_path, {"id": "node", "parent_id": None, "commit": "abc"}, tmp_path / "results")
-    assert (result["wins"], result["losses"], result["ties"], result["crashes"]) == (4, 4, 1, 1)
-    assert result["games"] == 10
+    assert (result["wins"], result["losses"], result["ties"], result["crashes"]) == (2, 1, 1, 1)
+    assert result["games"] == 5
     assert "exceeded" in result["results"][-1]["error"]
 
 
@@ -229,7 +229,7 @@ class FakeEvaluator:
     def evaluate(self, worktree, node, output):
         wins = {"Seed": 1, "Earlier attack": 3, "Earlier supply": 2}[node["direction"]]
         records = [{"result": "win" if index < wins else "loss", "crashed": False,
-                    "duration": 0.0, "error": None} for index in range(10)]
+                    "duration": 0.0, "error": None} for index in range(5)]
         return {"candidate_id": node["id"], "parent_id": node["parent_id"],
                 "commit": node["commit"], **summarize(records)}
 
@@ -280,3 +280,19 @@ def test_smoke_failure_is_not_evaluated(repo):
     assert len(evolution.archive.nodes) == 1 and evolution.archive.nodes[0]["expanded"]
     assert all(item["stage"] == "smoke" and item["commit"] is None for item in evolution.failures)
     assert read_json(evolution.output / "state.json")["frontier"] == []
+
+
+def test_agent_sc2_lookup_roundtrip(repo, tmp_path):
+    llm = ScriptedLLM([
+        call("lookup_sc2_api", {"symbol": "BotAI.build"}),
+        call("replace_text", {"path": "bot/modules/strategy/strategy_config.py",
+                              "old": "attack_threshold = 12", "new": "attack_threshold = 10"}, "call_2"),
+        {"role": "assistant", "content": "Done"},
+    ])
+    result = Agent(llm).run(repo, "test", {}, tmp_path / "api-agent.json")
+    assert result["ok"]
+    reply = llm.requests[1][-1]
+    assert reply["role"] == "tool" and reply["tool_call_id"] == "call_1"
+    api = json.loads(reply["content"])
+    assert api["status"] == "found" and api["async"]
+    assert api["symbol"] == "sc2.bot_ai.BotAI.build"

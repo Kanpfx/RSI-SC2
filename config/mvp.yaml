@@ -6,7 +6,7 @@ search:
   beam_width: 2
   branch_factor: 2
 evaluation:
-  games: 10
+  games: 5
   realtime: false
   map: AbyssalReefLE
   bot_race: Terran
