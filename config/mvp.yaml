@@ -1,0 +1,19 @@
+project:
+  max_generations: 5
+agent:
+  max_steps: 20
+search:
+  beam_width: 2
+  branch_factor: 2
+evaluation:
+  games: 10
+  realtime: false
+  map: AbyssalReefLE
+  bot_race: Terran
+  opponent:
+    race: Terran
+    difficulty: VeryHard
+    build: RandomBuild
+  game_timeout_sec: 1800
+tools:
+  bash_timeout_sec: 60
