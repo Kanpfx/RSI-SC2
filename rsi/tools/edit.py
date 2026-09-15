@@ -1,4 +1,3 @@
-import re
 from pathlib import Path, PureWindowsPath
 from rsi.tools import INTEGER, STRING, schema
 
@@ -10,12 +9,18 @@ TOOLS = [
     schema("search", "List files under path; supply text for literal content search. Up to 200 results",
            {"path": STRING, "text": STRING}, [],
            [{"path": "bot"}, {"path": "bot", "text": "SeedBot"}, {"path": "feedback"}]),
-    schema("apply_patch", "Apply text unified diffs with exact current content: --- a/bot/path, +++ b/bot/path, "
-           "@@ -start,count +start,count @@ and context/removed/added lines. Use /dev/null for add/delete. "
-           "Use different paths for move, including a hunk even if unchanged. "
-           "No diff --git, binary or mode headers. All sections validated before writing",
+    schema("apply_patch", "Apply a context patch wrapped in *** Begin Patch / *** End Patch. "
+           "Use *** Update File: bot/path followed by @@ chunks, with space for unchanged lines, "
+           "- for removed lines and + for added lines, including blank lines. No line numbers/counts. "
+           "Old/context lines must match exactly one location; include context for insertions. "
+           "Chunks follow file order and cannot overlap. Use *** Add File: bot/path with + lines, "
+           "*** Delete File: bot/path without a body, or *** Move to: bot/new-path immediately "
+           "after an Update header (chunks optional for a pure move). Existing final newline is preserved. "
+           "All sections validated before writing; only bot/ can be changed",
            {"patch": STRING}, ["patch"],
-           [{"patch": "--- a/bot/example.py\n+++ b/bot/example.py\n@@ -1,1 +1,1 @@\n-old_value = 1\n+old_value = 2\n"}]),
+           [{"patch": "*** Begin Patch\n*** Update File: bot/example.py\n@@\n-old_value = 1\n+old_value = 2\n*** End Patch"},
+            {"patch": "*** Begin Patch\n*** Add File: bot/helper.py\n+value = 1\n*** End Patch"}]),
+
 ]
 
 
@@ -87,78 +92,80 @@ class Editor:
         return matches
 
     def apply_patch(self, patch):
-        """Apply text-only unified diffs after validating every file and hunk."""
-        lines = patch.splitlines(keepends=True)
-        changes, touched, index = [], set(), 0
-        while index < len(lines):
-            if not lines[index].startswith("--- ") or index + 1 >= len(lines) or not lines[index + 1].startswith("+++ "):
-                raise ValueError("Expected --- a/path and +++ b/path headers; omit diff --git and mode headers")
-            paths = []
-            for line, prefix in zip(lines[index:index + 2], ("a/", "b/")):
-                name = line[4:].rstrip("\r\n")
-                if name == "/dev/null":
-                    paths.append(None)
-                elif name.startswith(prefix):
-                    paths.append(self.path(name[2:], write=True))
-                else:
-                    raise ValueError("Use a/ and b/ paths, or /dev/null")
-            source, destination = paths
-            if source is None and destination is None:
-                raise ValueError("Patch must name a file")
-            for path in set(paths) - {None}:
+        """Apply context patches, validating all sections before writing."""
+        lines = patch.splitlines()
+        if not lines or lines[0] != "*** Begin Patch" or lines[-1] != "*** End Patch":
+            raise ValueError("Wrap the patch in *** Begin Patch and *** End Patch")
+        changes, touched, index = [], set(), 1
+        while index < len(lines) - 1:
+            header = lines[index]
+            action = next((value for value in ("Add", "Update", "Delete")
+                           if header.startswith(f"*** {value} File: ")), None)
+            if action is None:
+                raise ValueError(f"Patch line {index + 1}: expected *** Add/Update/Delete File: bot/path")
+            name = header.split(": ", 1)[1]
+            source = None if action == "Add" else self.path(name, write=True)
+            destination = None if action == "Delete" else self.path(name, write=True)
+            index += 1
+            if action == "Update" and lines[index].startswith("*** Move to: "):
+                destination = self.path(lines[index][13:], write=True)
+                index += 1
+            for path in {source, destination} - {None}:
                 if path in touched:
-                    raise ValueError("Each file may appear in only one patch section")
+                    raise ValueError(f"{name}: each file may appear in only one section")
                 touched.add(path)
             if destination != source and destination is not None and destination.exists():
-                raise ValueError("Destination already exists")
-            original = [] if source is None else source.read_text(encoding="utf-8").splitlines(keepends=True)
-            output, cursor, hunks = [], 0, 0
-            index += 2
-            while index < len(lines) and lines[index].startswith("@@ "):
-                match = re.fullmatch(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@[^\n]*\n?", lines[index])
-                if not match:
-                    raise ValueError("Invalid unified diff hunk")
-                old_start, old_count, new_start, new_count = (
-                    int(value) if value is not None else 1 for value in match.groups())
-                position = old_start if old_count == 0 else old_start - 1
-                if position < cursor or position > len(original):
-                    raise ValueError("Hunk position is out of range")
-                output.extend(original[cursor:position])
-                if (new_start if new_count == 0 else new_start - 1) != len(output):
-                    raise ValueError("New hunk position does not match")
-                old, new = [], []
-                index += 1
-                while index < len(lines):
-                    line = lines[index]
-                    if len(old) == old_count and len(new) == new_count and not line.startswith("\\ No newline"):
-                        break
-                    if line.startswith("\\ No newline at end of file") and index > 0:
-                        previous = lines[index - 1][:1]
-                        if previous in (" ", "-") and old:
-                            old[-1] = old[-1].rstrip("\r\n")
-                        if previous in (" ", "+") and new:
-                            new[-1] = new[-1].rstrip("\r\n")
-                    elif line[:1] in (" ", "-", "+"):
-                        if line[0] in (" ", "-"):
-                            old.append(line[1:])
-                        if line[0] in (" ", "+"):
-                            new.append(line[1:])
-                    else:
-                        raise ValueError("Invalid hunk line")
+                raise ValueError(f"{name}: Destination already exists")
+            original = "" if source is None else source.read_text(encoding="utf-8")
+            if action == "Add":
+                added = []
+                while index < len(lines) - 1 and not lines[index].startswith("*** "):
+                    if not lines[index].startswith("+"):
+                        raise ValueError(f"{name}, patch line {index + 1}: added lines must start with +")
+                    added.append(lines[index][1:])
                     index += 1
-                    if len(old) > old_count or len(new) > new_count:
-                        raise ValueError("Hunk counts do not match")
-                if len(old) != old_count or len(new) != new_count or original[position:position + old_count] != old:
-                    raise ValueError("Patch does not match current file; read it and retry")
-                output.extend(new)
-                cursor = position + old_count
-                hunks += 1
-            if not hunks:
-                raise ValueError("Each file section needs a hunk")
-            output.extend(original[cursor:])
-            if destination is None and output:
-                raise ValueError("Deletion must remove the entire file")
-            changes.append((source, destination, "".join(output)))
+                content = "\n".join(added) + ("\n" if added else "")
+            elif action == "Delete":
+                content = ""
+            else:
+                old_lines, output, cursor, hunks = original.splitlines(), [], 0, 0
+                while index < len(lines) - 1 and lines[index] == "@@":
+                    hunks += 1
+                    index += 1
+                    before, after = [], []
+                    while index < len(lines) - 1 and lines[index] != "@@" and not lines[index].startswith("*** "):
+                        line = lines[index]
+                        if not line or line[0] not in " +-":
+                            raise ValueError(f"{name}, hunk {hunks}, patch line {index + 1}: "
+                                             "prefix each line with space, - or + (including blank lines)")
+                        if line[0] in " -":
+                            before.append(line[1:])
+                        if line[0] in " +":
+                            after.append(line[1:])
+                        index += 1
+                    if not before and old_lines:
+                        raise ValueError(f"{name}, hunk {hunks}: include unchanged context to locate insertion")
+                    positions = [pos for pos in range(len(old_lines) - len(before) + 1)
+                                 if old_lines[pos:pos + len(before)] == before]
+                    if not positions:
+                        raise ValueError(f"{name}, hunk {hunks}: old content does not match; "
+                                         "read the file and copy exact context")
+                    if len(positions) != 1:
+                        raise ValueError(f"{name}, hunk {hunks}: context matches {len(positions)} places; "
+                                         "include more unchanged lines")
+                    position = positions[0]
+                    if position < cursor:
+                        raise ValueError(f"{name}, hunk {hunks}: overlapping or out-of-order chunks; combine them")
+                    output.extend(old_lines[cursor:position])
+                    output.extend(after)
+                    cursor = position + len(before)
+                if not hunks and destination == source:
+                    raise ValueError(f"{name}: use @@ before each chunk, without line numbers or counts")
+                output.extend(old_lines[cursor:])
+                content = "\n".join(output)
+                if output and (original.endswith("\n") or not original):
+                    content += "\n"
+            changes.append((source, destination, content))
         if not changes:
             raise ValueError("Patch is empty")
         for path in touched:

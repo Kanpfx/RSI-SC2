@@ -42,14 +42,24 @@ def repo(tmp_path):
 
 
 def patch_text(path, old, new, line=1, destination=None):
-    source = "/dev/null" if old is None else "a/" + path
-    target = "/dev/null" if new is None else "b/" + (destination or path)
-    before, after = (old or "").splitlines(), (new or "").splitlines()
-    old_start, new_start = (line if before else line - 1), (line if after else line - 1)
-    return (f"--- {source}\n+++ {target}\n"
-            f"@@ -{old_start},{len(before)} +{new_start},{len(after)} @@\n"
-            + "".join("-" + value + "\n" for value in before)
-            + "".join("+" + value + "\n" for value in after))
+    if old is None:
+        body = f"*** Add File: {path}\n" + "".join("+" + value + "\n" for value in (new or "").splitlines())
+    elif new is None:
+        body = f"*** Delete File: {path}\n"
+    else:
+        body = f"*** Update File: {path}\n"
+        if destination:
+            body += f"*** Move to: {destination}\n"
+        body += "@@\n"
+        body += "".join("-" + value + "\n" for value in old.splitlines())
+        body += "".join("+" + value + "\n" for value in new.splitlines())
+    return "*** Begin Patch\n" + body + "*** End Patch\n"
+
+
+def combine_patches(*patches):
+    return "*** Begin Patch\n" + "".join(
+        patch.removeprefix("*** Begin Patch\n").removesuffix("*** End Patch\n")
+        for patch in patches) + "*** End Patch\n"
 
 
 def test_editor_boundaries_and_replacement(repo):
@@ -416,15 +426,15 @@ def test_patch_validates_all_sections_before_writing(repo):
     valid = patch_text("bot/new.py", None, "value = 1")
     invalid = patch_text("bot/main.py", "missing context", "replacement")
     with pytest.raises(ValueError, match="does not match"):
-        editor.apply_patch(valid + invalid)
+        editor.apply_patch(combine_patches(valid, invalid))
     assert not (repo / "bot/new.py").exists()
     with pytest.raises(ValueError):
-        editor.apply_patch(valid + patch_text("feedback/metadata.json", None, "{}"))
+        editor.apply_patch(combine_patches(valid, patch_text("feedback/metadata.json", None, "{}")))
     assert not (repo / "bot/new.py").exists()
     with pytest.raises(ValueError, match="conflict"):
-        editor.apply_patch(valid + patch_text("bot/new.py/child.py", None, "x = 1"))
+        editor.apply_patch(combine_patches(valid, patch_text("bot/new.py/child.py", None, "x = 1")))
     assert not (repo / "bot/new.py").exists()
-    editor.apply_patch(valid + patch_text("bot/second.py", None, "value = 2"))
+    editor.apply_patch(combine_patches(valid, patch_text("bot/second.py", None, "value = 2")))
     assert (repo / "bot/new.py").read_text().strip() == "value = 1"
     assert (repo / "bot/second.py").read_text().strip() == "value = 2"
 
@@ -432,10 +442,9 @@ def test_patch_validates_all_sections_before_writing(repo):
 def test_patch_multiple_hunks_and_no_final_newline(repo):
     editor = Editor(repo)
     (repo / "bot/new.py").write_text("a\nb\nc\nd\ne", encoding="utf-8")
-    patch = ("--- a/bot/new.py\n+++ b/bot/new.py\n"
-             "@@ -1,2 +1,3 @@\n a\n-b\n+B\n+extra\n"
-             "@@ -4,2 +5,2 @@\n d\n-e\n\\ No newline at end of file\n"
-             "+E\n\\ No newline at end of file\n")
+    patch = ("*** Begin Patch\n*** Update File: bot/new.py\n"
+             "@@\n a\n-b\n+B\n+extra\n"
+             "@@\n d\n-e\n+E\n*** End Patch\n")
     editor.apply_patch(patch)
     assert (repo / "bot/new.py").read_text(encoding="utf-8") == "a\nB\nextra\nc\nd\nE"
 
@@ -451,3 +460,18 @@ def test_file_reads_continue_and_search_feedback(repo, tmp_path):
     second = editor.read_file("feedback/game_01.process.json", first["next_offset"])
     assert first["text"] + second["text"] == value and second["next_offset"] is None
     assert editor.search("bot", "SeedBot")[0]["path"] == "bot/main.py"
+
+
+def test_patch_ambiguous_context_and_pure_move(tmp_path):
+    (tmp_path / "bot").mkdir()
+    path = tmp_path / "bot/repeated.py"
+    path.write_text("a\nx\nb\nx\n", encoding="utf-8")
+    editor = Editor(tmp_path)
+    with pytest.raises(ValueError, match="hunk 1: context matches 2 places"):
+        editor.apply_patch(patch_text("bot/repeated.py", "x", "y"))
+    assert path.read_text() == "a\nx\nb\nx\n"
+    editor.apply_patch(patch_text("bot/repeated.py", "b\nx", "b\ny"))
+    editor.apply_patch("*** Begin Patch\n*** Update File: bot/repeated.py\n"
+                       "*** Move to: bot/moved.py\n*** End Patch")
+    assert not path.exists()
+    assert (tmp_path / "bot/moved.py").read_text() == "a\nx\nb\ny\n"

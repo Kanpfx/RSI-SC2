@@ -124,7 +124,7 @@ git diff <parent_commit> <commit> -- bot
 
 工具描述、参数 schema 和示例与实现在同一文件中，Agent runner 统一组装和分发。
 
-- 文件读取支持分块；搜索支持列出文件和字面内容匹配。补丁采用文本 unified diff，支持新增、修改、删除和移动，仅写入 `bot/`。
+- 文件读取支持分块；搜索支持列出文件和字面内容匹配。补丁采用 `*** Begin Patch` / `*** End Patch` 包裹的上下文格式，使用 `@@` 分块，无需行号或行数；支持新增、修改、删除和移动，仅写入 `bot/`。旧内容须唯一匹配，全部校验后写入。
 - Bot 内部模块与日志内容可进化，保留可安全导入的 `bot.main.SeedBot`（BotAI 子类）入口。
 - 命令限于固定编译、Smoke Test、导入及 `rg` 搜索，不接受任意 Shell 字符串。Git 只向模型开放 status/diff；提交和真实对局由外层控制。
 - 框架检查修改范围及符号链接/junction；子进程移除 `LLM_*`、`OPENAI_*` 环境变量，日志遮盖已配置的 API key。这是本地实验约束，不是恶意代码安全沙箱。
