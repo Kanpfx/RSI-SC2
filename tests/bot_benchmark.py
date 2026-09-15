@@ -5,8 +5,9 @@ import os
 import shutil
 import sys
 import tarfile
-import tempfile
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
+from uuid import uuid4
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
@@ -69,7 +70,9 @@ def main(argv=None):
         load_dotenv(ROOT / ".env", override=False, encoding="utf-8-sig")
         config = load_config(args.config)
         environment = check_sc2(config)
-        output = Path(tempfile.mkdtemp(prefix="sc2-benchmark-"))
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        output = ROOT / "runs/tmp" / f"benchmark-{stamp}_{uuid4().hex[:8]}"
+        output.mkdir(parents=True)
         print(f"Benchmark output (retained): {output}", flush=True)
         worktree = output / "snapshot"
         worktree.mkdir()

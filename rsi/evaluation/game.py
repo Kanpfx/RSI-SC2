@@ -31,7 +31,7 @@ def play(worktree, config):
         evaluation = config["evaluation"]
         result = run_game(maps.get(evaluation["map"]), [
             Bot(Race.Terran, SeedBot()),
-            Computer(Race.Terran, Difficulty.VeryHard, ai_build=AIBuild.RandomBuild),
+            Computer(Race.Terran, Difficulty.CheatInsane, ai_build=AIBuild.RandomBuild),
         ], realtime=False)
         if errors:
             raise RuntimeError("\n".join(errors)[-8000:])

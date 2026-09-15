@@ -17,8 +17,8 @@ def load_config(path):
             raise ValueError("evaluation.games must be 5 in v1")
         if (evaluation["realtime"] is not False or evaluation["bot_race"] != "Terran"
                 or evaluation["opponent"] != {
-                    "race": "Terran", "difficulty": "VeryHard", "build": "RandomBuild"}):
-            raise ValueError("v1 requires non-realtime Terran vs Terran / VeryHard / RandomBuild")
+                    "race": "Terran", "difficulty": "CheatInsane", "build": "RandomBuild"}):
+            raise ValueError("v1 requires non-realtime Terran vs Terran / CheatInsane / RandomBuild")
         if not isinstance(evaluation["map"], str) or not evaluation["map"].strip():
             raise ValueError("evaluation.map is required")
     except (KeyError, TypeError) as exc:

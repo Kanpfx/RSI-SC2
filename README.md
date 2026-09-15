@@ -55,7 +55,7 @@ git commit -m 'Initial SC2-RSI implementation'
 ### 固定实验设置
 
 - 默认地图 `AbyssalReefLE`，位于本机 SC2 的 `Maps/` 下；需要换地图时，在实验开始前修改配置并提交。
-- 5 局、非实时、Terran vs Terran、VeryHard（等级 7）、RandomBuild。第一版校验并固定这些设置。
+- 5 局、非实时、Terran vs Terran、CheatInsane（等级 10）、RandomBuild。第一版校验并固定这些设置。
 - `max_generations: 5` 表示 **5 轮扩展**，Seed 深度为 0；`beam_width: 2`、`branch_factor: 2`。全部成功时最多评测 19 个节点，共 95 局。
 - 每局默认 1800 秒**墙钟时间**上限，超时计为崩溃并终止本局进程树；不增加游戏内平局时限。
 - 保持游戏默认随机性，未新增固定随机种子。5 局是共同评测协议，不保证逐局随机情形相同；同分以深度、创建顺序决定，不宣称统计显著性。
@@ -83,6 +83,8 @@ runs/<run_id>/
   worktrees/           临时工作目录，完成或失败后清理
 ```
 
+`runs/` 下除正式运行目录以外的中间产物都集中在 `runs/tmp/`：pytest 的每用例临时目录、手动 Benchmark 输出、各类验证运行。清理时删除整个 `runs/tmp/` 即可，不影响任何正式结果。
+
 评测先 Smoke Test、再 Git Commit、再 5 局。每局 `result` 为 `win/loss/tie/crash`，`duration` 为秒，另有 `crashed/error`；四类计数总和为 5。框架会捕获 SC2 库记录的错误，避免将启动异常返回的 Defeat 当作正常输局。
 
 每个版本保存在 `candidate/<run_id>_nNNNN` 分支。候选独立从 Parent commit 创建 worktree，不改动主工作目录、不自动合并。评测差的节点也保留；有崩溃的节点不参与排名。父节点只扩展一次，每轮从**整个历史 Archive**中选择尚未扩展的最佳节点。
@@ -99,11 +101,13 @@ runs/<run_id>/
 
 ## 最小验证
 
-候选每次仅运行编译、导入以及一个接口 Smoke Test，不运行框架测试。开发验证命令：
+候选每次仅运行编译、导入以及一个接口 Smoke Test，不运行框架测试。开发验证命令（`pytest.ini` 已把临时目录默认指向 `runs/tmp/pytest`，可用 `--basetemp` 覆盖）：
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider tests/test_core.py tests/test_bot_smoke.py
 ```
+
+需要保留某次验证的现场时，加 `--basetemp runs/tmp/validation-<名称>-<日期>`，产物同样落在 `runs/tmp/` 下。
 
 覆盖写入边界、命令限制与超时清理、工具回传、模型输出错误、5 局汇总、Archive 排序、Git 父版本隔离，以及一轮完整控制流程。闭环测试用替代 LLM 和评测器，执行真实编辑、Git 提交和 Smoke Test，不连接模型、不启动 SC2。
 
@@ -114,8 +118,8 @@ runs/<run_id>/
 
 Run explicitly; pytest, Smoke Test and the RSI loop do not invoke this script.
 Each invocation runs 5 real games using the same config, Evaluator and metadata
-as formal evaluation. Results remain in a separate system temporary directory
-printed on completion. Git, Archive, Evolution State and formal runs/ are untouched.
+as formal evaluation. Results are retained under `runs/tmp/benchmark-<timestamp>_<id>/`
+and printed on completion. Git, Archive, Evolution State and formal runs/ are untouched.
 
 ```powershell
 # Current bot/, including uncommitted edits

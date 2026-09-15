@@ -12,7 +12,7 @@ evaluation:
   bot_race: Terran
   opponent:
     race: Terran
-    difficulty: VeryHard
+    difficulty: CheatInsane
     build: RandomBuild
   game_timeout_sec: 1800
 tools:
