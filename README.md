@@ -16,7 +16,7 @@ python -m venv --system-site-packages .venv
 
 也可使用独立 Python 3.12 创建普通 venv 并安装同一依赖清单。后续始终使用该环境的解释器。`rg` 是可选搜索命令；没有它时 Agent 仍可使用内置 `search_text`。
 
-设置环境变量（不自动加载 `.env`，示例见 `.env.example`）：
+启动实验、预检和手动 Benchmark 时，均自动加载项目根目录的 `.env`（示例见 `.env.example`）。已有环境变量优先；文件不存在时跳过。也可直接设置环境变量：
 
 ```powershell
 $env:SC2PATH = 'E:\Program Files\Battle.net\StarCraft II'

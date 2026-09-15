@@ -12,6 +12,8 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from dotenv import load_dotenv
+
 from rsi.config import load_config
 from rsi.evaluation.runner import Evaluator, check_sc2
 from rsi.evolution.state import redact, save_json
@@ -64,6 +66,7 @@ def main(argv=None):
     selection.add_argument("--ref", help="Commit or branch in this repository; read-only export of bot/")
     args = parser.parse_args(argv)
     try:
+        load_dotenv(ROOT / ".env", override=False, encoding="utf-8-sig")
         config = load_config(args.config)
         environment = check_sc2(config)
         output = Path(tempfile.mkdtemp(prefix="sc2-benchmark-"))

@@ -8,6 +8,8 @@ from uuid import uuid4
 from rsi.agent.context import parent_context
 from rsi.agent.runner import Agent
 from rsi.analysis.analyzer import analyze
+from dotenv import load_dotenv
+
 from rsi.config import load_config
 from rsi.evaluation.runner import Evaluator, preflight
 from rsi.evaluation.selector import eligible
@@ -160,6 +162,7 @@ def main():
     args = parser.parse_args()
     try:
         root = Path(__file__).resolve().parents[1]
+        load_dotenv(root / ".env", override=False, encoding="utf-8-sig")
         config = load_config(args.config)
         report = preflight(root, config)
         if args.preflight:
