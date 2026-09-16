@@ -120,9 +120,11 @@ git diff <parent_commit> <commit> -- bot
 | `rsi/tools/edit.py` | `read_file`、`search`、`apply_patch` |
 | `rsi/tools/bash.py` | `run_command`、`finish` |
 | `rsi/tools/git.py` | `git_view` |
-| `rsi/tools/sc2_api.py` | `lookup_sc2_api` |
+| `rsi/tools/sc2_api.py` | `tech_tree`、`entity_info`、`api_query` |
 
 工具描述、参数 schema 和示例与实现在同一文件中，Agent runner 统一组装和分发。
+
+SC2 工具基于本地库：`tech_tree` 查询生产前置及潜在解锁，`entity_info` 查询实体能力和研究项，`api_query` 按包、模块、类和成员逐层浏览或搜索。静态能力不代表对局中可立即使用；生命值、护甲等离线缺失数值返回 `null`，当前不采集运行时属性快照。
 
 - 文件读取支持分块；搜索支持列出文件和字面内容匹配。补丁采用 `*** Begin Patch` / `*** End Patch` 包裹的上下文格式，使用 `@@` 分块，无需行号或行数；支持新增、修改、删除和移动，仅写入 `bot/`。旧内容须唯一匹配，全部校验后写入。
 - Bot 内部模块与日志内容可进化，保留可安全导入的 `bot.main.SeedBot`（BotAI 子类）入口。

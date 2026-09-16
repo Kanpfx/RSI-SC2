@@ -4,7 +4,7 @@ from rsi.evolution.state import redact, save_json
 from rsi.tools.bash import TOOLS as BASH_TOOLS, Commands, smoke_test
 from rsi.tools.edit import TOOLS as EDIT_TOOLS, Editor
 from rsi.tools.git import TOOLS as GIT_TOOLS, Git
-from rsi.tools.sc2_api import TOOLS as API_TOOLS, lookup_sc2_api
+from rsi.tools.sc2_api import TOOLS as API_TOOLS, api_query, entity_info, tech_tree
 
 
 TOOLS = EDIT_TOOLS + BASH_TOOLS + GIT_TOOLS + API_TOOLS
@@ -23,7 +23,7 @@ class Agent:
         handlers = {"read_file": editor.read_file, "search": editor.search,
                     "apply_patch": editor.apply_patch, "run_command": commands.run_command,
                     "finish": commands.finish, "git_view": git.git_view,
-                    "lookup_sc2_api": lookup_sc2_api}
+                    "api_query": api_query, "entity_info": entity_info, "tech_tree": tech_tree}
         try:
             for step in range(self.max_steps):
                 message = self.llm.complete(messages, TOOLS)

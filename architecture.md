@@ -35,7 +35,7 @@ Seed 提交 → 5 局基线评测 → Archive
 | `rsi/tools/edit.py` | 文件读取、搜索和 patch；父版本反馈只读，编辑仅限 Bot |
 | `rsi/tools/bash.py` | 受限命令与 finish 检查 |
 | `rsi/tools/git.py` | 框架版本操作、修改范围检查及模型只读 git_view |
-| `rsi/tools/sc2_api.py` | 查询本地已安装的 SC2 API |
+| `rsi/tools/sc2_api.py` | 本地科技关系、实体能力及分层 API 查询；静态映射和源码索引按进程缓存 |
 | `rsi/evaluation/runner.py` | 环境预检、并发对局调度、日志归档与汇总 |
 | `rsi/evaluation/game.py` | 独立进程运行单局，捕获游戏错误 |
 | `rsi/evaluation/metadata.py` | 校验和统计胜、负、平、崩溃 |

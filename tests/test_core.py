@@ -313,14 +313,18 @@ def test_smoke_failure_is_not_evaluated(repo):
 
 def test_agent_sc2_lookup_roundtrip(repo, tmp_path):
     llm = ScriptedLLM([
-        call("lookup_sc2_api", {"symbol": "BotAI.build"}),
+        call("tech_tree", {"entity": "BARRACKS"}),
+        call("entity_info", {"entity": "MARAUDER"}),
+        call("api_query", {"path": "BotAI.build"}),
         call("apply_patch", {"patch": patch_text("bot/modules/strategy/strategy.py",
                               "attack_threshold = 12", "attack_threshold = 10")}, "call_2"),
         call("finish", {"summary": "Earlier attack"}),
     ])
     result = Agent(llm).run(repo, "test", {}, tmp_path / "api-agent.json")
     assert result["ok"]
-    reply = llm.requests[1][-1]
+    assert json.loads(llm.requests[1][-1]["content"])["entity"] == "BARRACKS"
+    assert json.loads(llm.requests[2][-1]["content"])["entity"] == "MARAUDER"
+    reply = llm.requests[3][-1]
     assert reply["role"] == "tool" and reply["tool_call_id"] == "call_1"
     api = json.loads(reply["content"])
     assert api["status"] == "found" and api["async"]
