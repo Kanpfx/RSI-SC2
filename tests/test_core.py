@@ -3,6 +3,7 @@ import json
 import shutil
 import sys
 import threading
+from hashlib import sha256
 from pathlib import Path
 
 import psutil
@@ -156,29 +157,29 @@ def test_agent_limit_and_bad_tool(repo, tmp_path):
 
 
 def make_node(identifier, wins, depth=1, order=0, crash=0, expanded=False):
-    return {"id": identifier, "wins": wins, "losses": 5 - wins - crash, "ties": 0,
-            "crashes": crash, "games": 5, "generation": depth, "created_order": order, "expanded": expanded}
+    return {"id": identifier, "wins": wins, "losses": 3 - wins - crash, "ties": 0,
+            "crashes": crash, "games": 3, "generation": depth, "created_order": order, "expanded": expanded}
 
 
 def test_archive_and_search(tmp_path):
     archive = Archive(tmp_path / "archive.json")
-    for node in [make_node("crashed", 4, crash=1), make_node("expanded", 4, expanded=True),
-                 make_node("deep", 3, depth=2), make_node("late", 3, order=2),
-                 make_node("early", 3, order=1), make_node("history", 3, depth=0)]:
+    for node in [make_node("crashed", 2, crash=1), make_node("expanded", 3, expanded=True),
+                 make_node("deep", 2, depth=2), make_node("late", 2, order=2),
+                 make_node("early", 2, order=1), make_node("history", 2, depth=0)]:
         archive.add(node)
     assert [node["id"] for node in archive.parents(2)] == ["history", "early"]
     assert archive.ranked()[0]["id"] == "expanded"
     assert all(node["crashes"] == 0 for node in archive.ranked())
     assert Archive(archive.path).nodes == archive.nodes
-    with pytest.raises(ValueError, match="five"):
+    with pytest.raises(ValueError, match="three"):
         archive.add({**make_node("invalid", 1), "games": 4})
 
 
-def test_evaluation_five_records(tmp_path, monkeypatch):
+def test_evaluation_three_records(tmp_path, monkeypatch):
     config = load_config(ROOT / "config/mvp.yaml")
     (tmp_path / "bot").mkdir()
     (tmp_path / "bot/main.py").write_text("# snapshot", encoding="utf-8")
-    barrier = threading.Barrier(5)
+    barrier = threading.Barrier(3)
     launches, intervals = {}, []
     monkeypatch.setattr("rsi.evaluation.runner.time.sleep", intervals.append)
 
@@ -186,25 +187,32 @@ def test_evaluation_five_records(tmp_path, monkeypatch):
         number = int(Path(argv[-1]).stem.split("_")[1])
         launches[number] = (cwd, env["TEMP"])
         assert env["TEMP"] == env["TMP"] == env["TMPDIR"]
-        assert cwd != tmp_path and (cwd / "bot/main.py").read_text() == "# snapshot"
-        (cwd / "bot/runtime.txt").write_text(str(number))
-        barrier.wait(timeout=10)  # All five processes must overlap.
-        if number == 5:
+        source = Path(argv[argv.index("--worktree") + 1])
+        assert source == tmp_path and (source / "bot/main.py").read_text() == "# snapshot"
+        assert cwd != tmp_path and not (cwd / "bot").exists()
+        (cwd / "telemetry.json").write_bytes(b'{"custom": [1, 2]}')
+        barrier.wait(timeout=10)  # All three processes must overlap.
+        if number == 3:
             return {"stdout": "", "stderr": "", "exit_code": -1, "timed_out": True}
-        result = "win" if number < 3 else "loss" if number < 4 else "tie"
+        result = "win" if number == 1 else "loss"
         save_json(Path(argv[-1]), {"result": result, "crashed": False, "error": None})
         return {"stdout": "", "stderr": "", "exit_code": 0, "timed_out": False}
 
     monkeypatch.setattr("rsi.evaluation.runner.run_process", process)
-    result = Evaluator(config, tmp_path / "config.json").evaluate(
+    completed = []
+    result = Evaluator(config, on_result=lambda node, record: completed.append(record)).evaluate(
         tmp_path, {"id": "node", "parent_id": None, "commit": "abc"}, tmp_path / "results")
-    assert (result["wins"], result["losses"], result["ties"], result["crashes"]) == (2, 1, 1, 1)
-    assert result["games"] == 5 and intervals == [3, 3, 3, 3]
-    assert [item["result"] for item in result["results"]] == ["win", "win", "loss", "tie", "crash"]
-    assert len({cwd for cwd, _ in launches.values()}) == 5
-    assert len({temp for _, temp in launches.values()}) == 5
+    assert (result["wins"], result["losses"], result["ties"], result["crashes"]) == (1, 1, 0, 1)
+    assert result["games"] == 3 and intervals == [3, 3]
+    assert [item["result"] for item in result["results"]] == ["win", "loss", "crash"]
+    assert len({cwd for cwd, _ in launches.values()}) == 3
+    assert len({temp for _, temp in launches.values()}) == 3
     assert not (tmp_path / "bot/runtime.txt").exists()
     assert "exceeded" in result["results"][-1]["error"]
+    assert len(completed) == 3
+    assert all(not cwd.exists() for cwd, _ in launches.values())
+    assert sorted(p.name for p in (tmp_path / "results").iterdir()) == [f"game_{n:02d}.json" for n in range(1, 4)]
+    assert all((tmp_path / "results" / item["telemetry"]["file"]).read_bytes() == b'{"custom": [1, 2]}' for item in completed)
 
 
 def test_git_parent_isolation_and_boundary(repo):
@@ -241,7 +249,7 @@ class EvolutionLLM:
         assert tools is not None
         context = json.loads(messages[1]["content"])
         assert "sources" not in context and "bot/main.py" in context["files"]
-        assert "evaluation" not in context and context["parent"]["games"] == 5
+        assert "evaluation" not in context and context["parent"]["games"] == 3
         assert context["lineage"][-1]["id"] == context["parent"]["id"]
         assert "feedback/metadata.json" in context["feedback_files"]
         first = context["attempt"] == 1
@@ -258,7 +266,7 @@ class FakeEvaluator:
     def evaluate(self, worktree, node, output):
         wins = {"Seed": 1, "Earlier attack": 3, "Earlier supply": 2}[node["direction"]]
         records = [{"result": "win" if index < wins else "loss", "crashed": False,
-                    "duration": 0.0, "error": None} for index in range(5)]
+                    "duration": 0.0, "error": None} for index in range(3)]
         return {"candidate_id": node["id"], "parent_id": node["parent_id"],
                 "commit": node["commit"], **summarize(records)}
 
@@ -277,10 +285,23 @@ def test_one_round_complete_loop(repo):
         assert git.run("rev-parse", f"{candidate['commit']}^") == seed["commit"]
         changed = git.run("diff", "--name-only", seed["commit"], candidate["commit"]).splitlines()
         assert changed == ["bot/modules/strategy/strategy.py"]
-    state = read_json(evolution.output / "state.json")
+    state = read_json(evolution.output / "run.json")
     assert state["status"] == "completed" and state["frontier"] == [first["id"], second["id"]]
     assert summary["best"]["id"] == first["id"]
-    assert not list(evolution.worktrees.iterdir())
+    tree = read_json(evolution.output / "tree.json")
+    assert "nodes" not in state
+    assert [node["id"] for node in tree["nodes"]] == ["a0", "a1", "a2"]
+    assert sorted(p.name for p in evolution.output.iterdir()) == ["nodes", "run.json", "tree.json"]
+    for candidate in (first, second):
+        patch = evolution.output / "nodes" / candidate["id"] / "changes.patch"
+        assert candidate["patch_sha256"] == sha256(patch.read_bytes()).hexdigest()
+        saved = read_json(patch.parent / "node.json")
+        assert saved["evaluation"] == candidate["evaluation"]
+        assert "evaluation" not in tree["nodes"][candidate["created_order"]]
+    feedback = Editor(repo, evolution.output / "nodes/a1")
+    assert json.loads(feedback.read_file("feedback/metadata.json")["text"])["wins"] == 3
+    assert feedback.search("feedback", "evaluation")
+    assert not evolution.worktrees.exists()
     assert git.current_commit() == seed["commit"] and not git.status()
 
 
@@ -290,6 +311,7 @@ def test_sc2_logged_error_is_not_a_normal_loss(monkeypatch):
     from rsi.evaluation.game import play
 
     def failed_game(*args, **kwargs):
+        assert args[1][1].difficulty.value == 8
         logger.error("Bot on_start failed")
         return Result.Defeat
 
@@ -308,7 +330,7 @@ def test_smoke_failure_is_not_evaluated(repo):
     assert summary["evaluated_nodes"] == 1 and summary["failed_attempts"] == 2
     assert len(evolution.archive.nodes) == 1 and evolution.archive.nodes[0]["expanded"]
     assert all(item["stage"] == "agent" and item["commit"] is None for item in evolution.failures)
-    assert read_json(evolution.output / "state.json")["frontier"] == []
+    assert read_json(evolution.output / "run.json")["frontier"] == []
 
 
 def test_agent_sc2_lookup_roundtrip(repo, tmp_path):
@@ -347,14 +369,14 @@ def test_cancel_kills_game_process_tree(tmp_path):
 
 
 def test_parallel_setup_failure_cancels_other_games(tmp_path, monkeypatch):
-    evaluator = Evaluator(load_config(ROOT / "config/mvp.yaml"), tmp_path / "config.json")
-    barrier = threading.Barrier(5)
+    evaluator = Evaluator(load_config(ROOT / "config/mvp.yaml"))
+    barrier = threading.Barrier(3)
     cancelled = []
     monkeypatch.setattr("rsi.evaluation.runner.time.sleep", lambda seconds: None)
 
     def game(number, worktree, node, output, cancel_event):
         barrier.wait(timeout=5)
-        if number == 5:
+        if number == 3:
             raise RuntimeError("setup failed")
         assert cancel_event.wait(timeout=5)
         cancelled.append(number)
@@ -362,7 +384,7 @@ def test_parallel_setup_failure_cancels_other_games(tmp_path, monkeypatch):
     monkeypatch.setattr(evaluator, "_game", game)
     with pytest.raises(RuntimeError, match="setup failed"):
         evaluator.evaluate(tmp_path, {}, tmp_path / "results")
-    assert sorted(cancelled) == [1, 2, 3, 4]
+    assert sorted(cancelled) == [1, 2]
     assert not (tmp_path / "results/metadata.json").exists()
 
 

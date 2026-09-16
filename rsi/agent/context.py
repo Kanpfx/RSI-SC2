@@ -5,7 +5,7 @@ def parent_context(root, parent, archive, failures):
     return {
         "entrypoint": "bot/main.py",
         "files": Editor(root).search(),
-        "parent": parent,
+        "parent": {key: value for key, value in parent.items() if key not in ("agent", "evaluation")},
         "lineage": archive.lineage(parent),
         "siblings": [
             {key: node[key] for key in ("direction", "wins", "losses", "ties", "crashes")}

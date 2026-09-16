@@ -1,4 +1,4 @@
-"""Manual-only five-game benchmark; never collected by pytest or Smoke Test."""
+"""Manual-only three-game benchmark; never collected by pytest or Smoke Test."""
 import argparse
 import json
 import os
@@ -60,7 +60,7 @@ def snapshot_ref(ref, worktree):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Manually benchmark a Bot for the same 5 games as Evaluation")
+    parser = argparse.ArgumentParser(description="Manually benchmark a Bot for the same 3 games as Evaluation")
     parser.add_argument("--config", type=Path, default=ROOT / "config/mvp.yaml")
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--bot-dir", type=Path, help="Directory containing main.py (default: current bot/)")
@@ -92,7 +92,8 @@ def main(argv=None):
         try:
             for key in previous:
                 os.environ[key] = str(temporary)
-            metadata = Evaluator(config, config_path).evaluate(worktree, node, output)
+            metadata = Evaluator(config).evaluate(worktree, node, output)
+            save_json(output / "metadata.json", metadata)
         finally:
             for key, value in previous.items():
                 if value is None:

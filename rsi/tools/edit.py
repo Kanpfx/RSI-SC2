@@ -1,3 +1,4 @@
+import json
 from pathlib import Path, PureWindowsPath
 from rsi.tools import INTEGER, STRING, schema
 
@@ -31,6 +32,14 @@ class Editor:
         self.feedback = {} if self.feedback_root is None else {
             "feedback/" + p.name: p for p in sorted(self.feedback_root.glob("*.json"))
             if p.name == "metadata.json" or p.name.startswith("game_")}
+        self.metadata = None
+        if self.feedback_root is not None:
+            node_file = self.feedback_root / "node.json"
+            if node_file.is_file():
+                node = json.loads(node_file.read_text(encoding="utf-8"))
+                self.metadata = json.dumps({key: value for key, value in node.items()
+                                            if key != "agent"}, ensure_ascii=False, indent=2)
+
 
     def path(self, name, write=False):
         if not isinstance(name, str) or not name or "\\" in name or ":" in name:
@@ -59,27 +68,29 @@ class Editor:
     def read_file(self, path, offset=0):
         if type(offset) is not int or offset < 0:
             raise ValueError("offset must be nonnegative")
-        text = self.path(path).read_text(encoding="utf-8")
+        text = (self.metadata if path == "feedback/metadata.json" and self.metadata is not None
+                else self.path(path).read_text(encoding="utf-8"))
         end = offset + 12000
         return {"text": text[offset:end], "next_offset": end if end < len(text) else None}
 
     def search(self, path="bot", text=None):
         if path == "feedback":
-            names = list(self.feedback)
+            names = sorted(set(self.feedback) | ({"feedback/metadata.json"} if self.metadata is not None else set()))
         else:
             target = self.path(path)
             names = [p.relative_to(self.root).as_posix() for p in sorted(target.rglob("*"))
                      if "__pycache__" not in p.parts] if target.is_dir() else [path]
         matches = []
         for name in names:
-            file = self.path(name)
-            if not file.is_file():
+            virtual = name == "feedback/metadata.json" and self.metadata is not None
+            file = None if virtual else self.path(name)
+            if not virtual and not file.is_file():
                 continue
             if text is None:
                 matches.append(name)
             else:
                 try:
-                    lines = file.read_text(encoding="utf-8").splitlines()
+                    lines = (self.metadata if virtual else file.read_text(encoding="utf-8")).splitlines()
                 except UnicodeDecodeError:
                     continue
                 for number, line in enumerate(lines, 1):

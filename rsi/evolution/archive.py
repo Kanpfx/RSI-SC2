@@ -2,18 +2,19 @@ from rsi.evolution.state import read_json, save_json
 
 
 class Archive:
-    def __init__(self, path):
+    def __init__(self, path=None):
         self.path = path
-        self.nodes = read_json(path) if path.exists() else []
+        self.nodes = read_json(path) if path is not None and path.exists() else []
 
     def save(self):
-        save_json(self.path, self.nodes)
+        if self.path is not None:
+            save_json(self.path, self.nodes)
 
     def add(self, node):
         if any(item["id"] == node["id"] for item in self.nodes):
             raise ValueError(f"Duplicate node: {node['id']}")
-        if node["games"] != 5 or sum(node[key] for key in ("wins", "losses", "ties", "crashes")) != 5:
-            raise ValueError("Archive requires exactly five evaluated games")
+        if node["games"] != 3 or sum(node[key] for key in ("wins", "losses", "ties", "crashes")) != 3:
+            raise ValueError("Archive requires exactly three evaluated games")
         self.nodes.append(node)
         self.save()
 

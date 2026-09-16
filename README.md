@@ -44,15 +44,15 @@ python -m venv .venv
 | 每轮最多选择父节点数 | 2 |
 | 每个父节点的独立候选数 | 2 |
 | 每次 Agent 的模型调用上限 | 20 |
-| 每个版本评测局数 | 5 |
+| 每个版本评测局数 | 3 |
 | 地图 | AbyssalReefLE |
-| 对局 | 非实时，Terran vs Terran / CheatInsane / RandomBuild |
+| 对局 | 非实时，Terran vs Terran / CheatVision（Lv8） / RandomBuild |
 | 单局墙钟超时 | 1800 秒 |
 | 工具命令超时 | 60 秒 |
 
-5 局及对局模式由配置校验固定。地图需安装在 SC2 的地图目录中。默认最多评测 19 个节点（含 Seed），共 95 局；失败或无可选父节点时可能提前结束。
+3 局及对局模式由配置校验固定。地图需安装在 SC2 的地图目录中。默认最多评测 19 个节点（含 Seed），共 57 局；失败或无可选父节点时可能提前结束。
 
-每个版本的 5 局并发运行，启动间隔 3 秒；各局使用独立 Bot 副本、工作目录和临时目录。结果按局号排列。超时计为崩溃并终止对应进程树。保留游戏默认随机性，不设置固定随机种子。
+每个版本的 3 局并发运行，启动间隔 3 秒；各局共用候选代码，使用独立工作目录和临时目录。结果按局号排列。超时计为崩溃并终止对应进程树。保留游戏默认随机性，不设置固定随机种子。
 
 ## 改进流程
 
@@ -60,39 +60,33 @@ python -m venv .venv
 2. 从历史 Archive 中选择尚未扩展、无崩溃的最佳父节点。
 3. 每次尝试从父提交创建独立 worktree。Agent 阅读代码、父版本日志与历史摘要，选择核心优化方向。
 4. Agent 使用 patch 修改 Bot，调用 `finish` 执行范围检查、编译、接口 Smoke Test 和导入检查；失败可在预算内修复。
-5. 检查通过后，框架提交候选、评测 5 局并归档，继续后续轮次。
+5. 检查通过后，框架提交候选、评测 3 局并归档，继续后续轮次。
 
 每次候选围绕一个主要问题形成完整改进，允许跨模块配套修改。该要求由 [核心提示词](prompts/improve.md) 引导。普通文字回复不会结束候选，必须单独调用 `finish`。
 
-排名按胜场降序、节点深度升序、创建顺序升序排列。成绩差的节点也保留，有崩溃的节点不参与排名；每个父节点只扩展一次。5 局成绩用于简单选择，不代表统计显著性。
+排名按胜场降序、节点深度升序、创建顺序升序排列。成绩差的节点也保留，有崩溃的节点不参与排名；每个父节点只扩展一次。3 局成绩用于简单选择，不代表统计显著性。
 
 ## 日志与调试
 
 ```text
-runs/<run_id>/
-  config.json          本次配置副本
-  environment.json     解释器、依赖版本、SC2/地图路径与 Seed commit
-  archive.json         已评测节点、血缘、提交与战绩
-  state.json           状态、轮数与待选父节点
-  usage.json           累计模型调用、tokens 与费用估算
-  failures.json        候选失败阶段与错误（有失败时创建）
-  summary.json         正常完成后的最佳节点与运行汇总
-  nodes/<node_id>/
-    node.json          节点信息
-    agent.json         提示词、上下文、模型回复、工具参数与返回值
-    agent_result.json  Agent 最终结果
-    smoke.json         候选检查结果（执行过检查时）
-    metadata.json      5 局汇总与逐局结果
-    game_NN.json       单局结果、耗时、错误与日志引用
-    game_NN.process.json    stdout/stderr、退出码与超时标记
-    game_NN.telemetry.json  Bot 原始日志（采集成功时）
-    game_NN_workdir/        保留的单局 Bot 副本和临时文件
-  worktrees/           候选 Git 工作区，尝试结束后清理
+runs/<UTC时间戳>/
+  run.json             配置、环境、状态、用量及运行汇总
+  tree.json            节点树索引（父子关系、深度与扩展状态）
+  nodes/a0/            Seed
+    node.json          节点信息、检查与逐局结果
+    game_NN.json       Bot 原始轨迹
+  nodes/a1/
+    node.json          节点信息、检查与逐局结果
+    changes.patch      相对父节点的 Git diff
+    agent.json         模型对话与工具调用
+    game_NN.json       Bot 原始轨迹
 ```
 
-Seed 不经过 Agent，因此没有对应的 Agent 对话与检查产物。`usage.json` 随外层运行状态更新，不是逐次模型调用实时刷新。
+节点使用 a0、a1…，父子关系保存在 tree.json。每个候选三局共用一份临时代码，各局工作目录独立；结束后清理单局目录、候选 worktree 及空父目录。
 
-排查问题时，先看 `state.json` / `failures.json`，再查看对应候选的 `agent.json`、`smoke.json` 或单局结果与进程输出。游戏 worker 异常包含 traceback；框架及 Agent 异常目前主要记录错误文字。
+排查先看 run.json 的运行状态及 tree.json 的节点树，再看 nodes/aN/node.json 的 failure、agent 和 evaluation，再查看 agent.json 与轨迹。检查成功只留简要结果；崩溃保留进程输出，正常局保留 stderr。总记录在关键阶段及各局结果收集后原子保存，用量随之更新。
+
+Agent 的 feedback/metadata.json 从父节点 node.json 生成，只读且不重复落盘；轨迹通过 feedback/game_NN.json 读取。
 
 ### 可进化的 Bot 日志
 
@@ -104,12 +98,14 @@ Agent 通过只读 `feedback/` 路径按需读取父版本汇总、逐局结果�
 
 ### 版本与恢复
 
-候选分支为 `candidate/<run_id>_nNNNN`，不自动合并到主工作目录。可用以下命令查看：
+候选分支为 `candidate/<run_id>/aN`，不自动合并到主工作目录。可用以下命令查看：
 
 ```powershell
 git show <commit>:bot/main.py
 git diff <parent_commit> <commit> -- bot
 ```
+
+初版直接引用 nodes/a0/node.json 的 commit，不额外复制或压缩 bot。任意候选可从对应 node.json 的 commit 在 Git 中恢复；也可从初版提交沿 parent_id 祖先链应用 changes.patch。tree.json 的 nodes 列表记录 id、parent_id、generation、status、expanded，即整棵进化树；节点详情保存在各自 node.json。
 
 当前不支持自动续跑，再次启动会创建新实验。强制中止可能遗留 worktree，可用 `git worktree list` 检查后通过 Git 清理。手动评测和定向验证产物放在 `runs/tmp/`，与正式运行目录分开。
 
@@ -143,7 +139,7 @@ SC2 工具基于本地库：`tech_tree` 查询生产前置及潜在解锁，`ent
 
 `tests/test_core.py` 覆盖工具边界、进程、Agent、归档及控制流程；`tests/test_bot_smoke.py` 检查 Bot 接口。控制流程测试使用替代模型和评测器，不调用模型或启动 SC2。
 
-手动评测复用正式 Evaluator，运行 5 局，无需 LLM 密钥，不更新进化树：
+手动评测复用正式 Evaluator，运行 3 局，无需 LLM 密钥，不更新进化树：
 
 ```powershell
 # 当前 bot/，包含未提交修改

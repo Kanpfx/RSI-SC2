@@ -3,7 +3,7 @@ import copy
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from uuid import uuid4
+from hashlib import sha256
 
 from rsi.agent.context import parent_context
 from rsi.agent.runner import Agent
@@ -22,14 +22,14 @@ class Evolution:
     def __init__(self, root, config, llm, evaluator=None, smoke=smoke_test):
         self.root, self.config = Path(root).resolve(), copy.deepcopy(config)
         self.git, self.llm = Git(self.root), llm
-        self.run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid4().hex[:8]
+        self.run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         self.output = self.root / "runs" / self.run_id
-        self.output.mkdir(parents=True)
+        self.output.mkdir(parents=True, exist_ok=False)
         self.worktrees = self.output / "worktrees"
         self.worktrees.mkdir()
-        save_json(self.output / "config.json", self.config)
-        self.evaluator = evaluator or Evaluator(self.config, self.output / "config.json")
-        self.archive = Archive(self.output / "archive.json")
+        self.record = {"run_id": self.run_id, "config": self.config, "nodes": [], "environment": None}
+        self.evaluator = evaluator or Evaluator(self.config, on_result=self.game_result)
+        self.archive = Archive()
         self.failures = []
         self.counter = 0
         self.agent = Agent(llm, self.config["agent"]["max_steps"], self.config["tools"]["bash_timeout_sec"], smoke)
@@ -39,37 +39,56 @@ class Evolution:
         statistics = getattr(self.llm, "statistics", None)
         return statistics() if callable(statistics) else None
 
+    def save(self):
+        self.record["usage"] = self.usage()
+        for node in self.record["nodes"]:
+            save_json(self.output / "nodes" / node["id"] / "node.json", node)
+        tree = [{key: node[key] for key in ("id", "parent_id", "generation", "status", "expanded")}
+                for node in self.record["nodes"]]
+        save_json(self.output / "tree.json", {"nodes": tree})
+        save_json(self.output / "run.json", {key: value for key, value in self.record.items() if key != "nodes"})
+
     def state(self, status, round_number, error=None):
         frontier = self.archive.parents(self.config["search"]["beam_width"])
-        save_json(self.output / "state.json", {"run_id": self.run_id, "status": status,
-                  "round": round_number, "frontier": [node["id"] for node in frontier], "error": error})
-        usage = self.usage()
-        if usage is not None:
-            save_json(self.output / "usage.json", usage)
+        self.record.update(status=status, round=round_number,
+                           frontier=[node["id"] for node in frontier], error=error)
+        self.save()
+
+    def game_result(self, node, record):
+        node.setdefault("evaluation", {"results": []})["results"].append(record)
+        node["evaluation"]["results"].sort(key=lambda item: item["number"])
+        self.save()
 
     def node(self, parent=None, direction="Seed"):
         number = self.counter
         self.counter += 1
-        node_id = f"{self.run_id}_n{number:04d}"
-        return {"id": node_id, "parent_id": parent["id"] if parent else None,
-                "commit": None, "branch": f"candidate/{node_id}",
+        node_id = f"a{number}"
+        node = {"id": node_id, "parent_id": parent["id"] if parent else None,
+                "commit": None, "branch": f"candidate/{self.run_id}/{node_id}",
                 "generation": parent["generation"] + 1 if parent else 0,
-                "created_order": number, "direction": direction, "expanded": False}
+                "created_order": number, "direction": direction, "expanded": False,
+                "status": "created"}
+        self.record["nodes"].append(node)
+        self.save()
+        return node
 
     def evaluate(self, worktree, node, artifact):
-        save_json(artifact / "node.json", node)
+        node["status"] = "evaluating"
+        self.save()
         metadata = self.evaluator.evaluate(worktree, node, artifact)
         node.update({key: metadata[key] for key in ("games", "wins", "losses", "ties", "crashes")})
-        save_json(artifact / "metadata.json", metadata)
-        save_json(artifact / "node.json", node)
+        node["evaluation"] = {"results": metadata["results"]}
+        node["status"] = "evaluated"
         self.archive.add(node)
+        self.save()
 
     def failure(self, node, stage, exc):
         item = {"candidate_id": node["id"], "parent_id": node["parent_id"],
                 "commit": node["commit"], "direction": node["direction"], "stage": stage,
                 "error": redact(str(exc))}
         self.failures.append(item)
-        save_json(self.output / "failures.json", self.failures)
+        node.update(status="failed", failure={"stage": stage, "error": item["error"]})
+        self.save()
         print(f"  Invalid {node['id']} ({stage}): {item['error']}", flush=True)
 
     def candidate(self, parent, attempt):
@@ -80,13 +99,19 @@ class Evolution:
             self.git.create_worktree(worktree, node["branch"], parent["commit"])
             git = Git(worktree)
             stage = "agent"
+            node["status"] = "improving"
+            self.save()
             context = parent_context(worktree, parent, self.archive, self.failures)
             context["attempt"] = attempt
             result = self.agent.run(worktree, self.improve_prompt, context, artifact / "agent.json",
                                     feedback_dir=self.output / "nodes" / parent["id"])
-            save_json(artifact / "agent_result.json", result)
-            if result.get("smoke") is not None:
-                save_json(artifact / "smoke.json", result["smoke"])
+            node["agent"] = copy.deepcopy(result)
+            if result.get("smoke"):
+                for check in node["agent"]["smoke"].get("checks", []):
+                    if check.get("exit_code") == 0 and not check.get("timed_out"):
+                        check.pop("stdout", None)
+                        check.pop("stderr", None)
+            self.save()
             if not result["ok"]:
                 raise ValueError(result["error"])
             node["direction"] = result["summary"]
@@ -95,6 +120,11 @@ class Evolution:
             stage = "commit"
             git.add()
             node["commit"] = git.commit(f"RSI {node['id']}: {node['direction'][:100]}")
+            patch = artifact / "changes.patch"
+            git.run("diff", "--binary", "--full-index", "--no-ext-diff", "--no-textconv",
+                    f"--output={patch}", parent["commit"], node["commit"], "--", "bot")
+            node["patch_sha256"] = sha256(patch.read_bytes()).hexdigest()
+            node["bot_tree"] = git.run("rev-parse", f"{node['commit']}:bot")
             stage = "evaluation"
             self.evaluate(worktree, node, artifact)
         except Exception as exc:
@@ -112,6 +142,7 @@ class Evolution:
             worktree = self.worktrees / seed["id"]
             self.git.create_worktree(worktree, seed["branch"], seed["commit"])
             try:
+                seed["bot_tree"] = self.git.run("rev-parse", f"{seed['commit']}:bot")
                 print(f"Run {self.run_id}: evaluating Seed", flush=True)
                 self.evaluate(worktree, seed, self.output / "nodes" / seed["id"])
             finally:
@@ -132,12 +163,17 @@ class Evolution:
             summary = {"run_id": self.run_id, "output": str(self.output),
                        "evaluated_nodes": len(self.archive.nodes), "failed_attempts": len(self.failures),
                        "best": ranked[0] if ranked else None, "usage": self.usage()}
-            save_json(self.output / "summary.json", summary)
+            self.record["summary"] = {"evaluated_nodes": len(self.archive.nodes),
+                                      "failed_attempts": len(self.failures),
+                                      "best": ranked[0]["id"] if ranked else None}
             self.state("completed", round_number)
             return summary
         except BaseException as exc:
             self.state("failed", round_number, redact(f"{type(exc).__name__}: {exc}"))
             raise
+        finally:
+            if self.worktrees.exists() and not any(self.worktrees.iterdir()):
+                self.worktrees.rmdir()
 
 
 def main():
@@ -155,7 +191,7 @@ def main():
             return 0
         llm = Client()
         evolution = Evolution(root, config, llm)
-        save_json(evolution.output / "environment.json", report)
+        evolution.record["environment"] = report
         print(json.dumps(evolution.run(), ensure_ascii=False, indent=2))
         return 0
     except Exception as exc:

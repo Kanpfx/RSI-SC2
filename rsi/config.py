@@ -13,12 +13,12 @@ def load_config(path):
             if type(value) is not int or value < 1:
                 raise ValueError(f"{group}.{key} must be a positive integer")
         evaluation = config["evaluation"]
-        if type(evaluation["games"]) is not int or evaluation["games"] != 5:
-            raise ValueError("evaluation.games must be 5 in v1")
+        if type(evaluation["games"]) is not int or evaluation["games"] != 3:
+            raise ValueError("evaluation.games must be 3 in v1")
         if (evaluation["realtime"] is not False or evaluation["bot_race"] != "Terran"
                 or evaluation["opponent"] != {
-                    "race": "Terran", "difficulty": "CheatInsane", "build": "RandomBuild"}):
-            raise ValueError("v1 requires non-realtime Terran vs Terran / CheatInsane / RandomBuild")
+                    "race": "Terran", "difficulty": "CheatVision", "build": "RandomBuild"}):
+            raise ValueError("v1 requires non-realtime Terran vs Terran / CheatVision / RandomBuild")
         if not isinstance(evaluation["map"], str) or not evaluation["map"].strip():
             raise ValueError("evaluation.map is required")
     except (KeyError, TypeError) as exc:

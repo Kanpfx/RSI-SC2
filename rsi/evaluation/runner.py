@@ -6,6 +6,7 @@ import threading
 from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 import time
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from rsi.evaluation.metadata import summarize
 from rsi.evolution.state import read_json, save_json
@@ -58,7 +59,7 @@ TELEMETRY_FILE = "telemetry.json"
 
 def read_telemetry(game_dir, output, number):
     """Archive Bot-defined logs without interpreting their contents."""
-    filename = f"game_{number:02d}.telemetry.json"
+    filename = f"game_{number:02d}.json"
     try:
         shutil.copyfile(Path(game_dir) / TELEMETRY_FILE, Path(output) / filename)
     except OSError as exc:
@@ -67,33 +68,34 @@ def read_telemetry(game_dir, output, number):
 
 
 class Evaluator:
-    def __init__(self, config, config_path):
+    def __init__(self, config, on_result=None):
         self.config = config["evaluation"]
-        self.config_path = Path(config_path).resolve()
+        self.on_result = on_result
 
     def _game(self, number, worktree, node, output, cancel_event):
-        game_dir = output / f"game_{number:02d}_workdir"
-        game_dir.mkdir()
-        shutil.copytree(Path(worktree) / "bot", game_dir / "bot",
-                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"))
+        with TemporaryDirectory(prefix=f"game_{number:02d}_", dir=output) as directory:
+            return self._play(number, worktree, node, output, cancel_event, Path(directory))
+
+    def _play(self, number, worktree, node, output, cancel_event, game_dir):
         temporary = game_dir / "tmp"
         temporary.mkdir()
         env = child_env()
         env.update({key: str(temporary) for key in ("TMP", "TEMP", "TMPDIR")})
-        result_path = output / f"game_{number:02d}.json"
+        result_path = game_dir / f"result_{number:02d}.json"
+        config_path = game_dir / "config.json"
+        save_json(config_path, {"evaluation": self.config})
         worker = Path(__file__).with_name("game.py")
         start = time.monotonic()
         try:
             result = run_process(
-                [sys.executable, "-I", "-B", worker, "--worktree", game_dir,
-                 "--config", self.config_path, "--output", result_path],
+                [sys.executable, "-I", "-B", worker, "--worktree", Path(worktree).resolve(),
+                 "--config", config_path, "--output", result_path],
                 cwd=game_dir, timeout=self.config["game_timeout_sec"],
                 env=env, cancel_event=cancel_event,
             )
         except Exception as exc:
             result = {"stdout": "", "stderr": str(exc), "exit_code": -1, "timed_out": False}
         duration = time.monotonic() - start
-        save_json(output / f"game_{number:02d}.process.json", result)
         try:
             if result["timed_out"]:
                 raise ValueError(f"Game process exceeded {self.config['game_timeout_sec']} seconds")
@@ -103,9 +105,15 @@ class Evaluator:
             summarize([record])
         except (OSError, ValueError, KeyError, TypeError) as exc:
             record = {"result": "crash", "crashed": True, "error": str(exc)}
+        record["number"] = number
         record["duration"] = duration
+        record["process"] = {key: value for key, value in result.items()
+                             if key not in ("stdout", "stderr")}
+        if record["crashed"]:
+            record["process"].update({key: result[key] for key in ("stdout", "stderr")})
+        elif result["stderr"]:
+            record["process"]["stderr"] = result["stderr"]
         record["telemetry"] = read_telemetry(game_dir, output, number)
-        save_json(result_path, record)
         print(f"  {node['id']} game {number}/{self.config['games']}: {record['result']}", flush=True)
         return record
 
@@ -113,7 +121,7 @@ class Evaluator:
         output = Path(output).resolve()
         output.mkdir(parents=True, exist_ok=True)
         cancel_event = threading.Event()
-        pool = ThreadPoolExecutor(max_workers=5)
+        pool = ThreadPoolExecutor(max_workers=self.config["games"])
         futures = []
         try:
             for number in range(1, self.config["games"] + 1):
@@ -124,7 +132,9 @@ class Evaluator:
             while pending:
                 done, pending = wait(pending, timeout=0.2, return_when=FIRST_EXCEPTION)
                 for future in done:
-                    future.result()
+                    record = future.result()
+                    if self.on_result is not None:
+                        self.on_result(node, record)
             # Keep metadata in game-number order, regardless of completion order.
             records = [future.result() for future in futures]
         except BaseException:
@@ -134,5 +144,4 @@ class Evaluator:
             pool.shutdown(wait=True, cancel_futures=True)
         metadata = {"candidate_id": node["id"], "parent_id": node["parent_id"],
                     "commit": node["commit"], **summarize(records)}
-        save_json(output / "metadata.json", metadata)
         return metadata

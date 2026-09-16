@@ -6,13 +6,13 @@ search:
   beam_width: 2
   branch_factor: 2
 evaluation:
-  games: 5
+  games: 3
   realtime: false
   map: AbyssalReefLE
   bot_race: Terran
   opponent:
     race: Terran
-    difficulty: CheatInsane
+    difficulty: CheatVision
     build: RandomBuild
   game_timeout_sec: 1800
 tools:
