@@ -1,9 +1,8 @@
 from sc2.bot_ai import BotAI
 
-from bot.modules.combat import control
-from bot.modules.economy import manage
-from bot.modules.logger import Logger
-from bot.modules.observation import snapshot
+from bot.combat import control
+from bot.economy import manage
+from bot.telemetry import Logger
 
 
 class SeedBot(BotAI):
@@ -12,7 +11,6 @@ class SeedBot(BotAI):
         self.telemetry = Logger()
 
     async def on_step(self, iteration: int):
-        self.last_snapshot = snapshot(self)
         self.telemetry.record(iteration, self)
         await manage(self)
         control(self)

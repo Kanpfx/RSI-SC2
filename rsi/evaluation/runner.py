@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from rsi.console import verbose
 from rsi.evaluation.metadata import summarize
 from rsi.evolution.state import read_json, save_json
 from rsi.process import child_env, run_process
@@ -85,6 +86,7 @@ class Evaluator:
         config_path = game_dir / "config.json"
         save_json(config_path, {"evaluation": self.config})
         worker = Path(__file__).with_name("game.py")
+        verbose(f"Game {node['id']} {number}/{self.config['games']}", "starting")
         start = time.monotonic()
         try:
             result = run_process(
@@ -114,7 +116,8 @@ class Evaluator:
         elif result["stderr"]:
             record["process"]["stderr"] = result["stderr"]
         record["telemetry"] = read_telemetry(game_dir, output, number)
-        print(f"  {node['id']} game {number}/{self.config['games']}: {record['result']}", flush=True)
+        verbose(f"Game {node['id']} {number}/{self.config['games']}",
+                f"{record['result']} {duration:.1f}s")
         return record
 
     def evaluate(self, worktree, node, output):

@@ -30,41 +30,42 @@ python -m venv .venv
 
 ```powershell
 # 仅检查环境，不调用模型或启动游戏，不要求模型密钥
-.\.venv\Scripts\python.exe -m rsi.loop --config config/mvp.yaml --preflight
+.\.venv\Scripts\python.exe -m rsi.loop --config config.yaml --preflight
 
 # 调用模型并运行真实 SC2 对局
-.\.venv\Scripts\python.exe -m rsi.loop --config config/mvp.yaml
+.\.venv\Scripts\python.exe -m rsi.loop --config config.yaml
 ```
 
-默认配置见 [config/mvp.yaml](config/mvp.yaml)：
+默认配置见 [config.yaml](config.yaml)：
 
 | 设置 | 当前值 |
 |---|---|
-| 扩展轮数 | 5 |
-| 每轮最多选择父节点数 | 2 |
+| 扩展轮数 | 10 |
+| 每轮选择父节点数 | 1 |
+| 随机探索概率 / 搜索种子 | 0.2 / 0 |
 | 每个父节点的独立候选数 | 2 |
 | 每次 Agent 的模型调用上限 | 20 |
-| 每个版本评测局数 | 3 |
+| 每个版本评测局数 | 5 |
 | 地图 | AbyssalReefLE |
 | 对局 | 非实时，Terran vs Terran / CheatVision（Lv8） / RandomBuild |
 | 单局墙钟超时 | 1800 秒 |
 | 工具命令超时 | 60 秒 |
 
-3 局及对局模式由配置校验固定。地图需安装在 SC2 的地图目录中。默认最多评测 19 个节点（含 Seed），共 57 局；失败或无可选父节点时可能提前结束。
+5 局及对局模式由配置校验固定。地图需安装在 SC2 的地图目录中。默认最多评测 21 个节点（含 Seed），共 105 局；失败或无可选父节点时可能提前结束。
 
-每个版本的 3 局并发运行，启动间隔 3 秒；各局共用候选代码，使用独立工作目录和临时目录。结果按局号排列。超时计为崩溃并终止对应进程树。保留游戏默认随机性，不设置固定随机种子。
+每个版本的 5 局并发运行，启动间隔 3 秒；各局共用候选代码，使用独立工作目录和临时目录。结果按局号排列。超时计为崩溃并终止对应进程树。保留游戏默认随机性，不设置固定随机种子。
 
 ## 改进流程
 
 1. 评测当前 Git 提交中的 Seed Bot，建立根节点。
-2. 从历史 Archive 中选择尚未扩展、无崩溃的最佳父节点。
+2. 从尚未扩展、无崩溃的节点中选择一个父节点：80% 选最高胜场组（同分随机），20% 从全部候选随机选择。
 3. 每次尝试从父提交创建独立 worktree。Agent 阅读代码、父版本日志与历史摘要，选择核心优化方向。
 4. Agent 使用 patch 修改 Bot，调用 `finish` 执行范围检查、编译、接口 Smoke Test 和导入检查；失败可在预算内修复。
-5. 检查通过后，框架提交候选、评测 3 局并归档，继续后续轮次。
+5. 检查通过后，框架提交候选、评测 5 局并归档，继续后续轮次。
 
-每次候选围绕一个主要问题形成完整改进，允许跨模块配套修改。该要求由 [核心提示词](prompts/improve.md) 引导。普通文字回复不会结束候选，必须单独调用 `finish`。
+每次候选围绕一个主要问题形成完整改进，允许跨模块配套修改。该要求由 [核心提示词](rsi/analysis/prompts/improve.md) 引导。普通文字回复不会结束候选，必须单独调用 `finish`。
 
-排名按胜场降序、节点深度升序、创建顺序升序排列。成绩差的节点也保留，有崩溃的节点不参与排名；每个父节点只扩展一次。3 局成绩用于简单选择，不代表统计显著性。
+最终结果展示按胜场降序、节点深度升序、创建顺序升序排列；选父采用上述概率策略。搜索种子和每轮选择记录在 run.json，保存状态不会重新抽签；frontier 仅列出可选节点。成绩差的节点也保留，有崩溃的节点不参与排名；每个父节点只扩展一次。5 局成绩用于简单选择，不代表统计显著性。
 
 ## 日志与调试
 
@@ -82,7 +83,7 @@ runs/<UTC时间戳>/
     game_NN.json       Bot 原始轨迹
 ```
 
-节点使用 a0、a1…，父子关系保存在 tree.json。每个候选三局共用一份临时代码，各局工作目录独立；结束后清理单局目录、候选 worktree 及空父目录。
+节点使用 a0、a1…，父子关系保存在 tree.json。每个候选五局共用一份临时代码，各局工作目录独立；结束后清理单局目录、候选 worktree 及空父目录。
 
 排查先看 run.json 的运行状态及 tree.json 的节点树，再看 nodes/aN/node.json 的 failure、agent 和 evaluation，再查看 agent.json 与轨迹。检查成功只留简要结果；崩溃保留进程输出，正常局保留 stderr。总记录在关键阶段及各局结果收集后原子保存，用量随之更新。
 
@@ -90,7 +91,7 @@ Agent 的 feedback/metadata.json 从父节点 node.json 生成，只读且不重
 
 ### 可进化的 Bot 日志
 
-初始 Logger 位于 `bot/modules/logger/logger.py`，每 10 次 `on_step` 迭代采样一次迭代编号、矿和气，每 500 条采样写盘，并在正常结束时保存。异常中止可能丢失尚未落盘的采样。
+初始 Logger 位于 `bot/telemetry.py`，每 10 次 `on_step` 迭代采样一次迭代编号、矿和气，每 500 条采样写盘，并在正常结束时保存。异常中止可能丢失尚未落盘的采样。
 
 日志出口约定为游戏工作目录中的 `telemetry.json`，内容应为合法 JSON。RSI 可修改字段、结构和调用位置，逐步增加状态、决策、动作或行为轨迹。框架原样归档，不解析字段或抽样；逐局结果的 `telemetry` 保存 `file/error`。采集失败不改变胜负结果，损坏文件也会保留以便调试。
 
@@ -118,11 +119,11 @@ git diff <parent_commit> <commit> -- bot
 | `rsi/tools/git.py` | `git_view` |
 | `rsi/tools/sc2_api.py` | `tech_tree`、`entity_info`、`api_query` |
 
-工具描述、参数 schema 和示例与实现在同一文件中，Agent runner 统一组装和分发。
+工具描述、参数 schema 和示例与实现在同一文件中，tools 统一组装，analysis runner 分发调用。
 
-SC2 工具基于本地库：`tech_tree` 查询生产前置及潜在解锁，`entity_info` 查询实体能力和研究项，`api_query` 按包、模块、类和成员逐层浏览或搜索。静态能力不代表对局中可立即使用；生命值、护甲等离线缺失数值返回 `null`，当前不采集运行时属性快照。
+SC2 工具基于本地库：`tech_tree` 查询生产前置及潜在解锁，`entity_info` 查询实体能力和研究项，`api_query` 按包、模块、类和成员逐层浏览或搜索。静态能力不代表对局中可立即使用；生命值、护甲等离线缺失数值返回 `null`，当前不采集运行时属性快照。API 函数默认只返回签名和简短说明，include_source=true 可读取完整说明和分页源码。
 
-- 文件读取支持分块；搜索支持列出文件和字面内容匹配。补丁采用 `*** Begin Patch` / `*** End Patch` 包裹的上下文格式，使用 `@@` 分块，无需行号或行数；支持新增、修改、删除和移动，仅写入 `bot/`。旧内容须唯一匹配，全部校验后写入。
+- 文件读取支持 offset/limit 字符范围；搜索支持 glob 文件过滤、字面匹配及 offset/limit 分页，返回 matches 和 next_offset。长匹配行会截短并标记，可继续读取原文件。补丁采用 `*** Begin Patch` / `*** End Patch` 包裹的上下文格式，使用 `@@` 分块，无需行号或行数；支持新增、修改、删除和移动，仅写入 `bot/`。旧内容须唯一匹配，全部校验后写入。
 - Bot 内部模块与日志内容可进化，保留可安全导入的 `bot.main.SeedBot`（BotAI 子类）入口。
 - 命令限于固定编译、Smoke Test、导入及 `rg` 搜索，不接受任意 Shell 字符串。Git 只向模型开放 status/diff；提交和真实对局由外层控制。
 - 框架检查修改范围及符号链接/junction；子进程移除 `LLM_*`、`OPENAI_*` 环境变量，日志遮盖已配置的 API key。这是本地实验约束，不是恶意代码安全沙箱。
@@ -139,7 +140,7 @@ SC2 工具基于本地库：`tech_tree` 查询生产前置及潜在解锁，`ent
 
 `tests/test_core.py` 覆盖工具边界、进程、Agent、归档及控制流程；`tests/test_bot_smoke.py` 检查 Bot 接口。控制流程测试使用替代模型和评测器，不调用模型或启动 SC2。
 
-手动评测复用正式 Evaluator，运行 3 局，无需 LLM 密钥，不更新进化树：
+手动评测复用正式 Evaluator，运行 5 局，无需 LLM 密钥，不更新进化树：
 
 ```powershell
 # 当前 bot/，包含未提交修改
@@ -153,3 +154,11 @@ SC2 工具基于本地库：`tech_tree` 查询生产前置及潜在解锁，`ent
 ```
 
 可加 `--config path/to/config.yaml`。结果保存在 `runs/tmp/benchmark-<timestamp>_<id>/`。目录快照记录 `commit: null`，`--ref` 记录解析后的提交。退出码 0 表示无崩溃，1 表示准备失败或出现崩溃。
+
+### 基础上下文管理
+
+完整对话仍保存于 agent.json。工作上下文超过约 60000 字符时，仅省略最近六轮之前的大块检索结果，保留调用配对与错误；不额外调用模型。这是轻量清理，不是严格 Token 上限。需要时重新查询，文件内容可能已变化。
+
+通过 feedback/history/<节点ID>/ 可按需读取本次实验已有节点的 node.json、changes.patch 和对局轨迹，保持只读。
+
+服务器脚本 run.sh 使用 /home/zrshan/projects/RSI-SC2 和 Conda why 环境。Slurm 输出为 RSI-SC2-BOT-<jobid>.out/.err；控制台按 Run、Round、Candidate、Agent、Result、Completed 标记阶段。每行以 `HH:MM:SS` 开头并带节点 ID，可用 `grep 'a1]'` 抽出单条候选的完整轨迹；`Result` 行给出逐局符号、胜负与耗时。`Evaluate`、`Game`、`Agent` 的每步和每局细节默认隐藏，设 `RSI_VERBOSE=1` 打开。进化上限为 10 轮（并非保证每条分支深度达到 10），Slurm 作业时限仍为 2 小时。

@@ -38,7 +38,8 @@ def test_entity_static_capabilities_and_missing_stats():
 def test_api_browse_search_members_and_pages():
     assert any(m["symbol"] == "sc2.bot_ai" for m in api_query()["members"])
     assert any(m["symbol"] == "sc2.bot_ai.BotAI" for m in api_query("sc2.bot_ai")["members"])
-    build = api_query("BotAI.build")
+    assert "source" not in api_query("BotAI.build")
+    build = api_query("BotAI.build", include_source=True)
     assert build["status"] == "found" and build["async"]
     assert build["symbol"] == "sc2.bot_ai.BotAI.build" and "async def build" in build["source"]
     found = api_query("sc2.bot_ai.BotAI", query="build")
@@ -97,14 +98,14 @@ class BotAI:
 def test_lookup_definition_without_execution(installed_source):
     from pathlib import Path
 
-    result = api_query("BotAI.build")
+    result = api_query("BotAI.build", include_source=True)
     assert result["status"] == "found" and result["version"] == "test-version"
     assert result["symbol"] == "sc2.bot_ai.BotAI.build" and result["async"]
     assert result["signature"] == "async def build(self, unit: int, near=None) -> bool:"
     assert result["line"] == 3 and Path(result["file"]).is_relative_to(installed_source)
     assert "Build near" in result["docstring"] and "return True" in result["source"]
     assert result["next_offset"] is None
-    assert api_query("sc2.bot_ai.BotAI.build") == result
+    assert api_query("sc2.bot_ai.BotAI.build", include_source=True) == result
 
 
 def test_ambiguous_missing_invalid_and_truncated(installed_source, monkeypatch):
@@ -117,11 +118,11 @@ def test_ambiguous_missing_invalid_and_truncated(installed_source, monkeypatch):
     for path in ("../secret.py", "/etc/passwd", "BotAI.build()", "", None):
         with pytest.raises(ValueError):
             api_query(path)
-    expected = api_query("Unit.build")["source"]
+    expected = api_query("Unit.build", include_source=True)["source"]
     monkeypatch.setattr(sc2_api, "MAX_SOURCE", 12)
     chunks, offset = [], 0
     while offset is not None:
-        result = api_query("Unit.build", offset=offset)
+        result = api_query("Unit.build", offset=offset, include_source=True)
         assert len(result["source"]) <= 12
         chunks.append(result["source"])
         offset = result["next_offset"]

@@ -1,14 +1,15 @@
-import json
+from fnmatch import fnmatch
 from pathlib import Path, PureWindowsPath
+from rsi.context.feedback import Feedback
 from rsi.tools import INTEGER, STRING, schema
 
 
 TOOLS = [
-    schema("read_file", "Read source or read-only feedback/path in 12000-character chunks; continue at next_offset",
-           {"path": STRING, "offset": INTEGER}, ["path"],
+    schema("read_file", "Read source or read-only feedback/path with offset/limit in characters (max 12000); continue at next_offset",
+           {"path": STRING, "offset": INTEGER, "limit": INTEGER}, ["path"],
            [{"path": "bot/main.py"}, {"path": "feedback/metadata.json", "offset": 12000}]),
-    schema("search", "List files under path; supply text for literal content search. Up to 200 results",
-           {"path": STRING, "text": STRING}, [],
+    schema("search", "List files or search literal text. Filter paths with glob; paginate matches with offset/limit (max 200). Long matching lines are clipped; read_file retrieves full content",
+           {"path": STRING, "text": STRING, "glob": STRING, "offset": INTEGER, "limit": INTEGER}, [],
            [{"path": "bot"}, {"path": "bot", "text": "SeedBot"}, {"path": "feedback"}]),
     schema("apply_patch", "Apply a context patch wrapped in *** Begin Patch / *** End Patch. "
            "Use *** Update File: bot/path followed by @@ chunks, with space for unchanged lines, "
@@ -28,18 +29,7 @@ TOOLS = [
 class Editor:
     def __init__(self, root, feedback_dir=None):
         self.root = Path(root).resolve()
-        self.feedback_root = None if feedback_dir is None else Path(feedback_dir).resolve()
-        self.feedback = {} if self.feedback_root is None else {
-            "feedback/" + p.name: p for p in sorted(self.feedback_root.glob("*.json"))
-            if p.name == "metadata.json" or p.name.startswith("game_")}
-        self.metadata = None
-        if self.feedback_root is not None:
-            node_file = self.feedback_root / "node.json"
-            if node_file.is_file():
-                node = json.loads(node_file.read_text(encoding="utf-8"))
-                self.metadata = json.dumps({key: value for key, value in node.items()
-                                            if key != "agent"}, ensure_ascii=False, indent=2)
-
+        self.feedback = Feedback(feedback_dir)
 
     def path(self, name, write=False):
         if not isinstance(name, str) or not name or "\\" in name or ":" in name:
@@ -47,12 +37,9 @@ class Editor:
         relative = Path(name)
         if relative.is_absolute() or PureWindowsPath(name).drive or any(part in ("..", ".git") for part in relative.parts):
             raise ValueError("Path escapes project")
-        if not write and name in self.feedback:
-            target = self.feedback[name]
-            if target.is_symlink() or not target.resolve().is_relative_to(self.feedback_root):
-                raise ValueError("Symlinks/junctions are not allowed")
-            return target
-        allowed = {"bot"} if write else {"bot", "rsi", "tests", "config", "prompts", "README.md", "architecture.md"}
+        if not write and name in self.feedback.files:
+            return self.feedback.path(name)
+        allowed = {"bot"} if write else {"bot", "rsi", "tests", "config.yaml", "README.md", "architecture.md"}
         if relative.parts[0] not in allowed:
             raise ValueError("Path is outside allowed area")
         target = self.root / relative
@@ -65,24 +52,30 @@ class Editor:
             raise ValueError("Path escapes project")
         return target
 
-    def read_file(self, path, offset=0):
+    def read_file(self, path, offset=0, limit=12000):
         if type(offset) is not int or offset < 0:
             raise ValueError("offset must be nonnegative")
-        text = (self.metadata if path == "feedback/metadata.json" and self.metadata is not None
+        text = (self.feedback.read(path) if path in self.feedback.names()
                 else self.path(path).read_text(encoding="utf-8"))
-        end = offset + 12000
+        if type(limit) is not int or not 1 <= limit <= 12000:
+            raise ValueError("limit must be 1-12000 characters")
+        end = offset + limit
         return {"text": text[offset:end], "next_offset": end if end < len(text) else None}
 
-    def search(self, path="bot", text=None):
+    def search(self, path="bot", text=None, glob="*", offset=0, limit=50):
+        if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 200:
+            raise ValueError("offset must be nonnegative; limit must be 1-200")
         if path == "feedback":
-            names = sorted(set(self.feedback) | ({"feedback/metadata.json"} if self.metadata is not None else set()))
+            names = self.feedback.names()
         else:
             target = self.path(path)
             names = [p.relative_to(self.root).as_posix() for p in sorted(target.rglob("*"))
                      if "__pycache__" not in p.parts] if target.is_dir() else [path]
         matches = []
         for name in names:
-            virtual = name == "feedback/metadata.json" and self.metadata is not None
+            if not fnmatch(name, glob):
+                continue
+            virtual = name in self.feedback.names()
             file = None if virtual else self.path(name)
             if not virtual and not file.is_file():
                 continue
@@ -90,17 +83,18 @@ class Editor:
                 matches.append(name)
             else:
                 try:
-                    lines = (self.metadata if virtual else file.read_text(encoding="utf-8")).splitlines()
+                    lines = (self.feedback.read(name) if virtual else file.read_text(encoding="utf-8")).splitlines()
                 except UnicodeDecodeError:
                     continue
                 for number, line in enumerate(lines, 1):
                     if text in line:
-                        matches.append({"path": name, "line": number, "text": line})
-                        if len(matches) == 200:
-                            return matches
-            if len(matches) == 200:
+                        matches.append({"path": name, "line": number, "text": line[:500], "truncated": len(line) > 500})
+                        if len(matches) > offset + limit:
+                            break
+            if len(matches) > offset + limit:
                 break
-        return matches
+        return {"matches": matches[offset:offset + limit],
+                "next_offset": offset + limit if len(matches) > offset + limit else None}
 
     def apply_patch(self, patch):
         """Apply context patches, validating all sections before writing."""

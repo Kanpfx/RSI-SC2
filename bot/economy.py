@@ -1,6 +1,6 @@
 from sc2.ids.unit_typeid import UnitTypeId as U
 
-from bot.modules.strategy import strategy
+from bot import strategy
 
 
 async def manage(bot):

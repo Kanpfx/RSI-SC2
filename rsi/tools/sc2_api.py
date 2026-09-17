@@ -19,9 +19,9 @@ TOOLS = [
            {"entity": STRING}, ["entity"], [{"entity": "SIEGETANK"}]),
     schema("api_query", "Browse installed sc2 packages, modules, classes and members without executing source. "
            "Use path='sc2' to start; query filters names/docs within the selected scope. "
-           "A member returns signature, docs and source. Use next_offset for more results. "
+           "Members default to signature and short docs; include_source=true returns full docs and paged source. Use next_offset for more results. "
            "For inherited methods, follow listed bases or search the method name under sc2.",
-           {"path": STRING, "query": STRING, "offset": INTEGER}, [],
+           {"path": STRING, "query": STRING, "offset": INTEGER, "include_source": {"type": "boolean"}}, [],
            [{"path": "sc2"}, {"path": "sc2.bot_ai.BotAI", "query": "build"},
             {"path": "BotAI.build"}]),
 ]
@@ -164,7 +164,9 @@ def api_index():
     return entries, sources
 
 
-def api_query(path="sc2", query=None, offset=0):
+def api_query(path="sc2", query=None, offset=0, include_source=False):
+    if type(include_source) is not bool:
+        raise ValueError("include_source must be boolean")
     if (not isinstance(path, str) or len(path) > 200 or not all(part.isidentifier() for part in path.split("."))
             or type(offset) is not int or offset < 0
             or (query is not None and (not isinstance(query, str) or len(query) > 200))):
@@ -188,7 +190,8 @@ def api_query(path="sc2", query=None, offset=0):
         base["status"] = "found"
         if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
             docs = ast.get_docstring(node) or ""
-            base.update(docstring=docs[:4000], docstring_truncated=len(docs) > 4000,
+            doc_limit = 4000 if include_source else 600
+            base.update(docstring=docs[:doc_limit], docstring_truncated=len(docs) > doc_limit,
                         decorators=[ast.unparse(value) for value in node.decorator_list])
             if isinstance(node, ast.ClassDef):
                 base["bases"] = [ast.unparse(value) for value in node.bases]
@@ -198,6 +201,8 @@ def api_query(path="sc2", query=None, offset=0):
                 base["signature"] = (("async " if base["async"] else "") + f"def {node.name}({ast.unparse(node.args)})"
                                      + (f" -> {ast.unparse(node.returns)}" if node.returns else "") + ":")
         if entry["kind"] in ("function", "constant"):
+            if entry["kind"] == "function" and not include_source:
+                return {**base, "hint": "Set include_source=true to read implementation", "next_offset": None}
             source = ast.get_source_segment(sources[entry["module"]], node) or ""
             base.update(source=source[offset:offset + MAX_SOURCE],
                         next_offset=offset + MAX_SOURCE if len(source) > offset + MAX_SOURCE else None)

@@ -13,8 +13,8 @@ class Archive:
     def add(self, node):
         if any(item["id"] == node["id"] for item in self.nodes):
             raise ValueError(f"Duplicate node: {node['id']}")
-        if node["games"] != 3 or sum(node[key] for key in ("wins", "losses", "ties", "crashes")) != 3:
-            raise ValueError("Archive requires exactly three evaluated games")
+        if node["games"] != 5 or sum(node[key] for key in ("wins", "losses", "ties", "crashes")) != 5:
+            raise ValueError("Archive requires exactly five evaluated games")
         self.nodes.append(node)
         self.save()
 
@@ -29,8 +29,13 @@ class Archive:
             key=lambda node: (-node["wins"], node["generation"], node["created_order"]),
         )
 
-    def parents(self, width):
-        return self.ranked(unexpanded=True)[:width]
+    def select_parent(self, rng, exploration_rate=0.2):
+        candidates = self.ranked(unexpanded=True)
+        if not candidates:
+            return None
+        if rng.random() >= exploration_rate:
+            candidates = [node for node in candidates if node["wins"] == candidates[0]["wins"]]
+        return rng.choice(candidates)
 
     def lineage(self, node):
         by_id = {item["id"]: item for item in self.nodes}

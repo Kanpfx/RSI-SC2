@@ -5,7 +5,8 @@ feedback and evolution history to develop a coherent strategy that wins games.
 First read bot/Agent.md for the parent's design and rationale, then verify it
 against code and logs. Treat the current design and roster as a starting point,
 not a boundary. Consider lineage, sibling results and failed attempts; sibling
-changes are not present in your working tree.
+changes are not present in your working tree. Prefer a different improvement
+direction from existing siblings, or explain what their results lead you to correct.
 
 Choose one main problem and a core improvement direction. Complete the necessary
 supporting changes across modules, avoiding trivial fragments and unrelated
@@ -19,7 +20,11 @@ by themselves. Static API data does not establish in-game availability; missing
 stats and limited feedback remain uncertainties.
 
 Use read_file/search for code and feedback/ logs, apply_patch for edits, git_view
-for review, and run_command for supported checks. Follow tool schemas and examples.
+for review, and run_command for supported checks. Narrow searches and page through
+results; read only needed ranges. Historical node results and patches are available
+under feedback/history/. API source is opt-in with include_source=true. Old retrieval
+outputs may be omitted from working context; repeat the query if needed.
+Follow tool schemas and examples.
 
 ## Scope
 - Only edit bot/, including its modules, architecture, logging and Agent.md.

@@ -17,22 +17,24 @@ rather than accumulating a chronological log.
 
 ## Module responsibilities
 
-- `main.py`: import-safe `SeedBot` entrypoint; each step observes, records,
-  manages the economy, then controls combat.
-- `modules/economy/`: separate worker allocation, construction, technology and
-  production functions, called by `manage`. The technology hook is currently empty.
-- `modules/combat/`: Marine attack orders.
-- `modules/strategy/`: attack threshold and supply buffer, accessed through the
-  `strategy` module without re-exporting individual constants.
-- `modules/observation/`: in-memory resource, supply, worker, army and time snapshot.
-- `modules/logger/`: resource samples every 10 iterations to `telemetry.json`,
-  flushed every 500 samples and at game end. The snapshot is not logged.
+- `main.py`: import-safe `SeedBot`; records telemetry, manages the economy,
+  then controls combat each step, and saves logs at game end.
+- `strategy.py`: shared parameters and goal selection; currently selects an
+  attack destination once 12 Marines exist. No persistent strategy state yet.
+- `economy.py`: worker allocation, construction, technology and production;
+  the connected technology hook is currently empty.
+- `combat.py`: executes the selected goal with idle Marine attack orders.
+- `telemetry.py`: owns state snapshots and logging without making decisions.
+  Records iteration/minerals/vespene every 10 iterations, flushing every 500
+  samples and at game end. `event(time, kind, **fields)` accepts optional
+  decision events; callers supply the reason. Richer snapshot fields are not
+  yet persisted. Decision modules read current BotAI data directly.
 
 ## Latest change and open questions
 
-Separated economy responsibilities and connected an empty technology hook to make
-extension easier; observation and combat TODOs suggest optional directions.
-The opening behavior and logging are unchanged. This is a minimal starting point,
+Flattened modules, merged observation into telemetry, and separated attack goal
+selection from unit orders. Optional events allow future decision explanations.
+The opening and default resource log format are unchanged. This is a starting point,
 not evidence of an effective strategy. Production capacity, army composition and
 combat decisions should be assessed using the parent version's actual results.
 Future updates should summarize the main problem, implemented change, rationale,

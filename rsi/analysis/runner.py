@@ -1,13 +1,11 @@
 import json
+from pathlib import Path
 
+from rsi.console import verbose
 from rsi.evolution.state import redact, save_json
-from rsi.tools.bash import TOOLS as BASH_TOOLS, Commands, smoke_test
-from rsi.tools.edit import TOOLS as EDIT_TOOLS, Editor
-from rsi.tools.git import TOOLS as GIT_TOOLS, Git
-from rsi.tools.sc2_api import TOOLS as API_TOOLS, api_query, entity_info, tech_tree
-
-
-TOOLS = EDIT_TOOLS + BASH_TOOLS + GIT_TOOLS + API_TOOLS
+from rsi.evaluation.checks import smoke_test
+from rsi.tools import toolset
+from rsi.context.window import working_messages
 
 
 class Agent:
@@ -15,22 +13,22 @@ class Agent:
         self.llm, self.max_steps, self.timeout, self.smoke = llm, max_steps, timeout, smoke
 
     def run(self, root, prompt, context, log_path, feedback_dir=None):
-        editor, git = Editor(root, feedback_dir), Git(root)
-        commands = Commands(root, self.timeout, git.current_commit(), self.smoke)
+        schemas, handlers, commands = toolset(root, feedback_dir, self.timeout, self.smoke)
+        stage = f"Agent {Path(log_path).parent.name}"
         messages = [{"role": "system", "content": prompt},
                     {"role": "user", "content": json.dumps(
-                        {**context, "feedback_files": editor.search("feedback")}, ensure_ascii=False)}]
-        handlers = {"read_file": editor.read_file, "search": editor.search,
-                    "apply_patch": editor.apply_patch, "run_command": commands.run_command,
-                    "finish": commands.finish, "git_view": git.git_view,
-                    "api_query": api_query, "entity_info": entity_info, "tech_tree": tech_tree}
+                        {**context, "feedback_files": handlers["search"]("feedback", limit=200)}, ensure_ascii=False)}]
         try:
             for step in range(self.max_steps):
-                message = self.llm.complete(messages, TOOLS)
+                verbose(stage, f"step {step + 1}/{self.max_steps} model")
+                message = self.llm.complete(working_messages(messages), schemas)
                 if message.get("role") != "assistant":
                     raise ValueError("Expected an assistant message")
                 messages.append(message)
                 calls = message.get("tool_calls") or []
+                if calls:
+                    verbose(stage, f"step {step + 1}/{self.max_steps}: "
+                           + ", ".join(call["function"]["name"] for call in calls))
                 if not calls:
                     messages.append({"role": "user", "content": "Continue using tools, or call finish with your change summary."})
                 for call in calls:
