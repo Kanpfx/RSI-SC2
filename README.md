@@ -44,7 +44,7 @@ python -m venv .venv
 | 每轮选择父节点数 | 1 |
 | 随机探索概率 / 搜索种子 | 0.2 / 0 |
 | 每个父节点的独立候选数 | 2 |
-| 每次 Agent 的模型调用上限 | 20 |
+| 每次 Agent 的模型调用上限 | 30 |
 | 每个版本评测局数 | 5 |
 | 地图 | AbyssalReefLE |
 | 对局 | 非实时，Terran vs Terran / CheatVision（Lv8） / RandomBuild |

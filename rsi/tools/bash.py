@@ -1,3 +1,4 @@
+import shutil
 import sys
 
 from rsi.process import run_process
@@ -6,10 +7,16 @@ from rsi.tools.edit import Editor
 from rsi.tools import STRING, schema
 
 
-TOOLS = [
-    schema("run_command", "Allowed argv: python -m compileall -q bot; "
+# rg is optional; probe once so the tool description and errors match this machine.
+RG = shutil.which("rg")
+ALLOWED = ("python -m compileall -q bot; "
            "python -m pytest -q -p no:cacheprovider tests/test_bot_smoke.py; "
-           "python -c 'import bot.main'; rg -n -- PATTERN PATH",
+           "python -c 'import bot.main'" + ("; rg -n -- PATTERN PATH" if RG else ""))
+NO_RG = "" if RG else " rg is not installed on this machine; use the search tool instead."
+
+
+TOOLS = [
+    schema("run_command", f"Allowed argv: {ALLOWED}.{NO_RG}",
            {"argv": {"type": "array", "items": STRING}}, ["argv"],
            [{"argv": ["python", "-m", "compileall", "-q", "bot"]}]),
     schema("finish", "Validate the candidate; fix failures and retry. Call alone",
@@ -44,8 +51,10 @@ class Commands:
             command = [sys.executable, *argv[1:]]
         elif len(argv) == 5 and argv[:3] == ["rg", "-n", "--"]:
             self.editor.path(argv[4])
-            command = ["rg", "--no-config", *argv[1:]]
+            if RG is None:
+                raise ValueError("rg is not installed on this machine; use the search tool instead")
+            command = [RG, "--no-config", *argv[1:]]
         else:
-            raise ValueError("Allowed: compileall, fixed smoke pytest, import bot.main, rg -n -- PATTERN PATH")
+            raise ValueError(f"Allowed: {ALLOWED}.{NO_RG}")
         return run_process(command, self.editor.root, self.timeout)
 

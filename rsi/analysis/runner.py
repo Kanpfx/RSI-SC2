@@ -8,8 +8,11 @@ from rsi.tools import toolset
 from rsi.context.window import working_messages
 
 
+BUDGET_WARNING = 5
+
+
 class Agent:
-    def __init__(self, llm, max_steps=20, timeout=60, smoke=smoke_test):
+    def __init__(self, llm, max_steps=30, timeout=60, smoke=smoke_test):
         self.llm, self.max_steps, self.timeout, self.smoke = llm, max_steps, timeout, smoke
 
     def run(self, root, prompt, context, log_path, feedback_dir=None):
@@ -17,7 +20,8 @@ class Agent:
         stage = f"Agent {Path(log_path).parent.name}"
         messages = [{"role": "system", "content": prompt},
                     {"role": "user", "content": json.dumps(
-                        {**context, "feedback_files": handlers["search"]("feedback", limit=200)}, ensure_ascii=False)}]
+                        {**context, "step_budget": self.max_steps,
+                         "feedback_files": handlers["search"]("feedback", limit=200)}, ensure_ascii=False)}]
         try:
             for step in range(self.max_steps):
                 verbose(stage, f"step {step + 1}/{self.max_steps} model")
@@ -46,6 +50,11 @@ class Agent:
                                      "content": redact(json.dumps(result, ensure_ascii=False))})
                     if name == "finish" and result.get("ok"):
                         return {"ok": True, "steps": step + 1, "summary": arguments["summary"], "smoke": commands.checks}
+                remaining = self.max_steps - step - 1
+                if remaining == BUDGET_WARNING:
+                    messages.append({"role": "user", "content": (
+                        f"Only {remaining} model calls remain. Stop exploring and land your change: "
+                        "apply_patch the edits, then call finish alone with the summary.")})
                 save_json(log_path, messages)
             raise ValueError("Agent exhausted max_steps")
         except Exception as exc:

@@ -87,6 +87,17 @@ def test_editor_boundaries_and_replacement(files):
         editor.read_file(".env")
 
 
+def test_editor_rejects_root_path(files):
+    # Path(".").parts is empty; a bare "." must fail with a readable error, not an IndexError.
+    editor = Editor(files)
+    for path in (".", "./"):
+        with pytest.raises(ValueError, match="Path must start with"):
+            editor.search(path)
+    with pytest.raises(ValueError, match="Path must start with"):
+        editor.read_file(".")
+    assert editor.search("bot", glob="*.py")["matches"]
+
+
 def test_editor_rejects_symlink(files, tmp_path):
     target = tmp_path / "outside.py"
     target.write_text("untouched", encoding="utf-8")
@@ -106,6 +117,16 @@ def test_commands_reject_arbitrary_execution(files):
                  ["rg", "-n", "--", "key", "../outside"], "python -m compileall bot"):
         with pytest.raises(ValueError):
             commands.run_command(argv)
+
+
+def test_run_command_reports_missing_rg(files, monkeypatch):
+    monkeypatch.setattr("rsi.tools.bash.RG", None)
+    commands = Commands(files)
+    with pytest.raises(ValueError, match="use the search tool instead"):
+        commands.run_command(["rg", "-n", "--", "key", "bot"])
+    # The path check still runs first, so an escaping path is rejected either way.
+    with pytest.raises(ValueError, match="Path"):
+        commands.run_command(["rg", "-n", "--", "key", "../outside"])
 
 
 def test_timeout_kills_child_tree(tmp_path, monkeypatch):
@@ -344,6 +365,18 @@ def test_agent_feedback_is_read_only_and_scoped(repo, tmp_path):
     assert "error" in replies[0] and "error" in replies[1]
     assert json.loads(replies[2]["text"])["wins"] == 2
     assert replies[2]["next_offset"] is None
+
+
+def test_agent_reports_and_warns_about_step_budget(repo, tmp_path):
+    llm = ScriptedLLM([call("search", {"path": "bot"}) for _ in range(6)])
+    result = Agent(llm, max_steps=6).run(repo, "test", {}, tmp_path / "budget.json")
+    assert not result["ok"]
+    assert json.loads(llm.requests[0][1]["content"])["step_budget"] == 6
+    assert "5 model calls remain" in llm.requests[1][-1]["content"]
+    messages = read_json(tmp_path / "budget.json")
+    warnings = [message for message in messages
+                if "model calls remain" in str(message.get("content"))]
+    assert len(warnings) == 1
 
 
 def test_finish_must_be_alone(repo, tmp_path):

@@ -1,7 +1,7 @@
 project:
   max_generations: 10
 agent:
-  max_steps: 20
+  max_steps: 30
 search:
   seed: 0
   exploration_rate: 0.2

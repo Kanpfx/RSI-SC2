@@ -40,8 +40,9 @@ class Editor:
         if not write and name in self.feedback.files:
             return self.feedback.path(name)
         allowed = {"bot"} if write else {"bot", "rsi", "tests", "config.yaml", "README.md", "architecture.md"}
-        if relative.parts[0] not in allowed:
-            raise ValueError("Path is outside allowed area")
+        # Path(".").parts is empty, so a bare "." would index out of range instead of being rejected.
+        if not relative.parts or relative.parts[0] not in allowed:
+            raise ValueError(f"Path must start with {', '.join(sorted(allowed))}")
         target = self.root / relative
         for item in (target, *target.parents):
             if item == self.root:
