@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 
-from rsi.console import elapsed, log, results, score, verbose
+from rsi.console import blank, elapsed, log, results, score, verbose
 from rsi.context.builder import parent_context
 from rsi.analysis.runner import Agent
 from rsi.evaluation.runner import Evaluator
@@ -84,6 +84,7 @@ class Evolution:
         self.save()
         log(f"Result {node['id']}",
             f"{results(metadata['results'])}  {score(node)}  {elapsed(time.monotonic() - start)}")
+        blank()
 
     def failure(self, node, stage, exc):
         item = {"candidate_id": node["id"], "parent_id": node["parent_id"],
@@ -93,6 +94,7 @@ class Evolution:
         node.update(status="failed", failure={"stage": stage, "error": item["error"]})
         self.save()
         log(f"Failed {node['id']}", f"stage={stage}: {item['error']}")
+        blank()
 
     def candidate(self, parent, attempt):
         node = self.node(parent, f"Attempt {attempt}")

@@ -15,6 +15,11 @@ def verbose(stage, message=""):
         log(stage, message)
 
 
+def blank():
+    """Separate one finished node from the next."""
+    print(flush=True)
+
+
 def results(records):
     """Per-game outcomes in game order, e.g. ``WWLXL``."""
     return "".join(SYMBOLS.get(record["result"], "?") for record in records)
