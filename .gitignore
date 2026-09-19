@@ -1,0 +1,49 @@
+# Python bytecode and tooling caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+
+# Virtual environments and Python build outputs
+.venv/
+venv/
+env/
+ENV/
+build/
+dist/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Generated SC2 runtime data
+logs/
+data/
+*.SC2Replay
+
+# Local editor and operating-system files
+.vscode/
+.idea/
+*.code-workspace
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Keep documentation trackable even inside the original parent repository.
+!/docs/
+!/docs/**
+
+# Local dependency checkout (installed through Poetry).
+/ares-sc2/

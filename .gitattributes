@@ -1,0 +1,12 @@
+# Store text consistently across Windows and Unix checkouts.
+* text=auto eol=lf
+
+# Keep binary game and generated artifact formats untouched.
+*.SC2Replay binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary

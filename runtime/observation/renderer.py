@@ -1,0 +1,95 @@
+"""Canonical model observation renderer."""
+
+from __future__ import annotations
+
+from textwrap import indent
+from typing import Any
+
+
+def _tag(name: str, content: str | list[str]) -> str:
+    """Wrap one observation domain in a stable XML-like semantic tag."""
+    if isinstance(content, list):
+        body = "\n".join(content) if content else "[None]"
+    else:
+        body = content or "[None]"
+    return f"<{name}>\n{indent(body, '  ')}\n</{name}>"
+
+
+def _section(name: str, content: str | list[str], *, empty: str = "[None]") -> str:
+    if isinstance(content, list):
+        content = "\n".join(content) if content else empty
+    return _tag(name, content or empty)
+
+
+def _heading(title: str, blocks: list[str]) -> str:
+    body = "\n".join(blocks) if blocks else "[None]"
+    return f"{title}:\n{indent(body, '  ')}"
+
+
+def observation_text(data: dict[str, Any]) -> str:
+    """Render the factual observation read by model."""
+    hint_sections = data["situational_hints"]
+    alert_lines = [
+        f"- {item}"
+        for items in hint_sections.values()
+        for item in items
+    ]
+    situation_alerts = "alerts: " + " | ".join(dict.fromkeys(line[2:] for line in alert_lines)) if alert_lines else ""
+    overview = "\n".join(filter(None, (
+        data["overview"]["resources"],
+        data["overview"]["economy"],
+        data["overview"]["match"],
+        data["overview"]["military"],
+        situation_alerts,
+    )))
+    technology = "\n".join(data["production_and_technology"])
+    own_state = "\n".join(
+        (
+            _section("units", data["own_unit_blocks"]),
+            _section("structures", data["own_structure_blocks"]),
+            _section("production_and_technology", technology),
+        )
+    )
+    enemy_state = "\n".join(
+        (
+            _section(
+                "visible_units",
+                data["enemy_unit_blocks"],
+                empty="[None visible]",
+            ),
+            _section(
+                "visible_structures",
+                data["enemy_structure_blocks"],
+                empty="[None visible]",
+            ),
+            _tag(
+                "enemy_memory",
+                "\n".join(
+                    (
+                        _heading(
+                            "Recently seen units",
+                            data["remembered_enemy_unit_blocks"],
+                        ),
+                        _heading(
+                            "Known structures",
+                            data["remembered_enemy_structure_blocks"],
+                        ),
+                    )
+                ),
+            ),
+        )
+    )
+    recent_history = "\n".join(
+        (
+            _section("state_changes", data["recent_changes"]),
+            _section("action_history", data["action_history"]),
+        )
+    )
+    return "\n".join(
+        (
+            _tag("overview", overview),
+            _tag("own_state", own_state),
+            _tag("enemy_state", enemy_state),
+            _tag("recent_history", recent_history),
+        )
+    )

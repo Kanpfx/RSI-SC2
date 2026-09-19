@@ -1,0 +1,105 @@
+{
+  "schema_version": "1.0",
+  "types": {
+    "boolean": {
+      "meaning": "Boolean value.",
+      "model_type": "Boolean"
+    },
+    "integer": {
+      "meaning": "Integer, excluding booleans.",
+      "model_type": "Integer"
+    },
+    "number": {
+      "meaning": "Finite integer or float.",
+      "model_type": "Number"
+    },
+    "json_array": {
+      "meaning": "Action-specific array."
+    },
+    "json_object": {
+      "meaning": "Action-specific object.",
+      "model_type": "Object"
+    },
+    "unit_ref": {
+      "meaning": "Reference to a game entity.",
+      "model_type": "Unit"
+    },
+    "unit_refs": {
+      "meaning": "List of game entity references.",
+      "model_type": "Units"
+    },
+    "point_ref": {
+      "meaning": "Map position or landmark.",
+      "model_type": "Point"
+    },
+    "point_or_unit_ref": {
+      "meaning": "Position or entity reference.",
+      "model_type": "Target"
+    },
+    "grid_ref": {
+      "allowed_values": [
+        "ground",
+        "air",
+        "ground_avoidance",
+        "air_avoidance",
+        "tactical_ground"
+      ],
+      "meaning": "Ares pathing or influence grid.",
+      "model_type": "Choice"
+    },
+    "unit_type_id": {
+      "meaning": "SC2 UnitTypeId.",
+      "model_type": "Choice"
+    },
+    "ability_id": {
+      "meaning": "SC2 AbilityId.",
+      "model_type": "Choice"
+    },
+    "unit_role": {
+      "meaning": "Ares UnitRole.",
+      "model_type": "Choice"
+    },
+    "integer_list": {
+      "meaning": "Integer tag or ID collection.",
+      "model_type": "List[Integer]"
+    },
+    "point_refs": {
+      "meaning": "List of positions.",
+      "model_type": "List[Point]"
+    },
+    "army_composition": {
+      "meaning": "UnitTypeId mapping to proportion and priority.",
+      "model_type": "Composition"
+    },
+    "resource_pair": {
+      "meaning": "Mineral and gas thresholds.",
+      "model_type": "List[Integer]"
+    },
+    "upgrade_ids": {
+      "meaning": "List of SC2 UpgradeId values.",
+      "model_type": "List[Choice]"
+    },
+    "unit_or_unit_type_id": {
+      "meaning": "Entity reference or UnitTypeId.",
+      "model_type": "Unit | Choice"
+    },
+    "unit_or_upgrade_id": {
+      "meaning": "UnitTypeId or UpgradeId.",
+      "model_type": "Choice"
+    }
+  },
+  "model_types": {
+    "Unit": "Current entity ID, e.g. 851.",
+    "Units": "Entity IDs, e.g. [851,852]; non-empty unless stated.",
+    "Point": "Landmark or coordinates, e.g. main or {x:10,y:20}.",
+    "Target": "Entity ID, landmark, or coordinates.",
+    "Choice": "Named identifier allowed by the parameter, not a display name.",
+    "Integer": "Whole number; not a boolean.",
+    "Number": "Finite integer or decimal; not a boolean.",
+    "Boolean": "true or false.",
+    "Composition": "{MARINE:{proportion:1.0,priority:0}}; positive proportions sum to 1; priority 0 (highest) to 10.",
+    "List": "List[T]: [value1,value2] of type T.",
+    "Object": "Object with the specified fields.",
+    "Value": "Literal value in the specified format."
+  }
+}

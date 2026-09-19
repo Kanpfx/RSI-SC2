@@ -1,0 +1,610 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SC2 Agent 日志查看器</title>
+  <style>
+    :root {
+      --page:#f4f7fb; --card:rgba(255,255,255,.92); --ink:#172033; --muted:#667085;
+      --line:#dfe6f0; --line-strong:#cdd7e6; --blue:#175cd3; --blue-soft:#eef4ff;
+      --purple:#6938ef; --green:#027a48; --orange:#b54708; --code:#0f172a;
+      --shadow:0 1px 2px rgba(16,24,40,.04),0 8px 24px rgba(16,24,40,.045);
+    }
+    * { box-sizing:border-box; }
+    html { color-scheme:light; }
+    body {
+      margin:0; color:var(--ink); font:14px/1.55 Inter,"Segoe UI",Arial,sans-serif;
+      background:
+        radial-gradient(circle at 12% -8%,rgba(23,92,211,.08),transparent 28rem),
+        radial-gradient(circle at 92% 4%,rgba(105,56,239,.055),transparent 24rem),
+        var(--page);
+      min-height:100vh;
+    }
+    main { max-width:1360px; margin:auto; padding:34px 22px 64px; }
+    h1 { margin:0; font-size:28px; line-height:1.2; letter-spacing:-.65px; }
+    h2 { margin:0; font-size:15px; letter-spacing:-.1px; }
+    p { margin:0; }
+    code { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:.92em; }
+
+    .page-header { display:flex; justify-content:space-between; align-items:flex-end; gap:24px; margin-bottom:20px; }
+    .eyebrow { display:flex; align-items:center; gap:7px; margin-bottom:7px; color:#52627a; font-size:11px; font-weight:700; letter-spacing:.9px; }
+    .eyebrow .dot { width:7px; height:7px; border-radius:50%; background:var(--green); box-shadow:0 0 0 4px rgba(2,122,72,.09); }
+    .sub { color:var(--muted); margin-top:6px; }
+    .sub code { padding:2px 6px; border:1px solid #dce5f1; border-radius:5px; background:rgba(255,255,255,.72); color:#344054; }
+    .privacy-badge { flex:none; color:#475467; background:rgba(255,255,255,.72); border:1px solid var(--line); border-radius:999px; padding:6px 10px; font-size:12px; box-shadow:0 1px 2px rgba(16,24,40,.03); }
+
+    .toolbar,.card,details,.metric { background:var(--card); border:1px solid var(--line); box-shadow:var(--shadow); backdrop-filter:blur(10px); }
+    .toolbar { padding:15px; display:grid; gap:13px; border-radius:14px; }
+    .controls { display:flex; flex-wrap:wrap; align-items:center; gap:9px; }
+    button,.file-label {
+      appearance:none; border:1px solid var(--line-strong); border-radius:8px; background:#fff; color:#243047;
+      padding:8px 12px; font:600 13px/1.2 inherit; cursor:pointer; transition:border-color .15s ease,box-shadow .15s ease,transform .15s ease,background .15s ease;
+    }
+    button:hover:not(:disabled),.file-label:hover { border-color:#9eb2d0; background:#fbfcff; box-shadow:0 2px 7px rgba(16,24,40,.07); }
+    button:active:not(:disabled),.file-label:active { transform:translateY(1px); }
+    button:focus-visible,.file-label:focus-visible,input[type=range]:focus-visible { outline:3px solid rgba(23,92,211,.16); outline-offset:2px; }
+    button.primary { background:linear-gradient(180deg,#2168dc,#175cd3); border-color:#175cd3; color:#fff; box-shadow:0 2px 5px rgba(23,92,211,.22); }
+    button.primary:hover:not(:disabled) { background:linear-gradient(180deg,#2a70e5,#175cd3); border-color:#175cd3; box-shadow:0 4px 10px rgba(23,92,211,.24); }
+    button:disabled { cursor:not-allowed; opacity:.42; box-shadow:none; }
+    input[type=file] { display:none; }
+    input[type=range] { width:100%; accent-color:var(--blue); cursor:pointer; }
+    input[type=range]:disabled { cursor:not-allowed; }
+    .tick-row { display:grid; grid-template-columns:104px minmax(180px,1fr) 190px; gap:14px; align-items:center; padding-top:1px; }
+    .tick { font-variant-numeric:tabular-nums; color:var(--blue); font-weight:750; letter-spacing:-.1px; }
+    .status { color:var(--muted); min-height:22px; text-align:right; font-size:12px; font-variant-numeric:tabular-nums; }
+
+    .summary { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:10px; margin:16px 0; }
+    .metric { border-radius:12px; padding:12px 14px 11px; min-width:0; position:relative; overflow:hidden; }
+    .metric.opponent { grid-column:span 2; }
+    .metric::before { content:""; position:absolute; left:0; top:0; width:3px; height:100%; background:#d9e6fb; }
+    .metric b { display:block; font-size:17px; line-height:1.35; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-variant-numeric:tabular-nums; }
+    .metric span { display:block; margin-top:2px; color:var(--muted); font-size:11.5px; }
+
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+    .card { overflow:hidden; min-width:0; border-radius:14px; }
+    .head { display:flex; align-items:center; gap:9px; min-height:46px; padding:11px 14px; border-bottom:1px solid var(--line); background:linear-gradient(180deg,rgba(248,250,252,.85),rgba(255,255,255,.45)); }
+    .tag { color:#fff; border-radius:999px; padding:3px 8px; font-size:10px; line-height:1.35; font-weight:800; letter-spacing:.55px; box-shadow:inset 0 0 0 1px rgba(255,255,255,.14); }
+    .model { background:var(--purple); } .ok { background:var(--green); } .event { background:#7a5af8; }
+    .body { padding:14px; }
+    .body p { color:#344054; }
+    .body strong { color:#1d2939; }
+    .body p + p { margin-top:6px; }
+    .body p + pre,.body pre + p { margin-top:10px; }
+    .muted { color:var(--muted); }
+    pre {
+      margin:0; overflow:auto; border:1px solid #1e293b; border-radius:9px; padding:12px 13px;
+      background:linear-gradient(180deg,#111b30,var(--code)); color:#e6edf7;
+      font:12px/1.58 ui-monospace,SFMono-Regular,Consolas,monospace; white-space:pre-wrap; overflow-wrap:anywhere;
+      max-height:330px; box-shadow:inset 0 1px 0 rgba(255,255,255,.035);
+      scrollbar-color:#475569 transparent; scrollbar-width:thin;
+    }
+    pre::-webkit-scrollbar { width:9px; height:9px; }
+    pre::-webkit-scrollbar-thumb { background:#475569; border:2px solid transparent; border-radius:999px; background-clip:padding-box; }
+    .wide { grid-column:1 / -1; }
+    .event-row { padding:9px 0 10px; border-bottom:1px solid var(--line); }
+    .event-row:first-child { padding-top:0; }
+    .event-row:last-child { border:0; padding-bottom:0; }
+    .event-row > strong { display:block; margin-bottom:7px; }
+
+    details { margin-top:14px; border-radius:12px; padding:0; overflow:hidden; }
+    summary { cursor:pointer; color:#344054; font-weight:650; padding:11px 14px; user-select:none; background:rgba(248,250,252,.68); transition:background .15s ease; }
+    summary:hover { background:#f7f9fc; }
+    details[open] > summary { border-bottom:1px solid var(--line); }
+    details > pre,details > div { margin:12px 13px 13px; }
+    details pre { max-height:430px; }
+    .raw-inputs { margin-top:14px; }
+    .raw-inputs details { margin-top:10px; }
+    .raw-inputs pre { max-height:620px; }
+    .raw-inputs .attempt + .attempt { margin-top:14px; padding-top:14px; border-top:1px solid var(--line); }
+    .empty { color:var(--muted)!important; padding:18px 0; text-align:center; font-size:12.5px; }
+    .hidden { display:none; }
+
+    @media (max-width:1040px) {
+      .summary { grid-template-columns:repeat(3,minmax(0,1fr)); }
+      .tick-row { grid-template-columns:98px 1fr; }
+      .status { grid-column:1 / -1; text-align:left; }
+    }
+    @media (max-width:840px) {
+      main { padding:24px 15px 44px; }
+      .page-header { align-items:flex-start; margin-bottom:16px; }
+      .privacy-badge { display:none; }
+      .summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .grid { grid-template-columns:1fr; }
+      .wide { grid-column:auto; }
+      .toolbar { padding:13px; }
+    }
+    @media (max-width:520px) {
+      h1 { font-size:24px; }
+      .controls { display:grid; grid-template-columns:1fr 1fr; }
+      button,.file-label { text-align:center; }
+      .summary { grid-template-columns:1fr 1fr; }
+      .metric.opponent { grid-column:1 / -1; }
+      .metric { padding:10px 12px; }
+      .metric b { font-size:15px; }
+      .tick-row { grid-template-columns:1fr; gap:8px; }
+      .status { grid-column:auto; }
+    }
+
+  </style>
+</head>
+<body>
+  <main>
+    <header class="page-header">
+      <div>
+        <div class="eyebrow"><span class="dot"></span>MODEL · LOCAL LOG INSPECTOR</div>
+        <h1>SC2 Agent 日志查看器</h1>
+        <p class="sub">选择一个 <code>logs/时间戳</code> 目录，在浏览器中快速查看观测、模型输出、动作和事件日志。</p>
+      </div>
+      <span class="privacy-badge">本地读取 · 不上传</span>
+    </header>
+
+    <section class="toolbar">
+      <div class="controls">
+        <button class="primary" id="directory-picker">选择日志目录</button>
+        <label class="file-label" for="directory-input">兼容方式：选择文件夹</label>
+        <input id="directory-input" type="file" webkitdirectory multiple>
+        <button id="previous" disabled>上一决策</button>
+        <button id="next" disabled>下一决策</button>
+      </div>
+      <div class="tick-row">
+        <span class="tick" id="tick-label">iteration —</span>
+        <input id="tick-slider" type="range" min="0" max="0" value="0" disabled>
+        <span class="status" id="status">尚未加载日志。</span>
+      </div>
+    </section>
+
+    <section class="summary hidden" id="summary"></section>
+
+    <section class="grid hidden" id="viewer">
+      <article class="card">
+        <header class="head"><span class="tag model">OUTPUT</span><h2>模型输出</h2></header>
+        <div class="body" id="model-panel"></div>
+      </article>
+      <article class="card">
+        <header class="head"><span class="tag event">CHECK</span><h2>解析与校验</h2></header>
+        <div class="body" id="validation-panel"></div>
+      </article>
+      <article class="card wide" id="observation-details">
+        <header class="head"><span class="tag event">OBS</span><h2>游戏观测</h2></header>
+        <div class="body" id="observation-meta"></div>
+        <details><summary>干净 OBS</summary><pre id="observation-panel"></pre></details>
+      </article>
+      <article class="card wide" id="raw-inputs">
+        <header class="head"><span class="tag model">INPUT</span><h2 id="raw-model-summary">模型输入</h2></header>
+        <div class="body" id="raw-model-panel"></div>
+      </article>
+      <article class="card wide">
+        <header class="head"><span class="tag ok">ACTION</span><h2>动作处理与执行</h2></header>
+        <div class="body" id="action-panel"></div>
+      </article>
+      <article class="card wide">
+        <header class="head"><span class="tag event">SYSTEM</span><h2>系统日志</h2></header>
+        <div class="body" id="event-panel"></div>
+      </article>
+    </section>
+
+    <details class="hidden" id="context-details">
+      <summary>本局配置、上下文快照与最新工作记忆</summary>
+      <div class="body" id="context-panel"></div>
+    </details>
+
+    <details class="hidden" id="metadata-details">
+      <summary>对局元数据</summary>
+      <pre id="metadata-panel"></pre>
+    </details>
+
+    <details class="hidden" id="console-details">
+      <summary>控制台原始输出</summary>
+      <pre id="console-panel"></pre>
+    </details>
+  </main>
+
+  <script>
+    const wantedFiles = new Set([
+      "metadata.json", "obs.jsonl", "model.jsonl",
+      "accepted_actions.jsonl", "events.jsonl", "console.log", "settings.json", "working.md",
+    ]);
+    const state = { metadata: {}, observations: [], model: [], decisions: [], events: [], console: "", iterations: [], settings: {}, working: null, snapshots: [] };
+    const rowIteration = row => {
+      const decision = /^d(\d+)$/.exec(row.decision_id || "");
+      return decision ? Number(decision[1]) : Number(Number.isFinite(row.request_iteration) && row.request_iteration >= 0 ? row.request_iteration : (row.iteration ?? row.tick ?? row.loop));
+    };
+    const byIteration = rows => new Map(rows.map(row => [rowIteration(row), row]));
+    let indexes = {};
+
+    const $ = id => document.getElementById(id);
+    const text = (node, value) => { node.textContent = value; return node; };
+    function formatValue(value) {
+      if (typeof value === "string") {
+        const reserved = /^(?:true|false|null|none)$/i.test(value) || ["False", "None", "True", "and", "as", "assert", "async", "await", "break", "class", "continue", "def", "del", "elif", "else", "except", "finally", "for", "from", "global", "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while", "with", "yield"].includes(value);
+        return /^[A-Za-z_][A-Za-z0-9_]*$/.test(value) && !reserved ? value : JSON.stringify(value);
+      }
+      if (value == null) return "null";
+      if (Array.isArray(value)) return `[${value.map(formatValue).join(", ")}]`;
+      if (typeof value === "object") return `{${Object.entries(value).map(([key, item]) => `${formatValue(key)}: ${formatValue(item)}`).join(", ")}}`;
+      return String(value);
+    }
+
+    function formatAction(action) {
+      if (!action || typeof action !== "object") return String(action ?? "[None]");
+      const args = action.args && typeof action.args === "object" ? action.args : {};
+      return `${action.id || "UnknownAction"}(${Object.entries(args).map(([key, value]) => `${key}=${formatValue(value)}`).join(", ")})`;
+    }
+
+    function formatFeedback(feedback) {
+      return feedback.map((item, index) => {
+        const submitted = Object.hasOwn(item, "action") ? formatAction(item.action) : (item.submitted_action ?? item.submitted_output ?? item.submitted_phase);
+        const submittedLines = String(submitted ?? "[None]").split(/\r\n|\r|\n/);
+        const lines = submittedLines.length <= 1
+          ? [`${index + 1}. Action: ${submittedLines[0] || "[None]"}`]
+          : [`${index + 1}. Action: `, ...submittedLines.map(line => `     ${line}`)];
+        lines.push(`   Error: ${item.error || "Unknown error"}`);
+        return lines.join("\n");
+      }).join("\n\n") || "[None]";
+    }
+
+    function formatFields(value) {
+      if (value == null) return "[None]";
+      if (typeof value !== "object") return String(value);
+      if (Array.isArray(value)) {
+        if (!value.length) return "[None]";
+        if (value.every(item => item && typeof item === "object" && "kind" in item && "error" in item)) return formatFeedback(value);
+        return value.map((item, index) => {
+          const rendered = item && typeof item === "object" && "id" in item ? formatAction(item) : formatFields(item);
+          return `${index + 1}. ${rendered.replace(/\n/g, "\n   ")}`;
+        }).join("\n");
+      }
+      if ("id" in value && "args" in value) return formatAction(value);
+      return Object.entries(value).map(([key, item]) => {
+        const label = key.replace(/_/g, " ");
+        const rendered = key === "status"
+          ? ({ queued: "等待资源", accepted: "已接受", active: "生效中", failed: "失败" }[item] || formatFields(item))
+          : formatFields(item);
+        return rendered.includes("\n") || (item && typeof item === "object")
+          ? `${label}:\n${rendered.split("\n").map(line => `  ${line}`).join("\n")}`
+          : `${label}: ${rendered}`;
+      }).join("\n");
+    }
+    const noData = message => Object.assign(document.createElement("p"), { className: "empty", textContent: message });
+
+    function parseJsonl(content, filename) {
+      const rows = [];
+      content.split(/\r?\n/).forEach((line, index) => {
+        if (!line.trim()) return;
+        try { rows.push(JSON.parse(line)); }
+        catch (error) { throw new Error(`${filename} 第 ${index + 1} 行不是合法 JSON：${error.message}`); }
+      });
+      return rows;
+    }
+
+    async function loadFiles(files) {
+      const selected = new Map();
+      for (const file of files) {
+        const path = file.logPath || (file.webkitRelativePath
+          ? file.webkitRelativePath.split("/").slice(1).join("/") : file.name);
+        if (wantedFiles.has(path) || (path.startsWith("context/") && path.endsWith(".md"))) selected.set(path, file);
+      }
+      if (!selected.has("metadata.json") || !selected.has("model.jsonl")) throw new Error("未找到 metadata.json 或 model.jsonl；请选择一局新格式日志的直接目录。");
+      const read = async name => selected.has(name) ? selected.get(name).text() : "";
+      const [metadata, obs, model, decisions, events, consoleText, settings, working] = await Promise.all([
+        read("metadata.json"), read("obs.jsonl"), read("model.jsonl"),
+        read("accepted_actions.jsonl"), read("events.jsonl"), read("console.log"), read("settings.json"), read("working.md"),
+      ]);
+      state.metadata = metadata ? JSON.parse(metadata) : {};
+      state.observations = obs ? parseJsonl(obs, "obs.jsonl") : [];
+      state.model = model ? parseJsonl(model, "model.jsonl") : [];
+      state.decisions = decisions ? parseJsonl(decisions, "accepted_actions.jsonl") : [];
+      state.events = events ? parseJsonl(events, "events.jsonl") : [];
+      state.console = consoleText;
+      state.settings = settings ? JSON.parse(settings) : {};
+      state.working = selected.has("working.md") ? working : null;
+      state.snapshots = await Promise.all([...selected.keys()].filter(path => path.startsWith("context/"))
+        .sort().map(async path => [path, await read(path)]));
+
+      state.iterations = [...new Set([
+        ...state.observations, ...state.model,
+        ...state.decisions, ...state.events,
+      ].map(rowIteration).filter(Number.isFinite))].sort((a, b) => a - b);
+      if (!state.iterations.length) throw new Error("日志中没有可浏览的 iteration。");
+      indexes = {
+        observation: byIteration(state.observations),
+        decision: byIteration(state.decisions),
+        model: groupByIteration(state.model),
+        event: groupByIteration(state.events),
+      };
+      $("tick-slider").min = "0";
+      $("tick-slider").max = String(state.iterations.length - 1);
+      $("tick-slider").value = "0";
+      $("tick-slider").disabled = false;
+      $("previous").disabled = false;
+      $("next").disabled = false;
+      $("summary").classList.remove("hidden");
+      $("viewer").classList.remove("hidden");
+      $("observation-details").classList.remove("hidden");
+      $("raw-inputs").classList.remove("hidden");
+      $("metadata-details").classList.remove("hidden");
+      $("console-details").classList.remove("hidden");
+      $("metadata-panel").textContent = formatFields(state.metadata);
+      $("console-panel").textContent = state.console || "该对局没有控制台输出。";
+      $("context-details").classList.remove("hidden");
+      replacePanel("context-panel", [
+        fold("运行设置", formatFields(state.settings)),
+        fold("最新工作记忆（日志读取时，不随决策切换）", state.working === null ? "未保存 working.md" : state.working || "[空]"),
+        ...state.snapshots.map(([path, content]) => fold(path, content)),
+      ]);
+      renderSummary();
+      renderCurrent();
+    }
+
+    function groupByIteration(rows, key = rowIteration) {
+      const grouped = new Map();
+      rows.forEach(row => {
+        const iteration = key(row);
+        if (!Number.isFinite(iteration)) return;
+        if (!grouped.has(iteration)) grouped.set(iteration, []);
+        grouped.get(iteration).push(row);
+      });
+      return grouped;
+    }
+
+    function renderSummary() {
+      const meta = state.metadata;
+      const opponent = [meta.enemy_race, meta.difficulty, meta.build_mode]
+        .filter(Boolean).join(" · ") || "未知对手";
+      const metrics = [
+        [meta.map_name || "未知地图", "地图"],
+        [opponent, "对手"],
+        [meta.model || "未知模型", "模型"],
+        [meta.result || "未完整结束", "结果"],
+        [meta.tactic || "未知战术", "战术"],
+      ];
+      const container = $("summary");
+      container.replaceChildren(...metrics.map(([value, label]) => {
+        const item = document.createElement("div");
+        item.className = label === "对手" ? "metric opponent" : "metric";
+        item.innerHTML = `<b></b><span></span>`;
+        text(item.querySelector("b"), value); text(item.querySelector("span"), label);
+        return item;
+      }));
+    }
+
+    function renderCurrent() {
+      const position = Number($("tick-slider").value);
+      const iteration = state.iterations[position];
+      const decision = indexes.decision.get(iteration);
+      const observation = indexes.observation.get(iteration);
+      $("tick-label").textContent = `iteration ${iteration}`;
+      $("status").textContent = `${position + 1} / ${state.iterations.length} · ${decision?.time || observation?.time || "--:--"}`;
+      $("previous").disabled = position === 0;
+      $("next").disabled = position === state.iterations.length - 1;
+      renderModel(iteration);
+      renderValidation(iteration);
+      renderActions(decision, iteration);
+      renderEvents(iteration);
+      renderRawInputs(iteration);
+      const validation = modelRecords(iteration).validation;
+      replacePanel("observation-meta", [
+        line("\u91c7\u96c6\u65f6\u95f4", observation?.timestamp || "\u65e7\u65e5\u5fd7\u672a\u8bb0\u5f55"),
+        line("\u6e38\u620f\u65f6\u95f4 / \u91c7\u96c6\u5e27", (observation?.time || "--:--") + " / " + (observation?.iteration ?? iteration)),
+        line("\u5e94\u7528\u65f6\u89c2\u6d4b\u5e74\u9f84", validation.observation_age_seconds == null ? "\u672a\u63d0\u4f9b" : validation.observation_age_seconds + " s"),
+      ]);
+      $("observation-panel").textContent = observation?.observation || "该 iteration 没有保存观测文本。";
+    }
+
+    function replacePanel(id, children) { $(id).replaceChildren(...children); }
+    function pre(value) { return text(document.createElement("pre"), value); }
+    function line(label, value) {
+      const paragraph = document.createElement("p");
+      const strong = document.createElement("strong"); text(strong, `${label}：`);
+      paragraph.append(strong, document.createTextNode(value)); return paragraph;
+    }
+
+    function fold(title, content) {
+      const details = document.createElement("details");
+      details.append(text(document.createElement("summary"), title), pre(content));
+      return details;
+    }
+
+    function modelRecords(iteration) {
+      const rows = indexes.model.get(iteration) || [];
+      const last = stage => rows.filter(row => row.stage === stage).at(-1);
+      const legacy = rows.filter(row => !row.stage).at(-1) || {};
+      return {
+        rows, request: last("request") || legacy, response: last("response") || legacy,
+        parsed: last("parsed") || legacy, validation: last("validated") || legacy,
+        failure: last("request_failed"),
+      };
+    }
+
+    function renderModel(iteration) {
+      const { rows, response, parsed, failure } = modelRecords(iteration);
+      if (!rows.length) return replacePanel("model-panel", [noData("\u6ca1\u6709\u6a21\u578b\u5bf9\u8bdd\u8bb0\u5f55\u3002")]);
+      const usage = response.usage || {};
+      const total = response.total_latency_ms ?? failure?.latency_ms;
+      const nodes = [
+        line("\u54cd\u5e94\u65f6\u95f4", response.timestamp || "\u672a\u63d0\u4f9b"),
+        line("\u5c1d\u8bd5\u5e8f\u53f7 / HTTP", (response.attempt ?? "\u672a\u63d0\u4f9b") + " / " + (response.http_status ?? "\u672a\u63d0\u4f9b")),
+        line("\u8f93\u51fa tokens", String(usage.completion_tokens ?? usage.output_tokens ?? "\u672a\u63d0\u4f9b")),
+        line("\u8bf7\u6c42\u8017\u65f6", response.latency_ms == null ? "\u672a\u63d0\u4f9b" : response.latency_ms + " ms"),
+        line("\u542b\u91cd\u8bd5\u603b\u8017\u65f6", total == null ? "\u672a\u63d0\u4f9b" : total + " ms"),
+        line("\u7ed3\u675f\u539f\u56e0", response.finish_reason || (failure ? "\u8bf7\u6c42\u5931\u8d25\uff0c\u89c1\u7cfb\u7edf\u65e5\u5fd7" : "\u672a\u63d0\u4f9b")),
+        line("\u539f\u59cb\u8f93\u51fa", ""), pre(response.reply ?? "\u5c1a\u672a\u6536\u5230\u6587\u672c\u54cd\u5e94"),
+        line("\u63d0\u53d6\u7ed3\u679c", ""), pre(parsed.stage || parsed.actions
+          ? formatFields({ actions: parsed.actions || [] })
+          : "\u5c1a\u672a\u5b8c\u6210\u89e3\u6790"),
+      ];
+      const memoryEvents = (indexes.event.get(iteration) || []).filter(row => row.event?.startsWith("working_memory_"));
+      if (parsed.stage) {
+        nodes.push(line("本轮工作记忆提议", ""), pre(parsed.working == null
+          ? "未提供更新，保留原记忆" : parsed.working === "" ? "[清空记忆]" : parsed.working));
+      }
+      if (memoryEvents.length) nodes.push(fold("工作记忆应用记录", formatFields(memoryEvents)));
+      if (response.raw_response != null) nodes.push(fold("\u5b8c\u6574 API \u539f\u59cb\u54cd\u5e94", response.raw_response));
+      if (Object.keys(usage).length) nodes.push(fold("\u5b8c\u6574 token \u7528\u91cf", formatFields(usage)));
+      replacePanel("model-panel", nodes);
+    }
+
+    function renderValidation(iteration) {
+      const { parsed, validation } = modelRecords(iteration);
+      const report = parsed.parse_report;
+      const errors = report?.errors || parsed.validation_feedback || [];
+      const checks = validation.validation_report || [];
+      const nodes = [
+        line("\u89e3\u6790\u6210\u529f / \u62a5\u544a\u9519\u8bef", (parsed.actions?.length ?? 0) + " / " + errors.length),
+        line("\u6821\u9a8c\u901a\u8fc7 / \u62d2\u7edd", validation.validation_report ? checks.filter(x => x.status === "passed").length + " / " + checks.filter(x => x.status === "rejected").length : "\u672a\u8bb0\u5f55"),
+      ];
+
+      nodes.push(line("\u89e3\u6790\u5668\u62a5\u544a", ""), pre(errors.length ? formatFeedback(errors) : (report ? "\u901a\u8fc7" : "\u65e7\u65e5\u5fd7\u6216\u5c1a\u672a\u89e3\u6790")));
+      if (checks.length) nodes.push(line("\u6821\u9a8c\u5668\u62a5\u544a", ""), pre(formatFields(checks)));
+      if (validation.notices?.length) nodes.push(line("\u6210\u5458\u8c03\u6574\u63d0\u793a", ""), pre(formatFields(
+        validation.notices.map(item => ({ action_index: item.action_index, unit: item.action, reason: item.error }))
+      )));
+      if (validation.normalizations?.length) nodes.push(fold("\u5f52\u4e00\u5316\u8bf4\u660e", formatFields(validation.normalizations)));
+      if (report?.sources?.length) nodes.push(fold("\u539f\u59cb\u52a8\u4f5c\u884c\u4e0e\u63d0\u53d6\u7ed3\u679c\u5bf9\u5e94", formatFields(report.sources)));
+      replacePanel("validation-panel", nodes);
+    }
+
+    const executionEvents = iteration => (indexes.event.get(iteration) || []).filter(row =>
+      row.event?.startsWith("action_") && !["parse", "validation", "system"].includes(row.stage));
+
+    function decisionOutcome(iteration, decision) {
+      const { response, parsed, validation, failure } = modelRecords(iteration);
+      if (failure) return "\u8bf7\u6c42\u5931\u8d25";
+      if (response.reply === "") return "\u6a21\u578b\u8f93\u51fa\u4e3a\u7a7a";
+      if (!parsed.stage && !parsed.actions) return "\u7b49\u5f85\u54cd\u5e94\u6216\u89e3\u6790";
+      if (!parsed.actions?.length) return parsed.parse_report?.errors?.length
+        ? "\u89e3\u6790\u540e\u65e0\u6709\u6548\u52a8\u4f5c" : "\u6a21\u578b\u672c\u8f6e\u672a\u7ed9\u51fa\u52a8\u4f5c";
+      if (validation.validated_actions?.length === 0) return "\u52a8\u4f5c\u5168\u90e8\u88ab\u6821\u9a8c\u62d2\u7edd";
+      if (!decision) return "\u5c1a\u672a\u5e94\u7528";
+      const states = decision.action_states || [];
+      if (states.length && states.every(x => x.unchanged)) return "\u65e0\u65b0\u6307\u4ee4\uff0c\u5df2\u6709\u63a7\u5236\u7ee7\u7eed";
+      if (states.length && states.every(x => x.status === "queued")) return "\u52a8\u4f5c\u7b49\u5f85\u8d44\u6e90";
+      if (!decision.actions?.length) return "\u65e0\u65b0\u63d0\u4ea4\uff0c\u89c1\u5904\u7406\u62a5\u544a";
+      return "\u52a8\u4f5c\u5df2\u5904\u7406\uff0c\u5b9e\u9645\u6267\u884c\u89c1\u540e\u7eed\u62a5\u544a";
+    }
+
+    function renderActions(decision, iteration) {
+      const events = executionEvents(iteration).filter(row => !(
+        ["action_queued", "action_failed"].includes(row.event)
+        && row.iteration === decision?.applied_iteration
+        && decision?.action_states?.some(item =>
+          item.action_id && item.action_id === row.action_id
+          && item.status === row.status)
+      ));
+      if (!decision && !events.length) return replacePanel("action-panel", [noData(decisionOutcome(iteration, decision)), noData("\u5c1a\u672a\u5e94\u7528\u6216\u65e0\u52a8\u4f5c\u5904\u7406\u8bb0\u5f55\u3002")]);
+      const states = decision?.action_states || [];
+      const validation = modelRecords(iteration).validation;
+      const counts = [
+        states.filter(x => !x.unchanged && ["accepted", "active"].includes(x.status)).length,
+        states.filter(x => x.unchanged).length, states.filter(x => x.status === "queued").length,
+        states.filter(x => x.status === "failed").length,
+      ];
+      const nodes = [
+        line("\u7ed3\u679c", decisionOutcome(iteration, decision)),
+        line("\u5e94\u7528\u65f6\u95f4 / \u5e27", (decision?.time || "--:--") + " / " + (decision?.applied_iteration ?? "\u672a\u5e94\u7528")),
+        line("\u54cd\u5e94\u5230\u5e94\u7528", validation.response_to_apply_ms == null ? "\u672a\u63d0\u4f9b" : validation.response_to_apply_ms + " ms"),
+        line("\u65b0\u5904\u7406 / \u7ef4\u6301 / \u7b49\u5f85 / \u5931\u8d25", counts.join(" / ")),
+      ];
+      if (states.length) nodes.push(pre(formatFields(states)));
+      else if (decision?.actions?.length) nodes.push(pre(formatFields(decision.actions)));
+      else nodes.push(noData("\u672c\u8f6e\u6ca1\u6709\u65b0\u63d0\u4ea4\uff1b\u8bf7\u7ed3\u5408\u6821\u9a8c\u62a5\u544a\u548c\u6709\u6548\u6307\u4ee4\u67e5\u770b\u3002"));
+      if (events.length) nodes.push(line("\u6267\u884c\u53ca\u961f\u5217\u540e\u7eed\u62a5\u544a", ""), pre(formatFields(events)));
+      if (decision?.active_actions || decision?.queued_actions) {
+        nodes.push(fold("\u5e94\u7528\u65f6\u7684\u6709\u6548\u6307\u4ee4\u4e0e\u7b49\u5f85\u961f\u5217", formatFields({
+          active: decision.active_actions || [], queued: decision.queued_actions || [],
+        })));
+      }
+      replacePanel("action-panel", nodes);
+    }
+
+    function renderEvents(iteration) {
+      const rows = indexes.event.get(iteration) || [];
+      const transportError = rows.some(row => row.event === "transport_error");
+      const system = rows.filter(row => {
+        if (row.stage === "parse" || row.stage === "validation" || row.event === "model_actions_normalized") return false;
+        if (row.event === "action_failed" && row.action === "Model request" && transportError) return false;
+        return !row.event?.startsWith("action_") || row.stage === "system";
+      });
+      const nodes = system.map(row => {
+        const { response_body, event, level, timestamp, ...metadata } = row;
+        const section = document.createElement("div"); section.className = "event-row";
+        section.append(line(row.event || "event", (row.level || "") + " " + (row.timestamp || "")), pre(formatFields(metadata)));
+        if (response_body) section.append(fold("\u9519\u8bef\u54cd\u5e94\u539f\u6587", response_body));
+        return section;
+      });
+      for (const row of modelRecords(iteration).rows.filter(x => x.stage === "response" && x.error)) {
+        nodes.push(fold("\u65e0\u6548 API \u54cd\u5e94 \u00b7 \u5c1d\u8bd5 " + row.attempt, row.raw_response || row.error));
+      }
+      const failure = modelRecords(iteration).failure;
+      if (failure && !transportError && !system.some(row => row.action === "Model request")) nodes.push(pre(formatFields(failure)));
+      replacePanel("event-panel", nodes.length ? nodes : [noData("\u65e0\u7cfb\u7edf\u5f02\u5e38\u6216\u989d\u5916\u4e8b\u4ef6\u3002")]);
+    }
+
+    function formatRequest(request) {
+      if (!Array.isArray(request)) return formatFields(request);
+      return request.map((message, index) => {
+        const role = String(message?.role || "unknown").toUpperCase();
+        const content = typeof message?.content === "string" ? message.content : formatFields(message?.content);
+        const extra = message && typeof message === "object"
+          ? Object.fromEntries(Object.entries(message).filter(([key]) => key !== "role" && key !== "content"))
+          : {};
+        const extraText = Object.keys(extra).length ? `\n\n[其他字段]\n${formatFields(extra)}` : "";
+        return `===== MESSAGE ${index + 1} · ${role} =====\n${content}${extraText}`;
+      }).join("\n\n");
+    }
+
+    function renderRawInputs(iteration) {
+      const { request, response } = modelRecords(iteration);
+      const body = request.request_body || {};
+      const usage = response.usage || {};
+      const messages = body.messages || request.request;
+      const { messages: omitted, ...parameters } = body;
+      const nodes = [
+        line("\u6a21\u578b", body.model || state.metadata.model || "\u672a\u63d0\u4f9b"),
+        line("\u8f93\u5165 tokens", String(usage.prompt_tokens ?? usage.input_tokens ?? "\u672a\u63d0\u4f9b")),
+        line("\u8bf7\u6c42\u65f6\u95f4", request.timestamp || "\u672a\u63d0\u4f9b"),
+        line("\u51b3\u7b56 ID", request.decision_id || "iteration " + iteration),
+      ];
+      if (Object.keys(parameters).length) nodes.push(line("\u8bf7\u6c42\u53c2\u6570", ""), pre(formatFields(parameters)));
+      nodes.push(messages ? fold("\u5b9e\u9645\u53d1\u9001\u7684 messages", formatRequest(messages)) : noData("\u6ca1\u6709\u8bf7\u6c42\u8bb0\u5f55\u3002"));
+      replacePanel("raw-model-panel", nodes);
+    }
+
+    $("tick-slider").addEventListener("input", renderCurrent);
+    $("previous").addEventListener("click", () => { $("tick-slider").stepDown(); renderCurrent(); });
+    $("next").addEventListener("click", () => { $("tick-slider").stepUp(); renderCurrent(); });
+    $("directory-input").addEventListener("change", async event => {
+      try { await loadFiles([...event.target.files]); }
+      catch (error) { $("status").textContent = `加载失败：${error.message}`; }
+    });
+    $("directory-picker").addEventListener("click", async () => {
+      if (!window.showDirectoryPicker) { $("directory-input").click(); return; }
+      try {
+        const directory = await window.showDirectoryPicker({ mode: "read" });
+        const files = [];
+        for (const name of wantedFiles) {
+          try { files.push(await (await directory.getFileHandle(name)).getFile()); }
+          catch (_) { /* Optional log file is absent. */ }
+        }
+
+        async function readContext(handle, prefix) {
+          for await (const entry of handle.values()) {
+            const path = `${prefix}/${entry.name}`;
+            if (entry.kind === "directory") await readContext(entry, path);
+            else if (entry.name.endsWith(".md")) {
+              const file = await entry.getFile();
+              files.push({ name: file.name, logPath: path, text: () => file.text() });
+            }
+          }
+        }
+        try { await readContext(await directory.getDirectoryHandle("context"), "context"); }
+        catch (error) { if (error.name !== "NotFoundError") throw error; }
+        await loadFiles(files);
+      } catch (error) {
+        if (error.name !== "AbortError") $("status").textContent = `加载失败：${error.message}`;
+      }
+    });
+  </script>
+</body>
+</html>

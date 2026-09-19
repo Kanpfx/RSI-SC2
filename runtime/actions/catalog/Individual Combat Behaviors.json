@@ -1,0 +1,1751 @@
+{
+  "schema_version": "1.0",
+  "chapter": {
+    "id": "behavior.individual_combat",
+    "title": "Individual Combat Behaviors",
+    "documentation_url": "https://aressc2.github.io/ares-sc2/api_reference/behaviors/combat_behaviors.html"
+  },
+  "source": {
+    "ares_version": "3.9.6",
+    "git_commit": "0ac34b87f9471979f8de19a77020eed2d8693b26"
+  },
+  "entries": [
+    {
+      "id": "combat.bc.move_safely",
+      "name": "MoveSafely",
+      "description": "Path a Battlecruiser safely to a target.",
+      "tags": [
+        "combat",
+        "movement"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "BATTLECRUISER"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.path_unit_to_target.PathUnitToTarget",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/path_unit_to_target.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "The Battlecruiser to move."
+        },
+        {
+          "name": "target",
+          "type": "point_ref",
+          "input": "model",
+          "required": true,
+          "description": "Safe destination for this Battlecruiser."
+        },
+        {
+          "name": "grid",
+          "type": "grid_ref",
+          "input": "runtime",
+          "required": true,
+          "value": "air",
+          "description": "Fixed safe air pathing grid."
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.bc.tactical_jump",
+      "name": "TacticalJump",
+      "description": "Tactical Jump a Battlecruiser to a target.",
+      "tags": [
+        "combat",
+        "ability",
+        "movement"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "BATTLECRUISER"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.use_ability.UseAbility",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/use_ability.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "The Battlecruiser that will jump."
+        },
+        {
+          "name": "target",
+          "type": "point_ref",
+          "input": "model",
+          "required": true,
+          "description": "Destination for Tactical Jump."
+        },
+        {
+          "name": "ability",
+          "type": "ability_id",
+          "input": "runtime",
+          "required": true,
+          "value": "EFFECT_TACTICALJUMP",
+          "description": "Fixed Tactical Jump ability."
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.individual.a_move",
+      "name": "AMove",
+      "description": "Attack-move a unit toward a target.",
+      "tags": [
+        "combat",
+        "movement"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "ALL"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.a_move.AMove",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/a_move.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "The unit that will attack-move."
+        },
+        {
+          "name": "target",
+          "type": "point_or_unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "Attack-move target."
+        },
+        {
+          "name": "success_at_distance",
+          "type": "number",
+          "input": "model",
+          "required": false,
+          "description": "Distance at which we don't need to issue a new move command because it's near the target.",
+          "default": 7.0
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.individual.attack_target",
+      "name": "AttackTarget",
+      "description": "Attack a specified enemy unit or structure.",
+      "tags": [
+        "combat",
+        "attack"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "ALL"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.attack_target.AttackTarget",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/attack_target.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "Attacking unit."
+        },
+        {
+          "name": "target",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "Target unit."
+        },
+        {
+          "name": "extra_range",
+          "type": "number",
+          "input": "model",
+          "required": false,
+          "description": "Accepted for API compatibility; currently ignored by the implementation.",
+          "default": 0.0
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.individual.auto_use_a_o_e_ability",
+      "name": "AutoUseAOEAbility",
+      "description": "Automatically cast an available supported AoE.",
+      "tags": [
+        "combat",
+        "ability"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "ALL"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.auto_use_aoe_ability.AutoUseAOEAbility",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/auto_use_aoe_ability.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "AoE caster."
+        },
+        {
+          "name": "targets",
+          "type": "unit_refs",
+          "input": "model",
+          "required": true,
+          "description": "AoE targets."
+        },
+        {
+          "name": "bonus_tags",
+          "type": "integer_list",
+          "input": "model",
+          "required": false,
+          "description": "Enemy unit tags to prioritize when choosing the spell position. Defaults to an empty set.",
+          "default": {
+            "expression": "field(default_factory=set)"
+          }
+        },
+        {
+          "name": "recalculate",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "If unit is already using ability, should we recalculate this behavior?",
+          "default": false
+        },
+        {
+          "name": "stack_same_spell",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Stack spell in same position? Default is False.",
+          "default": false
+        }
+      ],
+      "llm_exposure": "disabled"
+    },
+    {
+      "id": "combat.individual.combat_maneuver",
+      "name": "CombatManeuver",
+      "description": "Try combat behaviors in order until one acts.",
+      "tags": [
+        "combat"
+      ],
+      "availability": {
+        "param": null,
+        "types": [
+          "ALL"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.combat_maneuver.CombatManeuver",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/combat_maneuver.py"
+      },
+      "params": [
+        {
+          "name": "micros",
+          "type": "json_array",
+          "input": "derived",
+          "required": false,
+          "description": "A list of behaviors that should be executed. Defaults to an empty list.",
+          "default": {
+            "expression": "field(default_factory=list)"
+          }
+        }
+      ],
+      "llm_exposure": "disabled"
+    },
+    {
+      "id": "combat.individual.drop_cargo",
+      "name": "DropCargo",
+      "description": "Unload cargo from a transport.",
+      "tags": [
+        "combat",
+        "transport"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "MEDIVAC",
+          "OVERLORDTRANSPORT",
+          "WARPPRISM",
+          "NYDUSNETWORK",
+          "NYDUSCANAL"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.drop_cargo.DropCargo",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/drop_cargo.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "The container unit."
+        },
+        {
+          "name": "target",
+          "type": "point_ref",
+          "input": "model",
+          "required": true,
+          "description": "Ignored; unloads at the container's current position.",
+          "prompt_detail": true
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.individual.ghost_snipe",
+      "name": "GhostSnipe",
+      "description": "Snipe a nearby valid enemy.",
+      "tags": [
+        "combat",
+        "ability"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "GHOST"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.ghost_snipe.GhostSnipe",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/ghost_snipe.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "Ghost casting Snipe."
+        },
+        {
+          "name": "close_enemy",
+          "type": "unit_refs",
+          "input": "model",
+          "required": true,
+          "description": "Nearby Snipe targets."
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.individual.keep_unit_safe",
+      "name": "KeepUnitSafe",
+      "description": "Move a unit away from danger using an influence grid.",
+      "tags": [
+        "combat",
+        "defense"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "ALL"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.keep_unit_safe.KeepUnitSafe",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/keep_unit_safe.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "Unit to protect."
+        },
+        {
+          "name": "grid",
+          "type": "grid_ref",
+          "input": "model",
+          "required": true,
+          "description": "Safety influence grid."
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.individual.medivac_heal",
+      "name": "MedivacHeal",
+      "description": "Use a Medivac to cast Heal on nearby allied biological units.",
+      "tags": [
+        "combat",
+        "ability"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "MEDIVAC"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.medivac_heal.MedivacHeal",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/medivac_heal.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "The Medivac that will heal allied biological units."
+        },
+        {
+          "name": "close_allied",
+          "type": "unit_refs",
+          "input": "model",
+          "required": true,
+          "description": "Nearby allies to heal."
+        },
+        {
+          "name": "grid",
+          "type": "grid_ref",
+          "input": "model",
+          "required": true,
+          "description": "Healing safety grid."
+        },
+        {
+          "name": "keep_safe",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Attempt to stay safe, this may result in not always healing units (Default is True)",
+          "default": true
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.individual.move_to_safe_target",
+      "name": "MoveToSafeTarget",
+      "description": "Move to a safe point near the target.",
+      "tags": [
+        "combat",
+        "movement"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "ALL"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.move_to_safe_target.MoveToSafeTarget",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/move_to_safe_target.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "The unit to path."
+        },
+        {
+          "name": "grid",
+          "type": "grid_ref",
+          "input": "model",
+          "required": true,
+          "description": "Safety pathing grid."
+        },
+        {
+          "name": "target",
+          "type": "point_ref",
+          "input": "model",
+          "required": true,
+          "description": "Target destination."
+        },
+        {
+          "name": "use_pathing",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Whether to use pathing or just move directly towards the target. Defaults to True.",
+          "default": true
+        },
+        {
+          "name": "success_at_distance",
+          "type": "number",
+          "input": "model",
+          "required": false,
+          "description": "If the unit is within this distance of the target, do not issue another pathing command. Defaults to 1.0.",
+          "default": 1.0
+        },
+        {
+          "name": "sensitivity",
+          "type": "integer",
+          "input": "model",
+          "required": false,
+          "description": "Path precision. Defaults to 5.",
+          "default": 5
+        },
+        {
+          "name": "smoothing",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Whether to smooth out the path. Defaults to False.",
+          "default": false
+        },
+        {
+          "name": "sense_danger",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Whether to check for dangers. If none are present, the pathing query is skipped. Defaults to True.",
+          "default": true
+        },
+        {
+          "name": "danger_distance",
+          "type": "number",
+          "input": "model",
+          "required": false,
+          "description": "Accepted for API compatibility; currently not forwarded to the pathing behavior.",
+          "default": 20.0
+        },
+        {
+          "name": "danger_threshold",
+          "type": "number",
+          "input": "model",
+          "required": false,
+          "description": "Accepted for API compatibility; currently not forwarded to the pathing behavior.",
+          "default": 5.0
+        },
+        {
+          "name": "radius",
+          "type": "number",
+          "input": "model",
+          "required": false,
+          "description": "How far to look for a safe spot around the target. Defaults to 12.0.",
+          "default": 12.0
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.individual.nydus_path_unit_to_target",
+      "name": "NydusPathUnitToTarget",
+      "description": "Path to a target, using Nydus when suitable.",
+      "tags": [
+        "combat",
+        "movement",
+        "transport"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "ALL"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.nydus_path_unit_to_target.NydusPathUnitToTarget",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/nydus_path_unit_to_target.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "The unit to path."
+        },
+        {
+          "name": "grid",
+          "type": "grid_ref",
+          "input": "model",
+          "required": true,
+          "description": "2D grid to path on."
+        },
+        {
+          "name": "target",
+          "type": "point_ref",
+          "input": "model",
+          "required": true,
+          "description": "Target destination."
+        },
+        {
+          "name": "success_at_distance",
+          "type": "number",
+          "input": "model",
+          "required": false,
+          "description": "Stop pathing when the unit is closer than this distance to the target. Defaults to 0.0.",
+          "default": 0.0
+        },
+        {
+          "name": "large",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Accepted for API compatibility; currently unused by the implementation.",
+          "default": [
+            false
+          ]
+        },
+        {
+          "name": "sensitivity",
+          "type": "integer",
+          "input": "model",
+          "required": false,
+          "description": "Path precision. Defaults to 5.",
+          "default": 5
+        },
+        {
+          "name": "smoothing",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Whether to smooth out the path. Defaults to False.",
+          "default": false
+        },
+        {
+          "name": "exit_nydus_max_influence",
+          "type": "number",
+          "input": "model",
+          "required": false,
+          "description": "Maximum enemy influence of nydus exit If above this value unit will not path through nydus. Defaults to 10.0.",
+          "default": 10.0
+        }
+      ],
+      "llm_exposure": "disabled"
+    },
+    {
+      "id": "combat.individual.path_unit_to_target",
+      "name": "PathUnitToTarget",
+      "description": "Path a unit toward a target.",
+      "tags": [
+        "combat",
+        "movement"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "ALL"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.path_unit_to_target.PathUnitToTarget",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/path_unit_to_target.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "The unit to path."
+        },
+        {
+          "name": "grid",
+          "type": "grid_ref",
+          "input": "model",
+          "required": true,
+          "description": "2D grid to path on."
+        },
+        {
+          "name": "target",
+          "type": "point_ref",
+          "input": "model",
+          "required": true,
+          "description": "Target destination."
+        },
+        {
+          "name": "success_at_distance",
+          "type": "number",
+          "input": "model",
+          "required": false,
+          "description": "If the unit has gotten this close, consider path behavior complete. Defaults to 0.0.",
+          "default": 0.0
+        },
+        {
+          "name": "sensitivity",
+          "type": "integer",
+          "input": "model",
+          "required": false,
+          "description": "Path precision. Defaults to 5.",
+          "default": 5
+        },
+        {
+          "name": "smoothing",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Whether to smooth out the path. Defaults to False.",
+          "default": false
+        },
+        {
+          "name": "sense_danger",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Whether to check for dangers. If none are present, the pathing query is skipped. Defaults to True.",
+          "default": true
+        },
+        {
+          "name": "danger_distance",
+          "type": "number",
+          "input": "model",
+          "required": false,
+          "description": "If `sense_danger` is True, how far to check for dangers. Defaults to 20.0.",
+          "default": 20.0
+        },
+        {
+          "name": "danger_threshold",
+          "type": "number",
+          "input": "model",
+          "required": false,
+          "description": "Influence at which a danger is respected. Defaults to 5.0.",
+          "default": 5.0
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.individual.pick_up_and_drop_cargo",
+      "name": "PickUpAndDropCargo",
+      "description": "Load units, transport them, and optionally unload.",
+      "tags": [
+        "combat",
+        "transport"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "MEDIVAC",
+          "OVERLORDTRANSPORT",
+          "WARPPRISM"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.pick_up_and_drop_cargo.PickUpAndDropCargo",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/pick_up_and_drop_cargo.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "The container unit."
+        },
+        {
+          "name": "grid",
+          "type": "grid_ref",
+          "input": "model",
+          "required": true,
+          "description": "Pathing grid for the container unit."
+        },
+        {
+          "name": "pickup_targets",
+          "type": "unit_refs",
+          "input": "model",
+          "required": true,
+          "description": "Units we want to load into the container."
+        },
+        {
+          "name": "target",
+          "type": "point_ref",
+          "input": "model",
+          "required": true,
+          "description": "Cargo drop destination."
+        },
+        {
+          "name": "cargo_switch_to_role",
+          "type": "unit_role",
+          "input": "model",
+          "required": false,
+          "options": [
+            "ADEPT_SHADES",
+            "ATTACKING",
+            "ATTACKING_MAIN_SQUAD",
+            "ATTACKING_TRANSPORT_SQUAD",
+            "BANE_FODDER",
+            "BASE_BLOCKER",
+            "BASE_DEFENDER",
+            "BUILDING",
+            "BUILD_RUNNER_SCOUT",
+            "CONTROL_GROUP_EIGHT",
+            "CONTROL_GROUP_FIVE",
+            "CONTROL_GROUP_FOUR",
+            "CONTROL_GROUP_NINE",
+            "CONTROL_GROUP_ONE",
+            "CONTROL_GROUP_SEVEN",
+            "CONTROL_GROUP_SIX",
+            "CONTROL_GROUP_THREE",
+            "CONTROL_GROUP_TWO",
+            "DEFENDING",
+            "DROPPERLORD_CREEP",
+            "DROPPERLORD_OFFENSIVE",
+            "DROP_SHIP",
+            "DROP_UNITS_ATTACKING",
+            "DROP_UNITS_TO_LOAD",
+            "FLANK_GROUP_ONE",
+            "FLANK_GROUP_THREE",
+            "FLANK_GROUP_TWO",
+            "GAS_STEAL_PREVENTER",
+            "GATE_KEEPER",
+            "GATHERING",
+            "HARASSING",
+            "HARASSING_ADEPT",
+            "HARASSING_BANSHEE",
+            "HARASSING_LINGS",
+            "HARASSING_MUTAS",
+            "HARASSING_ORACLE",
+            "HARASSING_PHOENIX",
+            "HARASSING_REAPER",
+            "HEALING",
+            "HIGH_GROUND_SPOTTER",
+            "IDLE",
+            "MAP_CONTROL",
+            "MORPHING",
+            "NYDUS_SPOTTER",
+            "OFFENSIVE_REPAIR",
+            "OVERLORD_CREEP_SPOTTER",
+            "OVERLORD_HUNTER",
+            "PERSISTENT_BUILDER",
+            "PROXY_WORKER",
+            "QUEEN_CREEP",
+            "QUEEN_CREEP_DROPPERLORD",
+            "QUEEN_DEFENCE",
+            "QUEEN_INJECT",
+            "QUEEN_NYDUS",
+            "QUEEN_OFFENSIVE",
+            "QUEEN_OFFENSIVE_DROPPERLORD",
+            "REPAIRING",
+            "SCOUTING",
+            "SURROUNDING",
+            "UNDER_REPAIR"
+          ],
+          "description": "Select cargo by unit role.",
+          "default": null
+        },
+        {
+          "name": "should_drop_units",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Whether to drop units once they are loaded. Defaults to True.",
+          "default": true
+        },
+        {
+          "name": "keep_dropship_safe",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "If true, will keep dropship safe if nothing else to do. Defaults to True.",
+          "default": true
+        },
+        {
+          "name": "success_at_distance",
+          "type": "number",
+          "input": "model",
+          "required": false,
+          "description": "Distance at which pathing to target stops being checked. Defaults to 2.0.",
+          "default": 2.0
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.individual.pick_up_cargo",
+      "name": "PickUpCargo",
+      "description": "Approach and load the nearest selected unit.",
+      "tags": [
+        "combat",
+        "transport"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "MEDIVAC",
+          "OVERLORDTRANSPORT",
+          "WARPPRISM"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.pick_up_cargo.PickUpCargo",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/pick_up_cargo.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "The container unit."
+        },
+        {
+          "name": "grid",
+          "type": "grid_ref",
+          "input": "model",
+          "required": true,
+          "description": "Pathing grid for the container unit."
+        },
+        {
+          "name": "pickup_targets",
+          "type": "unit_refs",
+          "input": "model",
+          "required": true,
+          "description": "Units we want to load into the container."
+        },
+        {
+          "name": "cargo_switch_to_role",
+          "type": "unit_role",
+          "input": "model",
+          "required": false,
+          "options": [
+            "ADEPT_SHADES",
+            "ATTACKING",
+            "ATTACKING_MAIN_SQUAD",
+            "ATTACKING_TRANSPORT_SQUAD",
+            "BANE_FODDER",
+            "BASE_BLOCKER",
+            "BASE_DEFENDER",
+            "BUILDING",
+            "BUILD_RUNNER_SCOUT",
+            "CONTROL_GROUP_EIGHT",
+            "CONTROL_GROUP_FIVE",
+            "CONTROL_GROUP_FOUR",
+            "CONTROL_GROUP_NINE",
+            "CONTROL_GROUP_ONE",
+            "CONTROL_GROUP_SEVEN",
+            "CONTROL_GROUP_SIX",
+            "CONTROL_GROUP_THREE",
+            "CONTROL_GROUP_TWO",
+            "DEFENDING",
+            "DROPPERLORD_CREEP",
+            "DROPPERLORD_OFFENSIVE",
+            "DROP_SHIP",
+            "DROP_UNITS_ATTACKING",
+            "DROP_UNITS_TO_LOAD",
+            "FLANK_GROUP_ONE",
+            "FLANK_GROUP_THREE",
+            "FLANK_GROUP_TWO",
+            "GAS_STEAL_PREVENTER",
+            "GATE_KEEPER",
+            "GATHERING",
+            "HARASSING",
+            "HARASSING_ADEPT",
+            "HARASSING_BANSHEE",
+            "HARASSING_LINGS",
+            "HARASSING_MUTAS",
+            "HARASSING_ORACLE",
+            "HARASSING_PHOENIX",
+            "HARASSING_REAPER",
+            "HEALING",
+            "HIGH_GROUND_SPOTTER",
+            "IDLE",
+            "MAP_CONTROL",
+            "MORPHING",
+            "NYDUS_SPOTTER",
+            "OFFENSIVE_REPAIR",
+            "OVERLORD_CREEP_SPOTTER",
+            "OVERLORD_HUNTER",
+            "PERSISTENT_BUILDER",
+            "PROXY_WORKER",
+            "QUEEN_CREEP",
+            "QUEEN_CREEP_DROPPERLORD",
+            "QUEEN_DEFENCE",
+            "QUEEN_INJECT",
+            "QUEEN_NYDUS",
+            "QUEEN_OFFENSIVE",
+            "QUEEN_OFFENSIVE_DROPPERLORD",
+            "REPAIRING",
+            "SCOUTING",
+            "SURROUNDING",
+            "UNDER_REPAIR"
+          ],
+          "description": "Select cargo by unit role.",
+          "default": null
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.individual.place_predictive_ao_e",
+      "name": "PlacePredictiveAoE",
+      "description": "Predict enemy movement and place a delayed AoE.",
+      "tags": [
+        "combat",
+        "ability"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "ALL"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.place_predictive_aoe.PlacePredictiveAoE",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/place_predictive_aoe.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "The unit to fire the AoE."
+        },
+        {
+          "name": "path",
+          "type": "point_ref",
+          "input": "model",
+          "required": true,
+          "description": "Path must end at the predicted target position.",
+          "prompt_detail": true
+        },
+        {
+          "name": "enemy_center_unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "Enemy to predict."
+        },
+        {
+          "name": "aoe_ability",
+          "type": "ability_id",
+          "input": "model",
+          "required": true,
+          "description": "AoE ability to use."
+        },
+        {
+          "name": "ability_delay",
+          "type": "integer",
+          "input": "model",
+          "required": true,
+          "description": "AoE delay in game frames.",
+          "prompt_detail": true
+        },
+        {
+          "name": "reaper_grenade_range",
+          "type": "number",
+          "input": "model",
+          "required": false,
+          "description": "Reaper grenade range.",
+          "default": 5.0
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.individual.queen_spread_creep",
+      "name": "QueenSpreadCreep",
+      "description": "Place a Creep Tumor near a creep edge.",
+      "tags": [
+        "resource",
+        "ability"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "QUEEN"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.queen_spread_creep.QueenSpreadCreep",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/queen_spread_creep.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "The Queen that spreads creep."
+        },
+        {
+          "name": "cancel_if_close_enemy",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "While the Queen is spreading creep, move her to safety if nearby enemy influence is dangerous.",
+          "default": true
+        },
+        {
+          "name": "pre_move_queen_to_tumor",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Move the Queen toward a planned tumor placement even when she lacks energy to place it.",
+          "default": true
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.individual.raven_auto_turret",
+      "name": "RavenAutoTurret",
+      "description": "Deploy an Auto-Turret near enemies.",
+      "tags": [
+        "combat",
+        "ability"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "RAVEN"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.raven_auto_turret.RavenAutoTurret",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/raven_auto_turret.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "Raven placing the Auto Turret."
+        },
+        {
+          "name": "all_close_enemy",
+          "type": "unit_refs",
+          "input": "model",
+          "required": true,
+          "description": "Nearby enemies for turret placement."
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.individual.reaper_grenade",
+      "name": "ReaperGrenade",
+      "description": "Throw a grenade at nearby enemies.",
+      "tags": [
+        "combat",
+        "ability"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "REAPER"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.reaper_grenade.ReaperGrenade",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/reaper_grenade.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "The Reaper that throws the grenade."
+        },
+        {
+          "name": "enemy_units",
+          "type": "unit_refs",
+          "input": "model",
+          "required": true,
+          "description": "Nearby ground enemies."
+        },
+        {
+          "name": "retreat_target",
+          "type": "point_ref",
+          "input": "model",
+          "required": true,
+          "description": "Compatibility-only; currently ignored.",
+          "prompt_detail": true
+        },
+        {
+          "name": "grid",
+          "type": "grid_ref",
+          "input": "model",
+          "required": true,
+          "description": "Grenade pathing grid."
+        },
+        {
+          "name": "place_predictive",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Whether to predicatively place the grenade.",
+          "default": true
+        },
+        {
+          "name": "reaper_grenade_range",
+          "type": "number",
+          "input": "model",
+          "required": false,
+          "description": "The range at which to use the grenade.",
+          "default": 5.0
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.individual.shoot_and_move_to_target",
+      "name": "ShootAndMoveToTarget",
+      "description": "Move toward a destination while attacking enemies in range.",
+      "tags": [
+        "combat",
+        "attack",
+        "movement"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "ALL"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.shoot_and_move_to_target.ShootAndMoveToTarget",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/shoot_and_move_to_target.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "The unit to control."
+        },
+        {
+          "name": "enemy_units",
+          "type": "unit_refs",
+          "input": "model",
+          "required": true,
+          "description": "Enemies to attack while moving."
+        },
+        {
+          "name": "target",
+          "type": "point_ref",
+          "input": "model",
+          "required": true,
+          "description": "Movement destination."
+        },
+        {
+          "name": "grid",
+          "type": "grid_ref",
+          "input": "model",
+          "required": true,
+          "description": "Pathing grid."
+        },
+        {
+          "name": "dist_to_target",
+          "type": "number",
+          "input": "model",
+          "required": false,
+          "description": "Distance away from target where pathfinding stops. Default value of 4.0 means that once within 4 tiles of the target we stop pathfinding.",
+          "default": 4.0
+        },
+        {
+          "name": "attack_destructables",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Whether we should shoot destructibles. Default value is `True`.",
+          "default": true
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.individual.shoot_target_in_range",
+      "name": "ShootTargetInRange",
+      "description": "Attack a suitable target in range.",
+      "tags": [
+        "combat",
+        "attack"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "ALL"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.shoot_target_in_range.ShootTargetInRange",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/shoot_target_in_range.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "Attacking unit."
+        },
+        {
+          "name": "targets",
+          "type": "unit_refs",
+          "input": "model",
+          "required": true,
+          "description": "Candidate targets."
+        },
+        {
+          "name": "extra_range",
+          "type": "number",
+          "input": "model",
+          "required": false,
+          "description": "Look outside the unit's weapon range. This might be useful for hunting down low HP units.",
+          "default": 0.0
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.individual.siege_tank_decision",
+      "name": "SiegeTankDecision",
+      "description": "Siege or unsiege based on nearby threats.",
+      "tags": [
+        "combat",
+        "ability"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "SIEGETANK",
+          "SIEGETANKSIEGED"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.siege_tank_decision.SiegeTankDecision",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/siege_tank_decision.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "The siege tank unit."
+        },
+        {
+          "name": "close_enemy",
+          "type": "unit_refs",
+          "input": "model",
+          "required": true,
+          "description": "Nearby enemies."
+        },
+        {
+          "name": "target",
+          "type": "point_ref",
+          "input": "model",
+          "required": true,
+          "description": "Tank destination."
+        },
+        {
+          "name": "stay_sieged_near_target",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "This is useful for tanks in defensive position. If on offensive, might not be needed Default is False.",
+          "default": false
+        },
+        {
+          "name": "remain_sieged",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Sometimes we might just want to leave the tank sieged up Default is False.",
+          "default": false
+        },
+        {
+          "name": "force_unsiege",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "We might want to not ever siege Default is False.",
+          "default": false
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.individual.stutter_unit_back",
+      "name": "StutterUnitBack",
+      "description": "Attack when ready; otherwise retreat.",
+      "tags": [
+        "combat",
+        "movement"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "ALL"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.stutter_unit_back.StutterUnitBack",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/stutter_unit_back.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "Attacking unit."
+        },
+        {
+          "name": "target",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "Enemy to kite from."
+        },
+        {
+          "name": "kite_via_pathing",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Use the influence-grid safety behavior to retreat. False is currently unimplemented and produces no retreat action.",
+          "default": true
+        },
+        {
+          "name": "grid",
+          "type": "grid_ref",
+          "input": "model",
+          "required": false,
+          "description": "Pass in if using `kite_via_pathing`.",
+          "default": null
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.individual.stutter_unit_forward",
+      "name": "StutterUnitForward",
+      "description": "Attack when ready; otherwise advance.",
+      "tags": [
+        "combat",
+        "movement"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "ALL"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.stutter_unit_forward.StutterUnitForward",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/stutter_unit_forward.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "Attacking unit."
+        },
+        {
+          "name": "target",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "Enemy to advance toward."
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.individual.tumor_spread_creep",
+      "name": "TumorSpreadCreep",
+      "description": "Spread creep toward a nearby edge.",
+      "tags": [
+        "resource",
+        "ability"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "CREEPTUMOR",
+          "CREEPTUMORBURROWED",
+          "CREEPTUMORQUEEN"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.tumor_spread_creep.TumorSpreadCreep",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/tumor_spread_creep.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "Creep Tumor to spread from."
+        },
+        {
+          "name": "target",
+          "type": "point_ref",
+          "input": "model",
+          "required": true,
+          "description": "Ignored; position is chosen automatically.",
+          "prompt_detail": true
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.individual.use_a_o_e_ability",
+      "name": "UseAOEAbility",
+      "description": "Use an area-of-effect ability against suitable targets.",
+      "tags": [
+        "combat",
+        "ability"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "ALL"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.use_aoe_ability.UseAOEAbility",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/use_aoe_ability.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "AoE caster."
+        },
+        {
+          "name": "ability_id",
+          "type": "ability_id",
+          "input": "model",
+          "required": true,
+          "options": [
+            "BLINDINGCLOUD_BLINDINGCLOUD",
+            "EFFECT_ANTIARMORMISSILE",
+            "EFFECT_CORROSIVEBILE",
+            "EMP_EMP",
+            "FUNGALGROWTH_FUNGALGROWTH",
+            "KD8CHARGE_KD8CHARGE",
+            "PARASITICBOMB_PARASITICBOMB",
+            "PSISTORM_PSISTORM",
+            "TACNUKESTRIKE_NUKECALLDOWN"
+          ],
+          "description": "AoE ability."
+        },
+        {
+          "name": "targets",
+          "type": "unit_refs",
+          "input": "model",
+          "required": true,
+          "description": "AoE targets."
+        },
+        {
+          "name": "min_targets",
+          "type": "integer",
+          "input": "model",
+          "required": true,
+          "description": "Minimum targets to hit."
+        },
+        {
+          "name": "avoid_own_flying",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Avoid own flying with this spell? Default is False.",
+          "default": false
+        },
+        {
+          "name": "avoid_own_ground",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Avoid own ground with this spell? Default is False.",
+          "default": false
+        },
+        {
+          "name": "bonus_tags",
+          "type": "integer_list",
+          "input": "model",
+          "required": false,
+          "description": "Enemy unit tags to prioritize when choosing the spell position. Defaults to an empty set.",
+          "default": {
+            "expression": "field(default_factory=set)"
+          }
+        },
+        {
+          "name": "recalculate",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "If unit is already using ability, should we recalculate this behavior?",
+          "default": false
+        },
+        {
+          "name": "stack_same_spell",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Stack spell in same position? Default is False.",
+          "default": false
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.individual.use_ability",
+      "name": "UseAbility",
+      "description": "Use an ability, optionally on a target.",
+      "tags": [
+        "combat",
+        "ability"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "ALL"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.use_ability.UseAbility",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/use_ability.py"
+      },
+      "params": [
+        {
+          "name": "ability",
+          "type": "ability_id",
+          "input": "model",
+          "required": true,
+          "description": "The ability we want to use."
+        },
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "The unit to use the ability."
+        },
+        {
+          "name": "target",
+          "type": "point_or_unit_ref",
+          "input": "model",
+          "required": false,
+          "description": "Target for this ability.",
+          "default": null
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.individual.use_transfuse",
+      "name": "UseTransfuse",
+      "description": "Use a Queen to cast Transfusion on a valid allied biological target.",
+      "tags": [
+        "combat",
+        "ability"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "QUEEN"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.use_transfuse.UseTransfuse",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/use_transfuse.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "Transfusing Queen."
+        },
+        {
+          "name": "targets",
+          "type": "unit_refs",
+          "input": "model",
+          "required": true,
+          "description": "Transfuse candidates."
+        },
+        {
+          "name": "extra_range",
+          "type": "number",
+          "input": "model",
+          "required": false,
+          "description": "Look a bit further out of transfuse range? Default is 0.0",
+          "default": 0.0
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.individual.worker_kite_back",
+      "name": "WorkerKiteBack",
+      "description": "Attack when ready; otherwise mineral-walk away.",
+      "tags": [
+        "combat",
+        "resource"
+      ],
+      "availability": {
+        "param": "unit",
+        "types": [
+          "SCV",
+          "DRONE",
+          "PROBE"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.combat.individual.worker_kite_back.WorkerKiteBack",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/individual/worker_kite_back.py"
+      },
+      "params": [
+        {
+          "name": "unit",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "Worker to control."
+        },
+        {
+          "name": "target",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "Enemy to kite from."
+        },
+        {
+          "name": "should_attack",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Whether to attack `target`. If False, will always try to retreat",
+          "default": true
+        }
+      ],
+      "llm_exposure": "eligible"
+    }
+  ]
+}

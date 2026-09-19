@@ -1,0 +1,44 @@
+# 运行时依赖（Python 3.11–3.12）。
+#
+# ares-sc2 不在本文件里：它以源码目录 ares-sc2/ 的形式存在于项目根目录，
+# 由 run.py 在启动时加入 sys.path（ares 的 sc2_helper 不在它的 wheel 包里，
+# 因此 ares-sc2 本身不能用 pip 安装）。
+#
+# 版本来自原 poetry.lock（lock-version 2.1），并剔除了 jupyter/notebook 那一串：
+# cython-extensions-sc2 把 jupyterlab 误写成运行时依赖，poetry 会把整条 jupyter
+# 依赖链（约 90 个包）一起装上，运行期完全用不到。
+
+# ares-sc2 直接依赖的两个 git 依赖，按 lock 中解析到的 commit 固定
+burnysc2 @ git+https://github.com/august-k/python-sc2@7ec25cf80104391a91bd755bf637c93ab746686f
+map-analyzer @ git+https://github.com/spudde123/SC2MapAnalysis@dada4724b96cb7586d4c00dfff1ace7b13bb4d12
+
+aiohappyeyeballs==2.6.2
+aiohttp==3.14.1
+aiosignal==1.4.0
+attrs==26.1.0
+colorama==0.4.6
+frozenlist==1.8.0
+idna==3.10
+joblib==1.5.3
+loguru==0.7.3
+mpyq==0.2.5
+multidict==6.7.1
+narwhals==2.22.1
+numpy==2.4.6
+portpicker==1.6.0
+propcache==0.5.2
+protobuf==7.35.0
+psutil==7.2.2
+pys2clientprotocol==1.0.2
+pyyaml==6.0.3
+scikit-learn==1.9.0
+scipy==1.17.1
+threadpoolctl==3.6.0
+tqdm==4.68.1
+typing-extensions==4.15.0
+win32-setctime==1.2.0
+yarl==1.24.2
+
+# cython-extensions-sc2==0.15.0 不写在这里：它的依赖声明里挂着 jupyterlab，
+# 一起装会把 jupyter 那约 90 个包拖进来。安装方式见 README：
+#   pip install --no-deps cython-extensions-sc2==0.15.0

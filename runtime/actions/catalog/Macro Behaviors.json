@@ -1,0 +1,1583 @@
+{
+  "schema_version": "1.0",
+  "chapter": {
+    "id": "behavior.macro",
+    "title": "Macro Behaviors",
+    "documentation_url": "https://aressc2.github.io/ares-sc2/api_reference/behaviors/macro_behaviors.html"
+  },
+  "source": {
+    "ares_version": "3.9.6",
+    "git_commit": "0ac34b87f9471979f8de19a77020eed2d8693b26"
+  },
+  "entries": [
+    {
+      "id": "macro.addon_swap",
+      "name": "AddonSwap",
+      "description": "Attach the requested add-on by swapping structures.",
+      "tags": [
+        "technology",
+        "production"
+      ],
+      "availability": {
+        "param": "structure_needing_addon",
+        "types": [
+          "BARRACKS",
+          "FACTORY",
+          "STARPORT"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.macro.addon_swap.AddonSwap",
+        "source_path": "ares-sc2/src/ares/behaviors/macro/addon_swap.py"
+      },
+      "params": [
+        {
+          "name": "structure_needing_addon",
+          "type": "unit_or_unit_type_id",
+          "input": "model",
+          "required": true,
+          "options": [
+            "BARRACKS",
+            "FACTORY",
+            "STARPORT"
+          ],
+          "description": "Structure or type needing the add-on."
+        },
+        {
+          "name": "addon_required",
+          "type": "unit_type_id",
+          "input": "model",
+          "required": true,
+          "options": [
+            "BARRACKSREACTOR",
+            "BARRACKSTECHLAB",
+            "FACTORYREACTOR",
+            "FACTORYTECHLAB",
+            "REACTOR",
+            "STARPORTREACTOR",
+            "STARPORTTECHLAB",
+            "TECHLAB"
+          ],
+          "description": "Required Tech Lab or Reactor."
+        },
+        {
+          "name": "precise_addon_structure_id",
+          "type": "unit_type_id",
+          "input": "model",
+          "required": false,
+          "options": [
+            "BARRACKSREACTOR",
+            "BARRACKSTECHLAB",
+            "FACTORYREACTOR",
+            "FACTORYTECHLAB",
+            "STARPORTREACTOR",
+            "STARPORTTECHLAB"
+          ],
+          "description": "Precise addon structure id.",
+          "default": null
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "macro.auto_supply",
+      "name": "AutoSupply",
+      "description": "Build supply when low.",
+      "tags": [
+        "resource",
+        "supply"
+      ],
+      "availability": {
+        "param": null,
+        "types": [
+          "ALL"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.macro.auto_supply.AutoSupply",
+        "source_path": "ares-sc2/src/ares/behaviors/macro/auto_supply.py"
+      },
+      "params": [
+        {
+          "name": "base_location",
+          "type": "point_ref",
+          "input": "model",
+          "required": true,
+          "description": "Supply build location."
+        },
+        {
+          "name": "return_true_if_supply_required",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "If supply can't be afforded but is required, return true. Useful for creating a `MacroPlan`.",
+          "default": true
+        },
+        {
+          "name": "closest_to",
+          "type": "point_ref",
+          "input": "model",
+          "required": false,
+          "description": "Find available supply placement closest to this location. Only applicable to Terran or Protoss.",
+          "default": null
+        }
+      ],
+      "llm_exposure": "disabled"
+    },
+    {
+      "id": "macro.build_structure",
+      "name": "BuildStructure",
+      "description": "Build near a base. Use GasBuildingController for gas and TechUp for add-ons.",
+      "tags": [
+        "technology",
+        "construction"
+      ],
+      "availability": {
+        "param": null,
+        "types": [
+          "SCV",
+          "DRONE",
+          "PROBE"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.macro.build_structure.BuildStructure",
+        "source_path": "ares-sc2/src/ares/behaviors/macro/build_structure.py"
+      },
+      "params": [
+        {
+          "name": "base_location",
+          "type": "point_ref",
+          "input": "model",
+          "required": true,
+          "description": "The base location to build near."
+        },
+        {
+          "name": "structure_id",
+          "type": "unit_type_id",
+          "input": "model",
+          "required": true,
+          "options": [
+            "ARMORY",
+            "BANELINGNEST",
+            "BARRACKS",
+            "BUNKER",
+            "COMMANDCENTER",
+            "CYBERNETICSCORE",
+            "DARKSHRINE",
+            "ENGINEERINGBAY",
+            "EVOLUTIONCHAMBER",
+            "FACTORY",
+            "FLEETBEACON",
+            "FORGE",
+            "FUSIONCORE",
+            "GATEWAY",
+            "GHOSTACADEMY",
+            "HATCHERY",
+            "HYDRALISKDEN",
+            "INFESTATIONPIT",
+            "LURKERDENMP",
+            "MISSILETURRET",
+            "NEXUS",
+            "NYDUSCANAL",
+            "NYDUSNETWORK",
+            "PHOTONCANNON",
+            "PYLON",
+            "ROACHWARREN",
+            "ROBOTICSBAY",
+            "ROBOTICSFACILITY",
+            "SENSORTOWER",
+            "SHIELDBATTERY",
+            "SPAWNINGPOOL",
+            "SPINECRAWLER",
+            "SPIRE",
+            "SPORECRAWLER",
+            "STARGATE",
+            "STARPORT",
+            "SUPPLYDEPOT",
+            "TEMPLARARCHIVE",
+            "TWILIGHTCOUNCIL",
+            "ULTRALISKCAVERN"
+          ],
+          "description": "Structure type to build."
+        },
+        {
+          "name": "max_on_route",
+          "type": "integer",
+          "input": "model",
+          "required": false,
+          "description": "The max number of workers on route to build this. Defaults to 1.",
+          "default": 1
+        },
+        {
+          "name": "first_pylon",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Will look for the first pylon in placements dict. Defaults to False.",
+          "default": false
+        },
+        {
+          "name": "static_defence",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Will look for static defense in placements dict. Defaults to False.",
+          "default": false
+        },
+        {
+          "name": "wall",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Find wall placement if possible. Only the main base is currently supported. Defaults to False.",
+          "default": false
+        },
+        {
+          "name": "closest_to",
+          "type": "point_ref",
+          "input": "model",
+          "required": false,
+          "description": "Find placement at this base closest to the given point. Optional.",
+          "default": null
+        },
+        {
+          "name": "to_count",
+          "type": "integer",
+          "input": "model",
+          "required": false,
+          "description": "Prevent going over this amount in total. Defaults to 0, turning this check off.",
+          "default": 0
+        },
+        {
+          "name": "to_count_per_base",
+          "type": "integer",
+          "input": "model",
+          "required": false,
+          "description": "Prevent going over this amount at this base location. Defaults to 0, turning this check off.",
+          "default": 0
+        },
+        {
+          "name": "tech_progress_check",
+          "type": "number",
+          "input": "model",
+          "required": false,
+          "description": "Check if tech is ready before trying to build. Defaults to 0.85; setting it to 0.0 turns this check off.",
+          "default": 0.85
+        },
+        {
+          "name": "supply_depot",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Choose a predefined supply depot location. Defaults to False.",
+          "default": false
+        },
+        {
+          "name": "missile_turret",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Choose a predefined missile turret location. Defaults to False.",
+          "default": false
+        },
+        {
+          "name": "sensor_tower",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Choose a predefined sensor tower location. Defaults to False.",
+          "default": false
+        },
+        {
+          "name": "upgrade_structure",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Choose a predefined upgrade-structure location. Defaults to False.",
+          "default": false
+        },
+        {
+          "name": "production",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Choose a predefined production location. Defaults to True.",
+          "default": true
+        },
+        {
+          "name": "bunker",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Choose a predefined bunker location. Defaults to False.",
+          "default": false
+        },
+        {
+          "name": "reaper_wall",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Choose a predefined reaper wall location. Defaults to False.",
+          "default": false
+        },
+        {
+          "name": "find_alternative",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "If no placements are available at this base, optionally search nearby bases. Defaults to True.",
+          "default": true
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "macro.build_workers",
+      "name": "BuildWorkers",
+      "description": "Train SCVs until the requested total SCV count is reached.",
+      "tags": [
+        "resource",
+        "production"
+      ],
+      "availability": {
+        "param": null,
+        "types": [
+          "COMMANDCENTER",
+          "ORBITALCOMMAND",
+          "PLANETARYFORTRESS",
+          "NEXUS",
+          "HATCHERY",
+          "LAIR",
+          "HIVE"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.macro.build_workers.BuildWorkers",
+        "source_path": "ares-sc2/src/ares/behaviors/macro/build_workers.py"
+      },
+      "params": [
+        {
+          "name": "to_count",
+          "type": "integer",
+          "input": "model",
+          "required": true,
+          "description": "Desired total worker count."
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "macro.expansion_controller",
+      "name": "ExpansionController",
+      "description": "Expand until the requested total base count is reached.",
+      "tags": [
+        "resource",
+        "expansion"
+      ],
+      "availability": {
+        "param": null,
+        "types": [
+          "SCV",
+          "DRONE",
+          "PROBE"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.macro.expansion_controller.ExpansionController",
+        "source_path": "ares-sc2/src/ares/behaviors/macro/expansion_controller.py"
+      },
+      "params": [
+        {
+          "name": "to_count",
+          "type": "integer",
+          "input": "model",
+          "required": true,
+          "description": "Desired total base count."
+        },
+        {
+          "name": "can_afford_check",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Check if we can afford expansion. Setting this to False will allow the worker to move to a location ready to build the expansion. Defaults to True.",
+          "default": true
+        },
+        {
+          "name": "check_location_is_safe",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Check if we don't knowingly expand at a dangerous location. Defaults to True.",
+          "default": true
+        },
+        {
+          "name": "max_pending",
+          "type": "integer",
+          "input": "model",
+          "required": false,
+          "description": "Maximum pending townhalls at any time. Defaults to 1.",
+          "default": 1
+        },
+        {
+          "name": "prioritize",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Will return True for this behavior if we can't afford expansion. Default is False",
+          "default": false
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "macro.gas_building_controller",
+      "name": "GasBuildingController",
+      "description": "Maintain the requested number of Refineries.",
+      "tags": [
+        "resource"
+      ],
+      "availability": {
+        "param": null,
+        "types": [
+          "SCV",
+          "DRONE",
+          "PROBE"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.macro.gas_building_controller.GasBuildingController",
+        "source_path": "ares-sc2/src/ares/behaviors/macro/gas_building_controller.py"
+      },
+      "params": [
+        {
+          "name": "to_count",
+          "type": "integer",
+          "input": "model",
+          "required": true,
+          "description": "Desired total gas structure count."
+        },
+        {
+          "name": "max_pending",
+          "type": "integer",
+          "input": "model",
+          "required": false,
+          "description": "How many gas buildings can be pending at any time? Defaults to 1.",
+          "default": 1
+        },
+        {
+          "name": "closest_to",
+          "type": "point_ref",
+          "input": "model",
+          "required": false,
+          "description": "Find available geyser closest to this location. Optional, defaults to `None`",
+          "default": null
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "macro.macro_plan",
+      "name": "MacroPlan",
+      "description": "Try macro behaviors in order until one acts.",
+      "tags": [
+        "macro"
+      ],
+      "availability": {
+        "param": null,
+        "types": [
+          "ALL"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.macro.macro_plan.MacroPlan",
+        "source_path": "ares-sc2/src/ares/behaviors/macro/macro_plan.py"
+      },
+      "params": [
+        {
+          "name": "macros",
+          "type": "json_array",
+          "input": "derived",
+          "required": false,
+          "description": "A list of behaviors that should be executed. Defaults to an empty list.",
+          "default": {
+            "expression": "field(default_factory=list)"
+          }
+        }
+      ],
+      "llm_exposure": "disabled"
+    },
+    {
+      "id": "macro.mining",
+      "name": "Mining",
+      "description": "Manage worker mining and safety.",
+      "tags": [
+        "resource"
+      ],
+      "availability": {
+        "param": null,
+        "types": [
+          "SCV",
+          "DRONE",
+          "PROBE"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.macro.mining.Mining",
+        "source_path": "ares-sc2/src/ares/behaviors/macro/mining.py"
+      },
+      "params": [
+        {
+          "name": "flee_at_health_perc",
+          "type": "number",
+          "input": "model",
+          "required": false,
+          "description": "If worker is in danger, at what health percentage should it flee? Defaults to 0.5.",
+          "default": 0.5
+        },
+        {
+          "name": "keep_safe",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Should workers flee if they are in danger? Defaults to True.",
+          "default": true
+        },
+        {
+          "name": "long_distance_mine",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Can the worker long distance mine if it has nothing to do? Defaults to True.",
+          "default": true
+        },
+        {
+          "name": "mineral_boost",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Turn mineral boosting on or off. Defaults to True.",
+          "default": true
+        },
+        {
+          "name": "vespene_boost",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Turn vespene boosting on or off (only active when workers_per_gas < 3).",
+          "default": false
+        },
+        {
+          "name": "workers_per_gas",
+          "type": "integer",
+          "input": "model",
+          "required": false,
+          "description": "Control how many workers are assigned to each gas. Defaults to 3.",
+          "default": 3
+        },
+        {
+          "name": "self_defence_active",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "If set to True, workers will have some basic defence. Certain workers will attack enemy in range. Defaults to True.",
+          "default": true
+        },
+        {
+          "name": "safe_long_distance_mineral_fields",
+          "type": "unit_refs",
+          "input": "model",
+          "required": false,
+          "description": "Used internally, set when a worker starts long distance mining. Defaults to None.",
+          "default": null
+        },
+        {
+          "name": "locked_action_tags",
+          "type": "json_object",
+          "input": "model",
+          "required": false,
+          "description": "Locked action tags.",
+          "default": {
+            "expression": "field(default_factory=dict)"
+          }
+        },
+        {
+          "name": "weight_safety_limit",
+          "type": "number",
+          "input": "model",
+          "required": false,
+          "description": "Workers will flee if enemy influence is above this number. Defaults to 12.0",
+          "default": 12.0
+        }
+      ],
+      "llm_exposure": "disabled"
+    },
+    {
+      "id": "macro.production_controller",
+      "name": "ProductionController",
+      "description": "Build production facilities and prerequisites; does not train units.",
+      "tags": [
+        "technology",
+        "production"
+      ],
+      "availability": {
+        "param": null,
+        "types": [
+          "SCV",
+          "DRONE",
+          "PROBE"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.macro.production_controller.ProductionController",
+        "source_path": "ares-sc2/src/ares/behaviors/macro/production_controller.py"
+      },
+      "params": [
+        {
+          "name": "army_composition_dict",
+          "type": "army_composition",
+          "input": "model",
+          "required": true,
+          "options": [
+            "ADEPT",
+            "ARMORY",
+            "ASSIMILATOR",
+            "AUTOTURRET",
+            "BANELING",
+            "BANELINGNEST",
+            "BANSHEE",
+            "BARRACKS",
+            "BATTLECRUISER",
+            "BROODLORD",
+            "BUNKER",
+            "CARRIER",
+            "CHANGELING",
+            "COLOSSUS",
+            "COMMANDCENTER",
+            "CORRUPTOR",
+            "CREEPTUMOR",
+            "CREEPTUMORQUEEN",
+            "CYBERNETICSCORE",
+            "CYCLONE",
+            "DARKSHRINE",
+            "DARKTEMPLAR",
+            "DISRUPTOR",
+            "DRONE",
+            "ENGINEERINGBAY",
+            "EVOLUTIONCHAMBER",
+            "EXTRACTOR",
+            "FACTORY",
+            "FLEETBEACON",
+            "FORGE",
+            "FUSIONCORE",
+            "GATEWAY",
+            "GHOST",
+            "GHOSTACADEMY",
+            "GREATERSPIRE",
+            "HATCHERY",
+            "HELLION",
+            "HELLIONTANK",
+            "HIGHTEMPLAR",
+            "HIVE",
+            "HYDRALISK",
+            "HYDRALISKDEN",
+            "IMMORTAL",
+            "INFESTATIONPIT",
+            "INFESTOR",
+            "LAIR",
+            "LIBERATOR",
+            "LOCUSTMPFLYING",
+            "LURKERDENMP",
+            "LURKERMP",
+            "MARAUDER",
+            "MARINE",
+            "MEDIVAC",
+            "MISSILETURRET",
+            "MOTHERSHIP",
+            "MUTALISK",
+            "NEXUS",
+            "NYDUSCANAL",
+            "NYDUSNETWORK",
+            "OBSERVER",
+            "ORACLE",
+            "ORACLESTASISTRAP",
+            "ORBITALCOMMAND",
+            "OVERLORD",
+            "OVERLORDTRANSPORT",
+            "OVERSEER",
+            "PHOENIX",
+            "PHOTONCANNON",
+            "PLANETARYFORTRESS",
+            "PROBE",
+            "PYLON",
+            "QUEEN",
+            "RAVAGER",
+            "RAVEN",
+            "REAPER",
+            "REFINERY",
+            "ROACH",
+            "ROACHWARREN",
+            "ROBOTICSBAY",
+            "ROBOTICSFACILITY",
+            "SCV",
+            "SENSORTOWER",
+            "SENTRY",
+            "SHIELDBATTERY",
+            "SIEGETANK",
+            "SPAWNINGPOOL",
+            "SPINECRAWLER",
+            "SPIRE",
+            "SPORECRAWLER",
+            "STALKER",
+            "STARGATE",
+            "STARPORT",
+            "SUPPLYDEPOT",
+            "SWARMHOSTMP",
+            "TEMPEST",
+            "TEMPLARARCHIVE",
+            "THOR",
+            "TWILIGHTCOUNCIL",
+            "ULTRALISK",
+            "ULTRALISKCAVERN",
+            "VIKINGFIGHTER",
+            "VIPER",
+            "VOIDRAY",
+            "WARPPRISM",
+            "WIDOWMINE",
+            "ZEALOT",
+            "ZERGLING"
+          ],
+          "description": "Unit mix with per-type proportion and priority."
+        },
+        {
+          "name": "base_location",
+          "type": "point_ref",
+          "input": "model",
+          "required": true,
+          "description": "Production build location."
+        },
+        {
+          "name": "add_production_at_bank",
+          "type": "resource_pair",
+          "input": "model",
+          "required": false,
+          "description": "When the bank reaches this size, calculate what extra production would be useful. Tuple: minerals, then vespene. Defaults to `(400, 400)`.",
+          "default": [
+            400,
+            400
+          ]
+        },
+        {
+          "name": "alpha",
+          "type": "number",
+          "input": "model",
+          "required": false,
+          "description": "Controls how much production to add when the bank is higher than `add_production_at_bank`. Defaults to `0.9`.",
+          "default": 0.9
+        },
+        {
+          "name": "unit_pending_progress",
+          "type": "number",
+          "input": "model",
+          "required": false,
+          "description": "Count production structures that are nearly complete before adding more. Defaults to `0.75`.",
+          "default": 0.75
+        },
+        {
+          "name": "ignore_below_proportion",
+          "type": "number",
+          "input": "model",
+          "required": false,
+          "description": "Accepted for API compatibility; currently ignored by the implementation.",
+          "default": 0.05
+        },
+        {
+          "name": "should_repower_structures",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Search for unpowered structures and build a new pylon if needed. Defaults to `True`.",
+          "default": true
+        },
+        {
+          "name": "max_production_structures",
+          "type": "integer",
+          "input": "model",
+          "required": false,
+          "description": "Stop adding production at this number Defaults to 12",
+          "default": 12
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "macro.protoss_static_defence",
+      "name": "ProtossStaticDefence",
+      "description": "Maintain Protoss static defenses at Nexus bases.",
+      "tags": [
+        "combat",
+        "construction"
+      ],
+      "availability": {
+        "param": null,
+        "types": [
+          "PROBE"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.macro.protoss_static_defence.ProtossStaticDefence",
+        "source_path": "ares-sc2/src/ares/behaviors/macro/protoss_static_defence.py"
+      },
+      "params": [
+        {
+          "name": "pylons_per_base",
+          "type": "integer",
+          "input": "model",
+          "required": false,
+          "description": "Number of pylons to maintain per base.",
+          "default": 1
+        },
+        {
+          "name": "photon_cannons_per_base",
+          "type": "integer",
+          "input": "model",
+          "required": false,
+          "description": "Number of photon cannons to maintain per base.",
+          "default": 1
+        },
+        {
+          "name": "shield_batteries_per_base",
+          "type": "integer",
+          "input": "model",
+          "required": false,
+          "description": "Number of shield batteries to maintain per base.",
+          "default": 1
+        },
+        {
+          "name": "exclude_base_locations",
+          "type": "point_refs",
+          "input": "model",
+          "required": false,
+          "description": "Base locations to skip when placing defence.",
+          "default": {
+            "expression": "field(default_factory=set)"
+          }
+        },
+        {
+          "name": "max_on_route",
+          "type": "integer",
+          "input": "model",
+          "required": false,
+          "description": "Max number of workers on route per structure type.",
+          "default": 1
+        },
+        {
+          "name": "tech_base_location",
+          "type": "point_ref",
+          "input": "model",
+          "required": false,
+          "description": "Where to build tech requirements (forge/core).",
+          "default": null
+        }
+      ],
+      "llm_exposure": "disabled"
+    },
+    {
+      "id": "macro.restore_power",
+      "name": "RestorePower",
+      "description": "Build a Pylon to restore power.",
+      "tags": [
+        "technology",
+        "construction"
+      ],
+      "availability": {
+        "param": null,
+        "types": [
+          "PROBE"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.macro.restore_power.RestorePower",
+        "source_path": "ares-sc2/src/ares/behaviors/macro/restore_power.py"
+      },
+      "params": [],
+      "llm_exposure": "disabled"
+    },
+    {
+      "id": "macro.spawn_controller",
+      "name": "SpawnController",
+      "description": "Train units by priority; fixed freeflow mode ignores proportions.",
+      "tags": [
+        "production"
+      ],
+      "availability": {
+        "param": null,
+        "types": [
+          "BARRACKS",
+          "FACTORY",
+          "STARPORT",
+          "GATEWAY",
+          "WARPGATE",
+          "ROBOTICSFACILITY",
+          "STARGATE",
+          "HATCHERY",
+          "LAIR",
+          "HIVE",
+          "LARVA"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.macro.spawn_controller.SpawnController",
+        "source_path": "ares-sc2/src/ares/behaviors/macro/spawn_controller.py"
+      },
+      "params": [
+        {
+          "name": "army_composition_dict",
+          "type": "army_composition",
+          "input": "model",
+          "required": true,
+          "options": [
+            "ADEPT",
+            "ARMORY",
+            "ASSIMILATOR",
+            "AUTOTURRET",
+            "BANELING",
+            "BANELINGNEST",
+            "BANSHEE",
+            "BARRACKS",
+            "BATTLECRUISER",
+            "BROODLORD",
+            "BUNKER",
+            "CARRIER",
+            "CHANGELING",
+            "COLOSSUS",
+            "COMMANDCENTER",
+            "CORRUPTOR",
+            "CREEPTUMOR",
+            "CREEPTUMORQUEEN",
+            "CYBERNETICSCORE",
+            "CYCLONE",
+            "DARKSHRINE",
+            "DARKTEMPLAR",
+            "DISRUPTOR",
+            "DRONE",
+            "ENGINEERINGBAY",
+            "EVOLUTIONCHAMBER",
+            "EXTRACTOR",
+            "FACTORY",
+            "FLEETBEACON",
+            "FORGE",
+            "FUSIONCORE",
+            "GATEWAY",
+            "GHOST",
+            "GHOSTACADEMY",
+            "GREATERSPIRE",
+            "HATCHERY",
+            "HELLION",
+            "HELLIONTANK",
+            "HIGHTEMPLAR",
+            "HIVE",
+            "HYDRALISK",
+            "HYDRALISKDEN",
+            "IMMORTAL",
+            "INFESTATIONPIT",
+            "INFESTOR",
+            "LAIR",
+            "LIBERATOR",
+            "LOCUSTMPFLYING",
+            "LURKERDENMP",
+            "LURKERMP",
+            "MARAUDER",
+            "MARINE",
+            "MEDIVAC",
+            "MISSILETURRET",
+            "MOTHERSHIP",
+            "MUTALISK",
+            "NEXUS",
+            "NYDUSCANAL",
+            "NYDUSNETWORK",
+            "OBSERVER",
+            "ORACLE",
+            "ORACLESTASISTRAP",
+            "ORBITALCOMMAND",
+            "OVERLORD",
+            "OVERLORDTRANSPORT",
+            "OVERSEER",
+            "PHOENIX",
+            "PHOTONCANNON",
+            "PLANETARYFORTRESS",
+            "PROBE",
+            "PYLON",
+            "QUEEN",
+            "RAVAGER",
+            "RAVEN",
+            "REAPER",
+            "REFINERY",
+            "ROACH",
+            "ROACHWARREN",
+            "ROBOTICSBAY",
+            "ROBOTICSFACILITY",
+            "SCV",
+            "SENSORTOWER",
+            "SENTRY",
+            "SHIELDBATTERY",
+            "SIEGETANK",
+            "SPAWNINGPOOL",
+            "SPINECRAWLER",
+            "SPIRE",
+            "SPORECRAWLER",
+            "STALKER",
+            "STARGATE",
+            "STARPORT",
+            "SUPPLYDEPOT",
+            "SWARMHOSTMP",
+            "TEMPEST",
+            "TEMPLARARCHIVE",
+            "THOR",
+            "TWILIGHTCOUNCIL",
+            "ULTRALISK",
+            "ULTRALISKCAVERN",
+            "VIKINGFIGHTER",
+            "VIPER",
+            "VOIDRAY",
+            "WARPPRISM",
+            "WIDOWMINE",
+            "ZEALOT",
+            "ZERGLING"
+          ],
+          "description": "Unit mix with per-type proportion and priority."
+        },
+        {
+          "name": "freeflow_mode",
+          "type": "boolean",
+          "input": "runtime",
+          "required": true,
+          "value": true,
+          "description": "Fixed `true`; ignore proportions and spend by priority."
+        },
+        {
+          "name": "ignore_proportions_below_unit_count",
+          "type": "integer",
+          "input": "model",
+          "required": false,
+          "description": "In early game, units affect the army proportions significantly. This allows some units to be freely built before proportions are respected. Defaults to `0`.",
+          "default": 0
+        },
+        {
+          "name": "over_produce_on_low_tech",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "If only one tech is available for a unit, this allows that unit to be constantly produced. Defaults to `True`.",
+          "default": true
+        },
+        {
+          "name": "ignored_build_from_tags",
+          "type": "integer_list",
+          "input": "model",
+          "required": false,
+          "description": "A set of tags to prevent the spawn controller from morphing from these tags.",
+          "default": {
+            "expression": "field(default_factory=set)"
+          }
+        },
+        {
+          "name": "maximum",
+          "type": "integer",
+          "input": "model",
+          "required": false,
+          "description": "The maximum number of a unit type that can be produced in a single step. Defaults to `20`.",
+          "default": 20
+        },
+        {
+          "name": "spawn_target",
+          "type": "point_ref",
+          "input": "model",
+          "required": false,
+          "description": "A location to prioritize spawning units near. Defaults to `None`.",
+          "default": null
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "macro.speed_mining",
+      "name": "SpeedMining",
+      "description": "Optimize a worker's mining cycle.",
+      "tags": [
+        "resource"
+      ],
+      "availability": {
+        "param": "worker",
+        "types": [
+          "SCV",
+          "DRONE",
+          "PROBE"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.macro.speed_mining.SpeedMining",
+        "source_path": "ares-sc2/src/ares/behaviors/macro/speed_mining.py"
+      },
+      "params": [
+        {
+          "name": "worker",
+          "type": "unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "The worker to mine with."
+        },
+        {
+          "name": "target",
+          "type": "point_or_unit_ref",
+          "input": "model",
+          "required": true,
+          "description": "The resource to mine."
+        },
+        {
+          "name": "worker_position",
+          "type": "point_ref",
+          "input": "model",
+          "required": true,
+          "description": "Current worker position."
+        },
+        {
+          "name": "resource_target_pos",
+          "type": "point_ref",
+          "input": "model",
+          "required": true,
+          "description": "Resource approach point."
+        },
+        {
+          "name": "distance_to_townhall_factor",
+          "type": "number",
+          "input": "model",
+          "required": false,
+          "description": "How far away from th to move command. Default is 1.08",
+          "default": 1.08
+        },
+        {
+          "name": "townhall",
+          "type": "unit_ref",
+          "input": "model",
+          "required": false,
+          "description": "Townhall worker is assigned to. Default to None (will calculate closest if so)",
+          "default": null
+        }
+      ],
+      "llm_exposure": "disabled"
+    },
+    {
+      "id": "macro.tech_up",
+      "name": "TechUp",
+      "description": "Advance one prerequisite step toward a unit or upgrade; repeat as needed.",
+      "tags": [
+        "technology"
+      ],
+      "availability": {
+        "param": null,
+        "types": [
+          "ALL"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.macro.tech_up.TechUp",
+        "source_path": "ares-sc2/src/ares/behaviors/macro/tech_up.py"
+      },
+      "params": [
+        {
+          "name": "desired_tech",
+          "type": "unit_or_upgrade_id",
+          "input": "model",
+          "required": true,
+          "options": [
+            "ADEPT",
+            "ADEPTPIERCINGATTACK",
+            "ANABOLICSYNTHESIS",
+            "ARMORY",
+            "ASSIMILATOR",
+            "ASSIMILATORRICH",
+            "BANELING",
+            "BANELINGNEST",
+            "BANSHEE",
+            "BANSHEECLOAK",
+            "BANSHEESPEED",
+            "BARRACKS",
+            "BARRACKSREACTOR",
+            "BARRACKSTECHLAB",
+            "BATTLECRUISER",
+            "BATTLECRUISERENABLESPECIALIZATIONS",
+            "BLINKTECH",
+            "BROODLORD",
+            "BUNKER",
+            "BURROW",
+            "CARRIER",
+            "CENTRIFICALHOOKS",
+            "CHARGE",
+            "CHITINOUSPLATING",
+            "COLOSSUS",
+            "COMMANDCENTER",
+            "CYBERNETICSCORE",
+            "CYCLONE",
+            "CYCLONELOCKONDAMAGEUPGRADE",
+            "DARKSHRINE",
+            "DARKTEMPLAR",
+            "DARKTEMPLARBLINKUPGRADE",
+            "DIGGINGCLAWS",
+            "DISRUPTOR",
+            "DRILLCLAWS",
+            "ENGINEERINGBAY",
+            "EVOLUTIONCHAMBER",
+            "EVOLVEGROOVEDSPINES",
+            "EVOLVEMUSCULARAUGMENTS",
+            "EXTENDEDTHERMALLANCE",
+            "EXTRACTOR",
+            "EXTRACTORRICH",
+            "FACTORY",
+            "FACTORYREACTOR",
+            "FACTORYTECHLAB",
+            "FLEETBEACON",
+            "FORGE",
+            "FRENZY",
+            "FUSIONCORE",
+            "GATEWAY",
+            "GHOST",
+            "GHOSTACADEMY",
+            "GLIALRECONSTITUTION",
+            "GRAVITICDRIVE",
+            "GREATERSPIRE",
+            "HATCHERY",
+            "HELLION",
+            "HELLIONTANK",
+            "HIGHCAPACITYBARRELS",
+            "HIGHTEMPLAR",
+            "HISECAUTOTRACKING",
+            "HIVE",
+            "HYDRALISKDEN",
+            "IMMORTAL",
+            "INFESTATIONPIT",
+            "INTERFERENCEMATRIX",
+            "LAIR",
+            "LIBERATOR",
+            "LIBERATORAGRANGEUPGRADE",
+            "LURKERDENMP",
+            "LURKERMP",
+            "LURKERRANGE",
+            "MARAUDER",
+            "MARINE",
+            "MEDIVAC",
+            "MEDIVACCADUCEUSREACTOR",
+            "MISSILETURRET",
+            "MOTHERSHIP",
+            "NEURALPARASITE",
+            "NEXUS",
+            "NYDUSNETWORK",
+            "OBSERVER",
+            "OBSERVERGRAVITICBOOSTER",
+            "ORACLE",
+            "ORBITALCOMMAND",
+            "OVERLORDSPEED",
+            "OVERLORDTRANSPORT",
+            "OVERSEER",
+            "PERSONALCLOAKING",
+            "PHOENIX",
+            "PHOENIXRANGEUPGRADE",
+            "PHOTONCANNON",
+            "PLANETARYFORTRESS",
+            "PROBE",
+            "PROTOSSAIRARMORSLEVEL1",
+            "PROTOSSAIRARMORSLEVEL2",
+            "PROTOSSAIRARMORSLEVEL3",
+            "PROTOSSAIRWEAPONSLEVEL1",
+            "PROTOSSAIRWEAPONSLEVEL2",
+            "PROTOSSAIRWEAPONSLEVEL3",
+            "PROTOSSGROUNDARMORSLEVEL1",
+            "PROTOSSGROUNDARMORSLEVEL2",
+            "PROTOSSGROUNDARMORSLEVEL3",
+            "PROTOSSGROUNDWEAPONSLEVEL1",
+            "PROTOSSGROUNDWEAPONSLEVEL2",
+            "PROTOSSGROUNDWEAPONSLEVEL3",
+            "PROTOSSSHIELDSLEVEL1",
+            "PROTOSSSHIELDSLEVEL2",
+            "PROTOSSSHIELDSLEVEL3",
+            "PSISTORMTECH",
+            "PUNISHERGRENADES",
+            "PYLON",
+            "QUEEN",
+            "RAVAGER",
+            "RAVEN",
+            "REAPER",
+            "REFINERY",
+            "REFINERYRICH",
+            "ROACHWARREN",
+            "ROBOTICSBAY",
+            "ROBOTICSFACILITY",
+            "SCV",
+            "SENSORTOWER",
+            "SENTRY",
+            "SHIELDBATTERY",
+            "SHIELDWALL",
+            "SIEGETANK",
+            "SMARTSERVOS",
+            "SPAWNINGPOOL",
+            "SPINECRAWLER",
+            "SPIRE",
+            "SPORECRAWLER",
+            "STALKER",
+            "STARGATE",
+            "STARPORT",
+            "STARPORTREACTOR",
+            "STARPORTTECHLAB",
+            "STIMPACK",
+            "SUPPLYDEPOT",
+            "TEMPEST",
+            "TEMPESTGROUNDATTACKUPGRADE",
+            "TEMPLARARCHIVE",
+            "TERRANBUILDINGARMOR",
+            "TERRANINFANTRYARMORSLEVEL1",
+            "TERRANINFANTRYARMORSLEVEL2",
+            "TERRANINFANTRYARMORSLEVEL3",
+            "TERRANINFANTRYWEAPONSLEVEL1",
+            "TERRANINFANTRYWEAPONSLEVEL2",
+            "TERRANINFANTRYWEAPONSLEVEL3",
+            "TERRANSHIPWEAPONSLEVEL1",
+            "TERRANSHIPWEAPONSLEVEL2",
+            "TERRANSHIPWEAPONSLEVEL3",
+            "TERRANVEHICLEANDSHIPARMORSLEVEL1",
+            "TERRANVEHICLEANDSHIPARMORSLEVEL2",
+            "TERRANVEHICLEANDSHIPARMORSLEVEL3",
+            "TERRANVEHICLEWEAPONSLEVEL1",
+            "TERRANVEHICLEWEAPONSLEVEL2",
+            "TERRANVEHICLEWEAPONSLEVEL3",
+            "THOR",
+            "TUNNELINGCLAWS",
+            "TWILIGHTCOUNCIL",
+            "ULTRALISKCAVERN",
+            "VIKINGFIGHTER",
+            "VOIDRAY",
+            "VOIDRAYSPEEDUPGRADE",
+            "WARPGATERESEARCH",
+            "WARPPRISM",
+            "WIDOWMINE",
+            "ZEALOT",
+            "ZERGFLYERARMORSLEVEL1",
+            "ZERGFLYERARMORSLEVEL2",
+            "ZERGFLYERARMORSLEVEL3",
+            "ZERGFLYERWEAPONSLEVEL1",
+            "ZERGFLYERWEAPONSLEVEL2",
+            "ZERGFLYERWEAPONSLEVEL3",
+            "ZERGGROUNDARMORSLEVEL1",
+            "ZERGGROUNDARMORSLEVEL2",
+            "ZERGGROUNDARMORSLEVEL3",
+            "ZERGLINGATTACKSPEED",
+            "ZERGLINGMOVEMENTSPEED",
+            "ZERGMELEEWEAPONSLEVEL1",
+            "ZERGMELEEWEAPONSLEVEL2",
+            "ZERGMELEEWEAPONSLEVEL3",
+            "ZERGMISSILEWEAPONSLEVEL1",
+            "ZERGMISSILEWEAPONSLEVEL2",
+            "ZERGMISSILEWEAPONSLEVEL3"
+          ],
+          "description": "The desired upgrade or unit type."
+        },
+        {
+          "name": "base_location",
+          "type": "point_ref",
+          "input": "model",
+          "required": true,
+          "description": "Tech build location."
+        },
+        {
+          "name": "ignore_existing_techlabs",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "If set to `True`, will keep building techlabs even if others exist. Defaults to `False`.",
+          "default": false
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "macro.upgrade_c_cs",
+      "name": "UpgradeCCs",
+      "description": "Upgrade a Command Center to Orbital or Planetary.",
+      "tags": [
+        "technology"
+      ],
+      "availability": {
+        "param": null,
+        "types": [
+          "COMMANDCENTER"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.macro.upgrade_ccs.UpgradeCCs",
+        "source_path": "ares-sc2/src/ares/behaviors/macro/upgrade_ccs.py"
+      },
+      "params": [
+        {
+          "name": "to",
+          "type": "unit_type_id",
+          "input": "model",
+          "required": true,
+          "options": [
+            "ORBITALCOMMAND",
+            "PLANETARYFORTRESS"
+          ],
+          "description": "Target Command Center upgrade."
+        },
+        {
+          "name": "prioritize",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "If True and there is a CC waiting to upgrade, but we can't afford it yet, this behavior will return True This is useful in a MacroPlan as it will prevent other spending actions occurring. Default is False",
+          "default": false
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "macro.upgrade_controller",
+      "name": "UpgradeController",
+      "description": "Research upgrades, building prerequisites if needed.",
+      "tags": [
+        "technology"
+      ],
+      "availability": {
+        "param": null,
+        "types": [
+          "ALL"
+        ]
+      },
+      "api": {
+        "import": "ares.behaviors.macro.upgrade_controller.UpgradeController",
+        "source_path": "ares-sc2/src/ares/behaviors/macro/upgrade_controller.py"
+      },
+      "params": [
+        {
+          "name": "upgrade_list",
+          "type": "upgrade_ids",
+          "input": "model",
+          "required": true,
+          "options": [
+            "ADEPTPIERCINGATTACK",
+            "ANABOLICSYNTHESIS",
+            "BANSHEECLOAK",
+            "BANSHEESPEED",
+            "BATTLECRUISERENABLESPECIALIZATIONS",
+            "BLINKTECH",
+            "BURROW",
+            "CENTRIFICALHOOKS",
+            "CHARGE",
+            "CHITINOUSPLATING",
+            "CYCLONELOCKONDAMAGEUPGRADE",
+            "DARKTEMPLARBLINKUPGRADE",
+            "DIGGINGCLAWS",
+            "DRILLCLAWS",
+            "EVOLVEGROOVEDSPINES",
+            "EVOLVEMUSCULARAUGMENTS",
+            "EXTENDEDTHERMALLANCE",
+            "FRENZY",
+            "GLIALRECONSTITUTION",
+            "GRAVITICDRIVE",
+            "HIGHCAPACITYBARRELS",
+            "HISECAUTOTRACKING",
+            "INTERFERENCEMATRIX",
+            "LIBERATORAGRANGEUPGRADE",
+            "LURKERRANGE",
+            "MEDIVACCADUCEUSREACTOR",
+            "NEURALPARASITE",
+            "OBSERVERGRAVITICBOOSTER",
+            "OVERLORDSPEED",
+            "PERSONALCLOAKING",
+            "PHOENIXRANGEUPGRADE",
+            "PROTOSSAIRARMORSLEVEL1",
+            "PROTOSSAIRARMORSLEVEL2",
+            "PROTOSSAIRARMORSLEVEL3",
+            "PROTOSSAIRWEAPONSLEVEL1",
+            "PROTOSSAIRWEAPONSLEVEL2",
+            "PROTOSSAIRWEAPONSLEVEL3",
+            "PROTOSSGROUNDARMORSLEVEL1",
+            "PROTOSSGROUNDARMORSLEVEL2",
+            "PROTOSSGROUNDARMORSLEVEL3",
+            "PROTOSSGROUNDWEAPONSLEVEL1",
+            "PROTOSSGROUNDWEAPONSLEVEL2",
+            "PROTOSSGROUNDWEAPONSLEVEL3",
+            "PROTOSSSHIELDSLEVEL1",
+            "PROTOSSSHIELDSLEVEL2",
+            "PROTOSSSHIELDSLEVEL3",
+            "PSISTORMTECH",
+            "PUNISHERGRENADES",
+            "SHIELDWALL",
+            "SMARTSERVOS",
+            "STIMPACK",
+            "TEMPESTGROUNDATTACKUPGRADE",
+            "TERRANBUILDINGARMOR",
+            "TERRANINFANTRYARMORSLEVEL1",
+            "TERRANINFANTRYARMORSLEVEL2",
+            "TERRANINFANTRYARMORSLEVEL3",
+            "TERRANINFANTRYWEAPONSLEVEL1",
+            "TERRANINFANTRYWEAPONSLEVEL2",
+            "TERRANINFANTRYWEAPONSLEVEL3",
+            "TERRANSHIPWEAPONSLEVEL1",
+            "TERRANSHIPWEAPONSLEVEL2",
+            "TERRANSHIPWEAPONSLEVEL3",
+            "TERRANVEHICLEANDSHIPARMORSLEVEL1",
+            "TERRANVEHICLEANDSHIPARMORSLEVEL2",
+            "TERRANVEHICLEANDSHIPARMORSLEVEL3",
+            "TERRANVEHICLEWEAPONSLEVEL1",
+            "TERRANVEHICLEWEAPONSLEVEL2",
+            "TERRANVEHICLEWEAPONSLEVEL3",
+            "TUNNELINGCLAWS",
+            "VOIDRAYSPEEDUPGRADE",
+            "WARPGATERESEARCH",
+            "ZERGFLYERARMORSLEVEL1",
+            "ZERGFLYERARMORSLEVEL2",
+            "ZERGFLYERARMORSLEVEL3",
+            "ZERGFLYERWEAPONSLEVEL1",
+            "ZERGFLYERWEAPONSLEVEL2",
+            "ZERGFLYERWEAPONSLEVEL3",
+            "ZERGGROUNDARMORSLEVEL1",
+            "ZERGGROUNDARMORSLEVEL2",
+            "ZERGGROUNDARMORSLEVEL3",
+            "ZERGLINGATTACKSPEED",
+            "ZERGLINGMOVEMENTSPEED",
+            "ZERGMELEEWEAPONSLEVEL1",
+            "ZERGMELEEWEAPONSLEVEL2",
+            "ZERGMELEEWEAPONSLEVEL3",
+            "ZERGMISSILEWEAPONSLEVEL1",
+            "ZERGMISSILEWEAPONSLEVEL2",
+            "ZERGMISSILEWEAPONSLEVEL3"
+          ],
+          "description": "Upgrades to research."
+        },
+        {
+          "name": "base_location",
+          "type": "point_ref",
+          "input": "model",
+          "required": true,
+          "description": "Prerequisite build location."
+        },
+        {
+          "name": "auto_tech_up_enabled",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "Whether to automatically build missing tech structures required for the requested upgrade. Defaults to True.",
+          "default": true
+        },
+        {
+          "name": "prioritize",
+          "type": "boolean",
+          "input": "model",
+          "required": false,
+          "description": "If True and there is an Upgrade ready to go, but we can't afford it yet, this behavior will return True. This is useful in a MacroPlan as it will prevent other spending actions occurring. Default is False",
+          "default": false
+        }
+      ],
+      "llm_exposure": "eligible"
+    }
+  ]
+}

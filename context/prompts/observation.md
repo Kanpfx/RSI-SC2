@@ -1,0 +1,5 @@
+- Type*N is a count, not a selector. Type[id,...] lists selectable IDs; attribute arrays follow the same ID order. '?' and '[Unknown]' mean unknown, not zero.
+- @landmark(x,y) and @(x,y) mark a shared 12-unit cell center, not an exact entity position. Use IDs for precise unit targets.
+- Enemy memory gives last known positions without selectable IDs; entities may have moved or disappeared. last_seen is elapsed game time.
+- income is minerals/vespene per minute; combat_total killed_value records destroyed enemy units/structures; army_lost is cumulative own mineral/vespene losses.
+- History: accepted=submitted, active=ongoing, queued=waiting for resources, failed=see reason. Ares starting no new work alone is not failure.
