@@ -1,105 +1,188 @@
 {
   "schema_version": "1.0",
-  "types": {
-    "boolean": {
-      "meaning": "Boolean value.",
-      "model_type": "Boolean"
-    },
-    "integer": {
-      "meaning": "Integer, excluding booleans.",
-      "model_type": "Integer"
-    },
-    "number": {
-      "meaning": "Finite integer or float.",
-      "model_type": "Number"
-    },
-    "json_array": {
-      "meaning": "Action-specific array."
-    },
-    "json_object": {
-      "meaning": "Action-specific object.",
-      "model_type": "Object"
-    },
-    "unit_ref": {
-      "meaning": "Reference to a game entity.",
-      "model_type": "Unit"
-    },
-    "unit_refs": {
-      "meaning": "List of game entity references.",
-      "model_type": "Units"
-    },
-    "point_ref": {
-      "meaning": "Map position or landmark.",
-      "model_type": "Point"
-    },
-    "point_or_unit_ref": {
-      "meaning": "Position or entity reference.",
-      "model_type": "Target"
-    },
-    "grid_ref": {
-      "allowed_values": [
-        "ground",
-        "air",
-        "ground_avoidance",
-        "air_avoidance",
-        "tactical_ground"
-      ],
-      "meaning": "Ares pathing or influence grid.",
-      "model_type": "Choice"
-    },
-    "unit_type_id": {
-      "meaning": "SC2 UnitTypeId.",
-      "model_type": "Choice"
-    },
-    "ability_id": {
-      "meaning": "SC2 AbilityId.",
-      "model_type": "Choice"
-    },
-    "unit_role": {
-      "meaning": "Ares UnitRole.",
-      "model_type": "Choice"
-    },
-    "integer_list": {
-      "meaning": "Integer tag or ID collection.",
-      "model_type": "List[Integer]"
-    },
-    "point_refs": {
-      "meaning": "List of positions.",
-      "model_type": "List[Point]"
-    },
-    "army_composition": {
-      "meaning": "UnitTypeId mapping to proportion and priority.",
-      "model_type": "Composition"
-    },
-    "resource_pair": {
-      "meaning": "Mineral and gas thresholds.",
-      "model_type": "List[Integer]"
-    },
-    "upgrade_ids": {
-      "meaning": "List of SC2 UpgradeId values.",
-      "model_type": "List[Choice]"
-    },
-    "unit_or_unit_type_id": {
-      "meaning": "Entity reference or UnitTypeId.",
-      "model_type": "Unit | Choice"
-    },
-    "unit_or_upgrade_id": {
-      "meaning": "UnitTypeId or UpgradeId.",
-      "model_type": "Choice"
-    }
+  "source": {
+    "ares_version": "3.9.6",
+    "git_commit": "0ac34b87f9471979f8de19a77020eed2d8693b26"
   },
-  "model_types": {
-    "Unit": "Current entity ID, e.g. 851.",
-    "Units": "Entity IDs, e.g. [851,852]; non-empty unless stated.",
-    "Point": "Landmark or coordinates, e.g. main or {x:10,y:20}.",
-    "Target": "Entity ID, landmark, or coordinates.",
-    "Choice": "Named identifier allowed by the parameter, not a display name.",
-    "Integer": "Whole number; not a boolean.",
-    "Number": "Finite integer or decimal; not a boolean.",
-    "Boolean": "true or false.",
-    "Composition": "{MARINE:{proportion:1.0,priority:0}}; positive proportions sum to 1; priority 0 (highest) to 10.",
-    "List": "List[T]: [value1,value2] of type T.",
-    "Object": "Object with the specified fields.",
-    "Value": "Literal value in the specified format."
+  "conventions": {
+    "scope": "Shared types for Ares behavior parameters. JSON representations are serialization conventions; Python objects require runtime resolution.",
+    "union": "A | B accepts either type. Optional[T] means T | null; nullability does not make a parameter optional. Only a constructor default makes it optional.",
+    "containers": "list[T], set[T], tuple[T1, T2] and dict[K, V] preserve element types. Units is distinct from list[Unit]. Empty collections are allowed unless a parameter requires otherwise.",
+    "aliases": "UnitID = UnitTypeId; np.ndarray = Grid; None = null; typing.List/Set/Tuple/Dict normalize to list/set/tuple/dict; Union[A, B] normalizes to A | B.",
+    "enums": "Serialize enum member names, not display names. Valid members come from the installed enum; action-specific allowed values are a separate constraint.",
+    "references": "Unit references identify current game entities. Availability, ownership, map bounds and ability compatibility are checked against the current game state."
+  },
+  "types": {
+    "basic": {
+      "bool": {
+        "python_type": "bool",
+        "json": "boolean",
+        "meaning": "true or false."
+      },
+      "int": {
+        "python_type": "int",
+        "json": "integer",
+        "meaning": "Whole number; excludes booleans."
+      },
+      "float": {
+        "python_type": "float",
+        "json": "number",
+        "meaning": "Finite numeric value; excludes booleans, NaN and infinity."
+      },
+      "str": {
+        "python_type": "str",
+        "json": "string",
+        "meaning": "Text, including dictionary field names."
+      },
+      "null": {
+        "python_type": "NoneType",
+        "json": "null",
+        "meaning": "Python None; valid only when explicitly included in the parameter type."
+      }
+    },
+    "containers": {
+      "list[T]": {
+        "python_type": "list[T]",
+        "json": "array",
+        "meaning": "Ordered sequence of T; preserves duplicates."
+      },
+      "set[T]": {
+        "python_type": "set[T]",
+        "json": "array",
+        "meaning": "Unique elements of T; order is insignificant. Resolve elements before constructing the set."
+      },
+      "tuple[T1, T2]": {
+        "python_type": "tuple[T1, T2]",
+        "json": "array",
+        "meaning": "Exactly two ordered values with the specified positional types."
+      },
+      "dict[K, V]": {
+        "python_type": "dict[K, V]",
+        "json": "object",
+        "meaning": "Mapping with typed keys and values. JSON keys are strings; decode integer keys and enum member names to K."
+      }
+    },
+    "game_objects_and_enums": {
+      "Unit": {
+        "python_type": "sc2.unit.Unit",
+        "json": "integer",
+        "meaning": "Current observation entity ID, resolved to a live Unit; not a unit type or an army count.",
+        "example": 851
+      },
+      "Units": {
+        "python_type": "sc2.units.Units",
+        "json": "array of Unit references",
+        "meaning": "SC2 unit collection constructed from resolved Units with BotAI context; supports SC2 collection methods.",
+        "example": [
+          851,
+          852
+        ]
+      },
+      "Point2": {
+        "python_type": "sc2.position.Point2",
+        "json": "{x: number, y: number} | string",
+        "meaning": "Finite map coordinates or a currently available landmark name, resolved to Point2.",
+        "example": {
+          "x": 10.0,
+          "y": 20.0
+        }
+      },
+      "Grid": {
+        "python_type": "numpy.ndarray",
+        "json": "string",
+        "meaning": "Reference to a runtime-supplied two-dimensional Ares pathing/influence grid; never an arbitrary model-generated matrix.",
+        "values": [
+          "ground",
+          "air",
+          "ground_avoidance",
+          "air_avoidance",
+          "tactical_ground"
+        ]
+      },
+      "UnitTypeId": {
+        "python_type": "sc2.ids.unit_typeid.UnitTypeId",
+        "json": "string",
+        "meaning": "Unit or structure type enum, distinct from a live Unit reference.",
+        "example": "MARINE"
+      },
+      "AbilityId": {
+        "python_type": "sc2.ids.ability_id.AbilityId",
+        "json": "string",
+        "meaning": "Ability enum; the actor must support the selected ability.",
+        "example": "MOVE"
+      },
+      "UpgradeId": {
+        "python_type": "sc2.ids.upgrade_id.UpgradeId",
+        "json": "string",
+        "meaning": "Research upgrade enum; distinct from UnitTypeId and AbilityId.",
+        "example": "STIMPACK"
+      },
+      "UnitRole": {
+        "python_type": "ares.consts.UnitRole",
+        "json": "string",
+        "meaning": "Ares unit-management role enum; valid names come from the local Ares version."
+      },
+      "Behavior": {
+        "python_type": "ares.behaviors.behavior.Behavior",
+        "json": "object",
+        "meaning": "Nested behavior specification requiring construction of a concrete Ares behavior. The type table does not define a nested-action wire format."
+      }
+    },
+    "composite": {
+      "CompositionEntry": {
+        "python_type": "dict[str, float | int]",
+        "json": "object",
+        "fields": {
+          "proportion": "float",
+          "priority": "int"
+        },
+        "meaning": "Both fields are required. proportion is the desired army fraction; priority is 0..10, with 0 highest.",
+        "example": {
+          "proportion": 1.0,
+          "priority": 0
+        }
+      },
+      "ArmyComposition": {
+        "python_type": "dict[UnitTypeId, dict[str, float | int]]",
+        "json": "object",
+        "type": "dict[UnitTypeId, CompositionEntry]",
+        "meaning": "Unit-type member names map to composition entries. Fractions sum to 1 for proportion-based spawning; SpawnController freeflow_mode ignores proportions.",
+        "example": {
+          "MARINE": {
+            "proportion": 1.0,
+            "priority": 0
+          }
+        }
+      },
+      "ResourcePair": {
+        "python_type": "tuple[int, int]",
+        "json": "array",
+        "type": "tuple[int, int]",
+        "meaning": "Exactly two resource thresholds in order: minerals, vespene.",
+        "example": [
+          400,
+          400
+        ]
+      },
+      "TagSet": {
+        "python_type": "set[int]",
+        "json": "array",
+        "type": "set[int]",
+        "meaning": "Unique SC2 unit tags, distinct from live Unit objects. Group tags must match the resolved group members.",
+        "example": [
+          851,
+          852
+        ]
+      },
+      "ActionTimes": {
+        "python_type": "dict[int, float]",
+        "json": "object",
+        "type": "dict[int, float]",
+        "meaning": "Worker tag to last action time in game seconds; mutable Mining bookkeeping supplied by the runtime.",
+        "example": {
+          "851": 12.5
+        }
+      }
+    }
   }
 }

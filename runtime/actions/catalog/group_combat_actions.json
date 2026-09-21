@@ -1,0 +1,435 @@
+{
+  "schema_version": "2.0",
+  "chapter": {
+    "id": "behavior.group_combat",
+    "title": "Group Combat Behaviors",
+    "documentation_url": "https://aressc2.github.io/ares-sc2/api_reference/behaviors/group_combat_behaviors.html"
+  },
+  "source": {
+    "ares_version": "3.9.6",
+    "git_commit": "0ac34b87f9471979f8de19a77020eed2d8693b26"
+  },
+  "types_file": "shared_types.json",
+  "conventions": {
+    "availability": "param identifies the actor argument, or is null for a global behavior. types lists allowed own UnitTypeId names; with param=null it is an any-of prerequisite filter. ALL imposes no static type restriction and includes structures. conditions are additional human-readable runtime checks, not implemented filter code; type membership alone does not guarantee execution.",
+    "params": "type uses shared_types.json names and generic/union syntax. required is independent of input and nullability; false means the Ares default permits omission. All model parameters, including optional ones, are part of this exported interface.",
+    "runtime": "input is model or runtime. Runtime parameters declare a fixed value or a registered source identifier. default is the Ares constructor default; value is an explicit agent policy override.",
+    "defaults": "Set and tuple defaults use JSON arrays and must be reconstructed using type. Mutable defaults are fresh per instance. default_python preserves the upstream Nydus bool/tuple mismatch without presenting it as a valid boolean.",
+    "scope": "Catalog consumed by the action runtime. llm_exposure controls model visibility; input controls the parameter provider. Disabled actions remain available to trusted internal callers."
+  },
+  "entries": [
+    {
+      "id": "combat.group.a_move_group",
+      "name": "AMoveGroup",
+      "description": "Attack-move a group toward a target.",
+      "tags": [
+        "combat",
+        "movement"
+      ],
+      "api": {
+        "import": "ares.behaviors.combat.group.a_move_group.AMoveGroup",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/group/a_move_group.py"
+      },
+      "availability": {
+        "param": "group",
+        "types": [
+          "ALL"
+        ],
+        "conditions": [
+          "Every group member supports attack-move."
+        ]
+      },
+      "params": [
+        {
+          "name": "group",
+          "type": "list[Unit]",
+          "description": "Units we want to control.",
+          "input": "model",
+          "required": true
+        },
+        {
+          "name": "group_tags",
+          "type": "set[int]",
+          "description": "Set of tags of the units in group; must match group.",
+          "input": "runtime",
+          "required": true,
+          "source": "group_tags"
+        },
+        {
+          "name": "target",
+          "type": "Point2 | Unit",
+          "description": "Attack-move target.",
+          "input": "model",
+          "required": true
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.group.group_use_ability",
+      "name": "GroupUseAbility",
+      "description": "Use one ability with a group of units.",
+      "tags": [
+        "combat",
+        "ability"
+      ],
+      "api": {
+        "import": "ares.behaviors.combat.group.group_use_ability.GroupUseAbility",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/group/group_use_ability.py"
+      },
+      "availability": {
+        "param": "group",
+        "types": [
+          "ALL"
+        ],
+        "conditions": [
+          "Every group member supports the selected ability; readiness is handled according to sync_command."
+        ]
+      },
+      "params": [
+        {
+          "name": "ability",
+          "type": "AbilityId",
+          "description": "Ability we want to use.",
+          "input": "model",
+          "required": true
+        },
+        {
+          "name": "group",
+          "type": "list[Unit]",
+          "description": "Units we want to control.",
+          "input": "model",
+          "required": true
+        },
+        {
+          "name": "group_tags",
+          "type": "set[int]",
+          "description": "Set of tags of the units in group; must match group.",
+          "input": "runtime",
+          "required": true,
+          "source": "group_tags"
+        },
+        {
+          "name": "target",
+          "type": "Point2 | Unit | null",
+          "description": "The target for this ability.",
+          "input": "model",
+          "required": true
+        },
+        {
+          "name": "sync_command",
+          "type": "bool",
+          "description": "(default=True) If True, wait for all units to be ready before trying ability.",
+          "input": "model",
+          "required": false,
+          "default": true
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.group.keep_group_safe",
+      "name": "KeepGroupSafe",
+      "description": "Avoid danger; attack when safe. close_enemy may be [].",
+      "tags": [
+        "combat",
+        "defense"
+      ],
+      "api": {
+        "import": "ares.behaviors.combat.group.keep_group_safe.KeepGroupSafe",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/group/keep_group_safe.py"
+      },
+      "availability": {
+        "param": "group",
+        "types": [
+          "ALL"
+        ],
+        "conditions": [
+          "Every group member can move on the selected grid."
+        ]
+      },
+      "params": [
+        {
+          "name": "group",
+          "type": "list[Unit]",
+          "description": "Units we want to control.",
+          "input": "model",
+          "required": true
+        },
+        {
+          "name": "close_enemy",
+          "type": "Units | list[Unit]",
+          "description": "Nearby enemy.",
+          "input": "model",
+          "required": true
+        },
+        {
+          "name": "grid",
+          "type": "Grid",
+          "description": "Grid we should check for safety.",
+          "input": "model",
+          "required": true
+        },
+        {
+          "name": "attack_in_range_enemy",
+          "type": "bool",
+          "description": "Whether to attack in range if weapon is ready.",
+          "input": "model",
+          "required": false,
+          "default": true
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.group.path_group_to_target",
+      "name": "PathGroupToTarget",
+      "description": "Path a group toward a target.",
+      "tags": [
+        "combat",
+        "movement"
+      ],
+      "api": {
+        "import": "ares.behaviors.combat.group.path_group_to_target.PathGroupToTarget",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/group/path_group_to_target.py"
+      },
+      "availability": {
+        "param": "group",
+        "types": [
+          "ALL"
+        ],
+        "conditions": [
+          "Every group member can move on the selected grid."
+        ]
+      },
+      "params": [
+        {
+          "name": "start",
+          "type": "Point2",
+          "description": "Where to start the path query.",
+          "input": "runtime",
+          "required": true,
+          "source": "group_center"
+        },
+        {
+          "name": "group",
+          "type": "list[Unit]",
+          "description": "The actual group units.",
+          "input": "model",
+          "required": true
+        },
+        {
+          "name": "group_tags",
+          "type": "set[int]",
+          "description": "Set of tags of the units in group; must match group.",
+          "input": "runtime",
+          "required": true,
+          "source": "group_tags"
+        },
+        {
+          "name": "grid",
+          "type": "Grid",
+          "description": "2D grid to path on.",
+          "input": "model",
+          "required": true
+        },
+        {
+          "name": "target",
+          "type": "Point2",
+          "description": "Target destination.",
+          "input": "model",
+          "required": true
+        },
+        {
+          "name": "distance_check_squared",
+          "type": "float",
+          "description": "Distance check squared.",
+          "input": "model",
+          "required": false,
+          "default": 26.25
+        },
+        {
+          "name": "success_at_distance",
+          "type": "float",
+          "description": "If the unit has gotten this close, consider the path behavior complete.",
+          "input": "model",
+          "required": false,
+          "default": 0.0
+        },
+        {
+          "name": "sensitivity",
+          "type": "int",
+          "description": "Path precision.",
+          "input": "model",
+          "required": false,
+          "default": 12
+        },
+        {
+          "name": "smoothing",
+          "type": "bool",
+          "description": "Whether to smooth out the path.",
+          "input": "model",
+          "required": false,
+          "default": false
+        },
+        {
+          "name": "sense_danger",
+          "type": "bool",
+          "description": "Whether to check for dangers.",
+          "input": "model",
+          "required": false,
+          "default": false
+        },
+        {
+          "name": "danger_distance",
+          "type": "float",
+          "description": "If sense_danger is True, how far to check for dangers.",
+          "input": "model",
+          "required": false,
+          "default": 20.0
+        },
+        {
+          "name": "danger_threshold",
+          "type": "float",
+          "description": "Influence at which a danger is respected.",
+          "input": "model",
+          "required": false,
+          "default": 5.0
+        },
+        {
+          "name": "prevent_duplicate",
+          "type": "bool",
+          "description": "Whether to try to prevent spamming actions.",
+          "input": "model",
+          "required": false,
+          "default": true
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.group.stutter_group_back",
+      "name": "StutterGroupBack",
+      "description": "Attack when ready; retreat the group during cooldown.",
+      "tags": [
+        "combat",
+        "movement"
+      ],
+      "api": {
+        "import": "ares.behaviors.combat.group.stutter_group_back.StutterGroupBack",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/group/stutter_group_back.py"
+      },
+      "availability": {
+        "param": "group",
+        "types": [
+          "ALL"
+        ],
+        "conditions": [
+          "Every group member can move; attack capability must match the target when attacking."
+        ]
+      },
+      "params": [
+        {
+          "name": "group",
+          "type": "list[Unit]",
+          "description": "The group of units we want to control.",
+          "input": "model",
+          "required": true
+        },
+        {
+          "name": "group_tags",
+          "type": "set[int]",
+          "description": "Set of tags of the units in group; must match group.",
+          "input": "runtime",
+          "required": true,
+          "source": "group_tags"
+        },
+        {
+          "name": "group_position",
+          "type": "Point2",
+          "description": "The position where this group is situated.",
+          "input": "runtime",
+          "required": true,
+          "source": "group_center"
+        },
+        {
+          "name": "target",
+          "type": "Point2 | Unit",
+          "description": "Target for the group.",
+          "input": "model",
+          "required": true
+        },
+        {
+          "name": "grid",
+          "type": "Grid",
+          "description": "Grid this group will use to path on.",
+          "input": "model",
+          "required": true
+        }
+      ],
+      "llm_exposure": "eligible"
+    },
+    {
+      "id": "combat.group.stutter_group_forward",
+      "name": "StutterGroupForward",
+      "description": "Attack when ready; advance the group during cooldown.",
+      "tags": [
+        "combat",
+        "movement"
+      ],
+      "api": {
+        "import": "ares.behaviors.combat.group.stutter_group_forward.StutterGroupForward",
+        "source_path": "ares-sc2/src/ares/behaviors/combat/group/stutter_group_forward.py"
+      },
+      "availability": {
+        "param": "group",
+        "types": [
+          "ALL"
+        ],
+        "conditions": [
+          "Every group member can move; attack capability must match the target when attacking."
+        ]
+      },
+      "params": [
+        {
+          "name": "group",
+          "type": "list[Unit]",
+          "description": "The group of units we want to control.",
+          "input": "model",
+          "required": true
+        },
+        {
+          "name": "group_tags",
+          "type": "set[int]",
+          "description": "Set of tags of the units in group; must match group.",
+          "input": "runtime",
+          "required": true,
+          "source": "group_tags"
+        },
+        {
+          "name": "group_position",
+          "type": "Point2",
+          "description": "The position where this group is situated.",
+          "input": "runtime",
+          "required": true,
+          "source": "group_center"
+        },
+        {
+          "name": "target",
+          "type": "Point2 | Unit",
+          "description": "Target for the group, used if no enemies are present.",
+          "input": "model",
+          "required": true
+        },
+        {
+          "name": "enemies",
+          "type": "Units | list[Unit]",
+          "description": "The enemy units we want to stutter towards.",
+          "input": "model",
+          "required": true
+        }
+      ],
+      "llm_exposure": "eligible"
+    }
+  ]
+}
