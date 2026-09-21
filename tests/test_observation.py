@@ -7,7 +7,7 @@ from agent.runtime.observation.builder import ObservationBuilder
 from agent.runtime.observation.overview import OverviewBuilder
 from agent.runtime.observation.renderer import observation_text
 from agent.runtime.observation.state import TagIdMapper
-from agent.runtime.actions.resolver import EntityContext
+from agent.runtime.actions.resolution.resolver import EntityContext
 
 
 def entity(tag, name, x=10, health=100, **kwargs):
@@ -23,21 +23,21 @@ class CompactObservationTests(unittest.TestCase):
 
     def test_workers_aggregate_but_scouts_and_controlled_workers_keep_ids(self):
         workers = [entity(1, "SCV"), entity(2, "SCV")]
-        self.builder._role_labels = lambda bot: {}
-        blocks = self.builder._own_unit_blocks(workers, self.context, self.bot)
+        self.builder.entities._role_labels = lambda bot: {}
+        blocks = self.builder.entities.own_unit_blocks(workers, self.context, self.bot)
         self.assertEqual(blocks, ["SCV*2 @main(6,6) working"])
         alias = self.builder.ids.alias(1)
         self.builder.sync_active_actions([{"id": "move", "args": {"unit": alias}}])
-        self.assertIn(f"SCV[{alias},", self.builder._own_unit_blocks(workers, self.context, self.bot)[0])
+        self.assertIn(f"SCV[{alias},", self.builder.entities.own_unit_blocks(workers, self.context, self.bot)[0])
         self.builder.sync_active_actions([])
-        self.builder._role_labels = lambda bot: {1: "scouting"}
-        blocks = self.builder._own_unit_blocks(workers, self.context, self.bot)
+        self.builder.entities._role_labels = lambda bot: {1: "scouting"}
+        blocks = self.builder.entities.own_unit_blocks(workers, self.context, self.bot)
         self.assertTrue(any(f"SCV[{alias}]" in block and "scouting" in block for block in blocks))
 
     def test_important_units_preserve_order_and_unknown_values(self):
         units = [entity(20, "BATTLECRUISER", health=100), entity(10, "BATTLECRUISER", health=10)]
         units[0].health = None
-        blocks = self.builder._own_unit_blocks(units, self.context, self.bot)
+        blocks = self.builder.entities.own_unit_blocks(units, self.context, self.bot)
         self.assertEqual(len(blocks), 1)
         self.assertIn("health=[10%,?]", blocks[0])
         self.assertIn("Tactical Jump=[", blocks[0])
@@ -45,7 +45,7 @@ class CompactObservationTests(unittest.TestCase):
 
     def test_combat_groups_keep_ids_and_separate_distant_positions(self):
         units = [entity(1, "MARINE"), entity(2, "MARINE", x=100)]
-        blocks = self.builder._own_unit_blocks(units, self.context, self.bot)
+        blocks = self.builder.entities.own_unit_blocks(units, self.context, self.bot)
         self.assertEqual(len(blocks), 2)
         self.assertTrue(all("Marine[" in block for block in blocks))
         self.assertNotEqual(blocks[0].split("@")[1], blocks[1].split("@")[1])
@@ -54,14 +54,14 @@ class CompactObservationTests(unittest.TestCase):
         structures = [entity(1, "SUPPLYDEPOT"), entity(2, "SUPPLYDEPOT"),
                       entity(3, "SUPPLYDEPOT", x=30, health=30),
                       entity(4, "STARPORT", build_progress=0.7, has_techlab=True)]
-        blocks = self.builder._structure_blocks(structures, self.context, self.bot, own=True)
+        blocks = self.builder.entities.structure_blocks(structures, self.context, self.bot, own=True)
         self.assertTrue(any("Supply Depot*2" in block for block in blocks))
         self.assertTrue(any("Supply Depot[" in block and "health=[30%]" in block for block in blocks))
         self.assertTrue(any("building=70% addon=TechLab" in block for block in blocks))
 
     def test_memory_has_counts_and_age_but_no_selectable_ids(self):
         units = [entity(1, "MARINE", age=8), entity(2, "MARINE", age=12)]
-        blocks = self.builder._remembered_enemy_unit_blocks(units, self.bot)
+        blocks = self.builder.entities.remembered_enemy_unit_blocks(units, self.bot)
         self.assertEqual(len(blocks), 1)
         self.assertIn("Marine*2", blocks[0])
         self.assertIn("last_seen=8-12s_ago", blocks[0])
@@ -82,7 +82,7 @@ class CompactObservationTests(unittest.TestCase):
 
     def test_enemy_shield_damage_and_rendered_sections(self):
         unit = entity(1, "STALKER", shield=20, shield_max=80)
-        blocks = self.builder._enemy_unit_blocks([unit], self.context, self.bot)
+        blocks = self.builder.entities.enemy_unit_blocks([unit], self.context, self.bot)
         self.assertIn("shield=[25%]", blocks[0])
         data = dict.fromkeys((
             "own_unit_blocks", "own_structure_blocks", "enemy_structure_blocks",

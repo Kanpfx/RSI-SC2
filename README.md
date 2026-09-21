@@ -101,15 +101,20 @@ python run.py --map_name Simple64 --difficulty VeryHard --enemy_race Terran --ta
 - `output_working.md`：第一轮输出要求，仅生成“当前阶段”和“具体指导”。
 - `output.md`：第二轮输出要求，依据第一轮指导生成 DSL 动作。
 
-通用记忆保存在 `context/memory/general.md`，包含全局约束、控制范围与通用经验；战术经验保存在 `context/memory/tactics/`。这些文件开局加载并归档，修改后下一局生效。每个决策周期独立调用两轮：第一轮输入共享规则、完整战术和观测，回复直接保存为本局 `working.md`，不额外校验格式或长度；第二轮独立组装上下文，以本轮 working 为主要决策指导，提供共享规则、相同观测、动作表和执行反馈，不携带第一轮对话或战术表，仅生成动作。第一轮不输入旧 working；周期之间不累积完整对话。动作回复只接受 `# actions` 段，不兼容旧的 `# working` 段。
+通用记忆保存在 `context/memory/general.md`，包含全局约束、控制范围与通用经验；战术经验保存在 `context/memory/tactics/`。这些文件开局加载并归档，修改后下一局生效。每个决策周期独立调用两轮：第一轮输入共享规则、完整战术和观测，回复保留在内存和系统日志中，不单独生成 `working.md`，不额外校验格式或长度；第二轮独立组装上下文，以本轮 working 为主要决策指导，提供共享规则、相同观测、动作表和执行反馈，不携带第一轮对话或战术表，仅生成动作。第一轮不输入旧 working；周期之间不累积完整对话。动作回复只接受 `# actions` 段，不兼容旧的 `# working` 段。
 
 每局生成 `logs/<时间戳>/`，主要内容包括：
 
-- `obs.jsonl`、`model.jsonl`：观测、模型请求与回复。
-- `accepted_actions.jsonl`、`events.jsonl`：采纳动作、校验与执行事件。
-- `context/`、`working.md`、`settings.json`：上下文快照、最新工作记忆与运行设置。
-- `metadata.json`：对局信息与结果。
-- `console.log`、`replay.SC2Replay`：控制台输出与对局录像。
+- `system/obs.jsonl`、`system/model.jsonl`：观测、模型请求与回复。
+- `system/accepted_actions.jsonl`、`system/events.jsonl`：采纳动作、校验与执行事件。
+- `context/general.md`、`context/<本局战术>.md`：本局使用的通用记忆和战术文件，与 `system/`、`data/` 平级。
+- `system/settings.json`：运行设置。
+- `system/metadata.json`：对局信息与结果。
+- `system/console.log`、`replay.SC2Replay`：控制台输出与对局录像。
+
+系统日志采用 schema version 3，每条 JSONL 记录包含 `run_id`。模型两轮请求分别标记 `working` / `actions`，具有独立 `request_id`，重试使用所属请求的 `attempt_id`。观测与执行分别记录迭代编号、可获取的 SC2 game loop 和游戏时间；异步响应只关联原观测，不推测当前游戏帧。
+
+不单独归档动作表或其 hash，也不单独归档固定 Prompt 文件；模型日志仍保留实际发送的完整 messages。metadata 保存上述两份 context 文件的 SHA-256、代码及 Ares commit、工作区修改状态、Python/关键依赖版本和可获取的 SC2 base build；未知版本与未显式配置的随机种子记为 null。未提交代码只记录修改状态，不保存代码补丁，因此不能仅凭 commit 完整还原修改中的工作区。后续 RSI 数据预留在 `data/`，目前只有未接入的接口框架。日志查看器仅支持当前格式，请选择包含 `system/` 和 `context/` 的对局目录。
 
 ## 测试
 

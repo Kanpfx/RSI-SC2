@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agent.config import GameConfig
-from agent.runtime.actions.adapter import AresActionAdapter
+from agent.runtime.actions.execution.adapter import AresActionAdapter
 from agent.runtime.actions.errors import (
     ActionNameError,
     ConflictError,
@@ -14,10 +14,11 @@ from agent.runtime.actions.errors import (
     OutputFormatError,
     ParameterError,
 )
-from agent.runtime.actions.exposure import ActionSurface, validate_resolved
-from agent.runtime.actions.types import symbol, type_names
-from agent.runtime.actions.resolver import EntityContext
-from agent.runtime.actions.loader import ActionCatalog
+from agent.runtime.actions.policy.exposure import ActionSurface
+from agent.runtime.actions.policy.rules import validate_resolved
+from agent.runtime.actions.resolution.types import symbol, type_names
+from agent.runtime.actions.resolution.resolver import EntityContext
+from agent.runtime.actions.resolution.loader import ActionCatalog
 
 
 @dataclass(frozen=True)

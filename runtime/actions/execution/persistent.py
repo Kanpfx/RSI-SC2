@@ -6,7 +6,7 @@ import json
 from copy import deepcopy
 from typing import Any
 
-from agent.runtime.actions.loader import ActionCatalog
+from agent.runtime.actions.resolution.loader import ActionCatalog
 
 PERSISTENT_ACTION_IDS = {
     "combat.bc.move_safely",

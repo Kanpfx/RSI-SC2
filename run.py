@@ -126,7 +126,8 @@ def main() -> None:
     enemy_race = Race[args.enemy_race]
     match_log_directory = PROJECT_ROOT / "logs" / datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     match_log_directory.mkdir(parents=True, exist_ok=False)
-    with mirror_console(match_log_directory / "console.log"):
+    (match_log_directory / "system").mkdir()
+    with mirror_console(match_log_directory / "system" / "console.log"):
         configure_console_logging()
         try:
             bot = Bot(

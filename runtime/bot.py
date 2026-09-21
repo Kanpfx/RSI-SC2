@@ -34,7 +34,7 @@ class WhyBot(AresBot):
         await super().on_start()
         self.llm_controller = LLMGameController(
             tactic_name=self.tactic_name,
-            run_metadata=self.run_metadata,
+            run_metadata={**self.run_metadata, "sc2_base_build": getattr(self, "base_build", None)},
             log_directory=self.log_directory,
         )
         if not self.llm_controller.active:

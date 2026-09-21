@@ -6,9 +6,9 @@ from html import escape
 from textwrap import indent
 from typing import Any
 
-from agent.runtime.actions.persistent import PERSISTENT_ACTION_IDS
-from agent.runtime.actions.loader import load_type_definitions
-from agent.runtime.actions.types import type_names
+from agent.runtime.actions.execution.persistent import PERSISTENT_ACTION_IDS
+from agent.runtime.actions.resolution.loader import load_type_definitions
+from agent.runtime.actions.resolution.types import type_names
 from agent.runtime.actions.formatting import format_value
 
 # Parameters self-evident from their name and the type legend. The action table

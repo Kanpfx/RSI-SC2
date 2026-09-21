@@ -7,7 +7,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
-from agent.runtime.actions.loader import ActionCatalog
+from agent.runtime.actions.resolution.loader import ActionCatalog
 
 
 @dataclass(frozen=True)

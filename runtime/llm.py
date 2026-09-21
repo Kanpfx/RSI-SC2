@@ -145,11 +145,13 @@ class ModelAgent:
                   iteration: int, action_message: dict[str, str], action_system: str,
                   on_working: Callable[[str], None]) -> ModelResult:
         started = perf_counter()
-        working = await self.client.complete(messages, trace=trace, iteration=iteration)
+        working_trace = trace.request_trace(iteration, "working")
+        working = await self.client.complete(messages, trace=working_trace, iteration=iteration)
         on_working(working)
         messages = [{"role": "system", "content": action_system}, {"role": "user", "content":
                     "<core_missions>\n" + working + "\n</core_missions>\n\n" + action_message["content"]}]
-        reply = await self.client.complete(messages, trace=trace, iteration=iteration)
+        action_trace = trace.request_trace(iteration, "actions")
+        reply = await self.client.complete(messages, trace=action_trace, iteration=iteration)
         received = perf_counter()
         latency = round((received - started) * 1000)
         try:
@@ -157,12 +159,12 @@ class ModelAgent:
         except ValueError as exc:
             feedback = [{"kind": "output_format", "submitted_output": reply, "error": str(exc)}]
             report = {"valid": False, "errors": feedback, "sources": []}
-            trace.model_conversation(stage="parsed", iteration=iteration, actions=[], parse_report=report)
+            action_trace.model_conversation(stage="parsed", iteration=iteration, actions=[], parse_report=report)
             return ModelResult([], feedback, latency, received_at=received, parse_report=report)
         feedback = [{"kind": "action_format", "action_index": error["index"] + 1,
                      "submitted_action": error["submitted_action"], "error": error["error"]}
                     for error in payload["errors"]]
         report = {"valid": not feedback, "errors": feedback, "sources": payload["sources"]}
-        trace.model_conversation(stage="parsed", iteration=iteration, actions=payload["actions"],
+        action_trace.model_conversation(stage="parsed", iteration=iteration, actions=payload["actions"],
                                  working=working, parse_report=report)
         return ModelResult(payload["actions"], feedback, latency, working, received, report)

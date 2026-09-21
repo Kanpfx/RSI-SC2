@@ -202,12 +202,12 @@
   <script>
     const wantedFiles = new Set([
       "metadata.json", "obs.jsonl", "model.jsonl",
-      "accepted_actions.jsonl", "events.jsonl", "console.log", "settings.json", "working.md",
+      "accepted_actions.jsonl", "events.jsonl", "console.log", "settings.json",
     ]);
-    const state = { metadata: {}, observations: [], model: [], decisions: [], events: [], console: "", iterations: [], settings: {}, working: null, snapshots: [] };
+    const state = { metadata: {}, observations: [], model: [], decisions: [], events: [], console: "", iterations: [], settings: {}, snapshots: [] };
     const rowIteration = row => {
       const decision = /^d(\d+)$/.exec(row.decision_id || "");
-      return decision ? Number(decision[1]) : Number(Number.isFinite(row.request_iteration) && row.request_iteration >= 0 ? row.request_iteration : (row.iteration ?? row.tick ?? row.loop));
+      return decision ? Number(decision[1]) : NaN;
     };
     const byIteration = rows => new Map(rows.map(row => [rowIteration(row), row]));
     let indexes = {};
@@ -282,13 +282,14 @@
       for (const file of files) {
         const path = file.logPath || (file.webkitRelativePath
           ? file.webkitRelativePath.split("/").slice(1).join("/") : file.name);
-        if (wantedFiles.has(path) || (path.startsWith("context/") && path.endsWith(".md"))) selected.set(path, file);
+        if (path.startsWith("system/") && wantedFiles.has(path.slice(7))) selected.set(path.slice(7), file);
+        else if (/^context\/[^/]+\.md$/.test(path)) selected.set(path, file);
       }
-      if (!selected.has("metadata.json") || !selected.has("model.jsonl")) throw new Error("未找到 metadata.json 或 model.jsonl；请选择一局新格式日志的直接目录。");
+      if (!selected.has("metadata.json") || !selected.has("model.jsonl")) throw new Error("未找到 system/metadata.json 或 system/model.jsonl；请选择包含 system 和 context 的对局目录。");
       const read = async name => selected.has(name) ? selected.get(name).text() : "";
-      const [metadata, obs, model, decisions, events, consoleText, settings, working] = await Promise.all([
+      const [metadata, obs, model, decisions, events, consoleText, settings] = await Promise.all([
         read("metadata.json"), read("obs.jsonl"), read("model.jsonl"),
-        read("accepted_actions.jsonl"), read("events.jsonl"), read("console.log"), read("settings.json"), read("working.md"),
+        read("accepted_actions.jsonl"), read("events.jsonl"), read("console.log"), read("settings.json"),
       ]);
       state.metadata = metadata ? JSON.parse(metadata) : {};
       state.observations = obs ? parseJsonl(obs, "obs.jsonl") : [];
@@ -297,7 +298,6 @@
       state.events = events ? parseJsonl(events, "events.jsonl") : [];
       state.console = consoleText;
       state.settings = settings ? JSON.parse(settings) : {};
-      state.working = selected.has("working.md") ? working : null;
       state.snapshots = await Promise.all([...selected.keys()].filter(path => path.startsWith("context/"))
         .sort().map(async path => [path, await read(path)]));
 
@@ -328,7 +328,6 @@
       $("context-details").classList.remove("hidden");
       replacePanel("context-panel", [
         fold("运行设置", formatFields(state.settings)),
-        fold("最新工作记忆（日志读取时，不随决策切换）", state.working === null ? "未保存 working.md" : state.working || "[空]"),
         ...state.snapshots.map(([path, content]) => fold(path, content)),
       ]);
       renderSummary();
@@ -394,12 +393,14 @@
     function modelRecords(iteration) {
       const rows = indexes.model.get(iteration) || [];
       const last = stage => rows.filter(row => row.stage === stage).at(-1);
-      const rounds = [];
+      const requests = new Map();
       for (const row of rows) {
-        if (row.stage === "request") rounds.push({ request: row, response: {} });
-        else if (row.stage === "response" && rounds.length) rounds.at(-1).response = row;
+        if (row.stage === "request") requests.set(row.request_id, { request: row, response: {} });
+        else if (row.stage === "response" && requests.has(row.request_id)) requests.get(row.request_id).response = row;
       }
-      const [planning, execution] = rounds;
+      const rounds = [...requests.values()];
+      const planning = rounds.find(round => round.request.request_phase === "working");
+      const execution = rounds.find(round => round.request.request_phase === "actions");
       return {
         rows, rounds, planning,
         request: execution?.request || planning?.request || {},
@@ -549,23 +550,24 @@
       if (!window.showDirectoryPicker) { $("directory-input").click(); return; }
       try {
         const directory = await window.showDirectoryPicker({ mode: "read" });
+        const system = await directory.getDirectoryHandle("system");
         const files = [];
         for (const name of wantedFiles) {
-          try { files.push(await (await directory.getFileHandle(name)).getFile()); }
+          try {
+            const file = await (await system.getFileHandle(name)).getFile();
+            files.push({ logPath: `system/${name}`, text: () => file.text() });
+          }
           catch (_) { /* Optional log file is absent. */ }
         }
 
-        async function readContext(handle, prefix) {
-          for await (const entry of handle.values()) {
-            const path = `${prefix}/${entry.name}`;
-            if (entry.kind === "directory") await readContext(entry, path);
-            else if (entry.name.endsWith(".md")) {
-              const file = await entry.getFile();
-              files.push({ name: file.name, logPath: path, text: () => file.text() });
-            }
+        try {
+          const context = await directory.getDirectoryHandle("context");
+          for await (const entry of context.values()) {
+            if (entry.kind !== "file" || !entry.name.endsWith(".md")) continue;
+            const file = await entry.getFile();
+            files.push({ logPath: `context/${entry.name}`, text: () => file.text() });
           }
         }
-        try { await readContext(await directory.getDirectoryHandle("context"), "context"); }
         catch (error) { if (error.name !== "NotFoundError") throw error; }
         await loadFiles(files);
       } catch (error) {

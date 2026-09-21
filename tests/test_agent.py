@@ -15,14 +15,14 @@ from agent.runtime.automation import AutomationController
 from agent.runtime.observation.builder import Observation
 from agent.runtime.parser import parse_model_payload
 from agent.runtime.actions.errors import OutputFormatError
-from agent.runtime.actions.resolver import EntityContext
+from agent.runtime.actions.resolution.resolver import EntityContext
 from agent.runtime.controller import LLMGameController
 
 
 class ContextAndParserTests(unittest.TestCase):
     def test_migrated_catalog_constructs_real_ares_behaviors(self):
-        from agent.runtime.actions.loader import ActionCatalog
-        from agent.runtime.actions.adapter import AresActionAdapter
+        from agent.runtime.actions.resolution.loader import ActionCatalog
+        from agent.runtime.actions.execution.adapter import AresActionAdapter
         from sc2.ids.unit_typeid import UnitTypeId
 
         actions = parse_model_payload(
@@ -124,7 +124,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         await self.deliver()
         self.assertEqual(self.controller.automation.worker_target, 22)
         self.assertEqual(self.controller.context_builder.working, self.working)
-        self.assertEqual((self.directory / "working.md").read_text(encoding="utf-8"), self.working)
+        self.assertFalse((self.directory / "system/working.md").exists())
         messages = self.controller.client.complete.call_args.args[0]
         self.assertEqual([m["role"] for m in messages], ["system", "user"])
         self.assertEqual(messages[0]["content"], self.controller.context_builder.sources["prompts/system_actions.md"])
@@ -153,17 +153,17 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         messages = self.controller.client.complete.call_args_list[2].args[0]
         self.assertNotIn("Prepare expansion.", messages[1]["content"])
         self.assertEqual(self.controller.client.complete.await_count, 4)
-        settings = (self.directory / "settings.json").read_text()
+        settings = (self.directory / "system/settings.json").read_text()
         self.assertNotIn("test-secret", settings)
-        self.assertTrue((self.directory / "context/memory/tactics/BattleCruiserRush.md").exists())
-        events = [json.loads(line) for line in (self.directory / "events.jsonl").read_text().splitlines()]
+        self.assertTrue((self.directory / "context/BattleCruiserRush.md").exists())
+        events = [json.loads(line) for line in (self.directory / "system/events.jsonl").read_text().splitlines()]
         self.assertTrue(any(event["event"] == "working_memory_updated" for event in events))
 
     async def test_second_round_failure_keeps_saved_working(self):
         async def complete(messages, **kwargs):
             if not messages[1]["content"].startswith("<core_missions>\n"):
                 return self.working
-            self.assertEqual((self.directory / "working.md").read_text(encoding="utf-8"), self.working)
+            self.assertFalse((self.directory / "system/working.md").exists())
             raise RuntimeError("execution request failed")
 
         self.controller.client.complete = AsyncMock(side_effect=complete)

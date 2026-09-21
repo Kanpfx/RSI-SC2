@@ -9,7 +9,7 @@ from functools import lru_cache
 from typing import Any
 
 from agent.runtime.actions.errors import ResolveError
-from agent.runtime.actions.resolver import EntityContext
+from agent.runtime.actions.resolution.resolver import EntityContext
 
 
 def symbol(value: str) -> str:

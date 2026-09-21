@@ -9,15 +9,15 @@ from pathlib import Path
 from typing import Any
 
 from agent.runtime.actions.errors import ActionNameError
-from agent.runtime.actions.types import TypeResolver, symbol
-from agent.runtime.actions.resolver import RUNTIME_SOURCES
+from agent.runtime.actions.resolution.types import TypeResolver, symbol
+from agent.runtime.actions.resolution.resolver import RUNTIME_SOURCES
 
 
 def catalog_root() -> Path:
     configured = os.getenv("AGENT_KNOWLEDGE_ROOT")
     if configured:
         return Path(configured).resolve()
-    return Path(__file__).resolve().parent / "catalog"
+    return Path(__file__).resolve().parents[1] / "catalog"
 
 
 def resolved_catalog_root() -> Path:

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
-from threading import Lock
 from pathlib import Path
 from typing import Any
+
+from agent.logger.system.writer import SystemWriter
+from agent.logger.system.records import RequestTrace, decision_fields
+from agent.logger.system.manifest import runtime_manifest, snapshot_sources
 
 
 class Telemetry:
@@ -29,8 +31,15 @@ class Telemetry:
         else:
             self.directory = directory
             self.directory.mkdir(parents=True, exist_ok=True)
-        self._lock = Lock()
-        self._metadata = {"log_schema_version": 2, **(metadata or {})}
+        self.run_id = self.directory.name
+        self.system_directory = self.directory / "system"
+        self._writer = SystemWriter(self.system_directory)
+        self._decisions: dict[int, dict[str, Any]] = {}
+        self._metadata = {
+            "log_schema_version": 3, "run_id": self.run_id,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            **runtime_manifest(), **(metadata or {}),
+        }
         self._write_json("metadata.json", self._metadata)
         for filename in (
             "obs.jsonl",
@@ -38,26 +47,32 @@ class Telemetry:
             "accepted_actions.jsonl",
             "events.jsonl",
         ):
-            (self.directory / filename).touch()
+            (self.system_directory / filename).touch()
 
     def snapshot_context(self, sources: dict[str, str], settings: dict[str, Any]) -> None:
         """Archive the exact editable sources loaded for this match."""
-        root = self.directory / "context"
-        for name, content in sources.items():
-            path = root / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
+        context = snapshot_sources(self.directory / "context", sources)
+        self.update_metadata(context_snapshot=context)
         self._write_json("settings.json", settings)
-        (self.directory / "working.md").write_text("", encoding="utf-8")
+
+    def request_trace(self, iteration: int, phase: str) -> RequestTrace:
+        return RequestTrace(self, iteration, phase)
 
     def working_memory(self, content: str, **fields: Any) -> None:
-        (self.directory / "working.md").write_text(content, encoding="utf-8")
         self.event("working_memory_updated", content=content, **fields)
 
     def event(self, name: str, **fields: Any) -> None:
         self._append("events.jsonl", {"event": name, **fields})
 
     def observation(self, **fields: Any) -> None:
+        iteration = fields.get("iteration")
+        if iteration is not None:
+            self._decisions[iteration] = {
+                **decision_fields(iteration),
+                "observation_iteration": iteration,
+                "observation_game_loop": fields.get("game_loop"),
+                "observation_game_time": fields.get("game_time"),
+            }
         self._append("obs.jsonl", fields)
 
     def model_conversation(self, **fields: Any) -> None:
@@ -72,14 +87,10 @@ class Telemetry:
         self._write_json("metadata.json", self._metadata)
 
     def _append(self, filename: str, fields: dict[str, Any]) -> None:
-        fields = {"timestamp": datetime.now(timezone.utc).isoformat(), **fields}
         request_iteration = fields.get("request_iteration", fields.get("iteration"))
-        if request_iteration is not None and request_iteration >= 0:
-            fields.setdefault("decision_id", f"d{request_iteration}")
-        with self._lock:
-            with (self.directory / filename).open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(fields, ensure_ascii=False, default=str) + "\n")
+        refs = decision_fields(request_iteration)
+        refs.update(self._decisions.get(request_iteration, {}))
+        self._writer.append(filename, {**refs, **fields, "run_id": self.run_id})
 
     def _write_json(self, filename: str, fields: dict[str, Any]) -> None:
-        with (self.directory / filename).open("w", encoding="utf-8") as handle:
-            json.dump(fields, handle, ensure_ascii=False, indent=2, default=str)
+        self._writer.write_json(filename, fields)

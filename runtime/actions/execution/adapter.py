@@ -7,9 +7,9 @@ from math import isclose
 from typing import Any
 
 from agent.runtime.actions.errors import InstructionError, ParameterError, ResolveError
-from agent.runtime.actions.loader import ActionCatalog
-from agent.runtime.actions.resolver import EntityContext
-from agent.runtime.actions.types import symbol
+from agent.runtime.actions.resolution.loader import ActionCatalog
+from agent.runtime.actions.resolution.resolver import EntityContext
+from agent.runtime.actions.resolution.types import symbol
 
 
 @lru_cache(maxsize=128)
