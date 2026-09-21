@@ -8,7 +8,7 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class GameConfig:
-    model_interval_seconds: float = 60 * 2 / 22.4
+    model_interval_seconds: float = 80 * 2 / 22.4
     max_actions_per_decision: int = 6
     max_action_units: int = 12
     max_action_targets: int = 8

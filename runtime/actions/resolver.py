@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 from typing import Any
 
 from agent.runtime.actions.errors import ResolveError
+
+RUNTIME_SOURCES = {"group_tags", "group_center", "combat_children", "macro_children", "mining_action_times"}
 
 
 def _normalized_label(value: str) -> str:
@@ -19,6 +22,25 @@ class EntityContext:
     positions: dict[str, Any] = field(default_factory=dict)
     grids: dict[str, Any] = field(default_factory=dict)
     known_own_aliases: set[str] = field(default_factory=set)
+    bot: Any = None
+    max_point_nudge_tiles: float = 2.0
+    runtime_values: dict[str, Any] = field(default_factory=dict)
+
+    def runtime_value(self, source: str, args: dict[str, Any]) -> Any:
+        if source in {"group_tags", "group_center"}:
+            group = args.get("group", [])
+            if not group:
+                raise ResolveError.format("group", "a non-empty resolved group")
+            if source == "group_tags":
+                return {unit.tag for unit in group}
+            from sc2.position import Point2
+            return Point2((sum(u.position.x for u in group) / len(group),
+                           sum(u.position.y for u in group) / len(group)))
+        if source in {"combat_children", "macro_children"}:
+            return list(self.runtime_values.get(source, []))
+        if source == "mining_action_times":
+            return self.runtime_values.setdefault(source, {})
+        raise ResolveError.invalid_value("source", source, "a registered runtime source")
 
     @property
     def entities(self) -> dict[str, Any]:
@@ -66,37 +88,38 @@ class EntityContext:
             )
             raise ResolveError(reason, f"unit {canonical}", parameter="unit", actual=canonical) from exc
 
-    def derive_group_value(self, derivation: str, aliases: Any) -> Any:
-        """Resolve from this frame, including on every persistent-action replay."""
-        if not isinstance(aliases, list) or not aliases:
-            raise ResolveError.format("group", "a non-empty own-unit ID list")
-        units = {self.canonical_entity_alias(alias): self.resolve_entity(alias, own_only=True)
-                 for alias in aliases}
-        if derivation == "group_tags":
-            return {unit.tag for unit in units.values()}
-        if derivation == "group_center":
-            from sc2.position import Point2
-
-            return Point2((sum(unit.position.x for unit in units.values()) / len(units),
-                           sum(unit.position.y for unit in units.values()) / len(units)))
-        raise ResolveError.invalid_value("derive", derivation, "group_tags or group_center")
-
     def resolve_point(self, value: Any) -> Any:
         if isinstance(value, str):
             try:
-                return self.positions[_normalized_label(value)]
+                point = self.positions[_normalized_label(value)]
+                value = {"x": point.x, "y": point.y}
             except KeyError as exc:
                 raise ResolveError.invalid_value(
                     "point", value, "a known landmark or an {x, y} coordinate"
                 ) from exc
         if (
             not isinstance(value, dict)
-            or not isinstance(value.get("x"), (int, float))
-            or not isinstance(value.get("y"), (int, float))
+            or set(value) != {"x", "y"}
+            or any(type(value.get(k)) not in (int, float) for k in ("x", "y"))
         ):
             raise ResolveError.format(
                 "point", "a known landmark or an {x, y} coordinate object"
             )
         from sc2.position import Point2
 
-        return Point2((value["x"], value["y"]))
+        try:
+            x, y = float(value["x"]), float(value["y"])
+        except OverflowError as exc:
+            raise ResolveError.format("point", "finite coordinates") from exc
+        if not math.isfinite(x) or not math.isfinite(y):
+            raise ResolveError.format("point", "finite coordinates")
+        area = getattr(getattr(self.bot, "game_info", None), "playable_area", None)
+        if area is not None:
+            cx = min(max(x, area.x), area.x + area.width - 1.0)
+            cy = min(max(y, area.y), area.y + area.height - 1.0)
+            if max(abs(cx - x), abs(cy - y)) > self.max_point_nudge_tiles:
+                raise ResolveError.invalid_value("point", value, "a coordinate inside the playable area")
+            x, y = cx, cy
+        elif x < 0 or y < 0:
+            raise ResolveError.invalid_value("point", value, "nonnegative map coordinates")
+        return Point2((x, y))

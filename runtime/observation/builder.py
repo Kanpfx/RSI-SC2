@@ -208,7 +208,7 @@ class ObservationBuilder:
 
     def execution_context(self, bot: Any) -> EntityContext:
         """Build a lightweight current-frame context without rendering a prompt."""
-        context = EntityContext()
+        context = EntityContext(bot=bot, )
         self._add_execution_context(bot, context)
         for entity in list(bot.units) + list(bot.structures):
             context.own_entities[self.ids.alias(entity.tag)] = entity

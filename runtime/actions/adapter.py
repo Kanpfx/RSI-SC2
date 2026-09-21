@@ -1,223 +1,115 @@
-"""Compile only catalog-described instructions into registered Ares behaviors."""
-
+"""Resolve catalog arguments and construct Ares behaviors."""
 from __future__ import annotations
 
 import importlib
+from functools import lru_cache
 from math import isclose
 from typing import Any
 
-from agent.runtime.actions.errors import (
-    ActionNameError,
-    InstructionError,
-    ParameterError,
-    ResolveError,
-)
-from agent.runtime.actions.resolver import EntityContext
+from agent.runtime.actions.errors import InstructionError, ParameterError, ResolveError
 from agent.runtime.actions.loader import ActionCatalog
+from agent.runtime.actions.resolver import EntityContext
+from agent.runtime.actions.types import symbol
 
 
-# Common multiplayer names can otherwise resolve to unrelated campaign enums.
-UPGRADE_NAME_ALIASES = {
-    "combatshield": "shieldwall",
-    "combatshields": "shieldwall",
-    "concussiveshell": "punishergrenades",
-    "concussiveshells": "punishergrenades",
-}
+@lru_cache(maxsize=128)
+def behavior_class(import_path: str) -> type:
+    if not import_path.startswith("ares.behaviors."):
+        raise ValueError("Only catalog Ares behavior imports are supported")
+    module, name = import_path.rsplit(".", 1)
+    return getattr(importlib.import_module(module), name)
 
 
 class AresActionAdapter:
     def __init__(self, catalog: ActionCatalog):
         self.catalog = catalog
 
-    def compile_and_register(
-        self, bot: Any, actions: list[dict[str, Any]], context: EntityContext
-    ) -> list[Any]:
+    def compile_and_register(self, bot: Any, actions: list[dict[str, Any]], context: EntityContext) -> list[Any]:
+        context.bot = bot
         compiled = self.compile(actions, context)
         for behavior in compiled:
             bot.register_behavior(behavior)
         return compiled
 
-    def compile(
-        self, actions: list[dict[str, Any]], context: EntityContext
-    ) -> list[Any]:
-        """Construct catalog behaviors without choosing how they are scheduled."""
-        compiled: list[Any] = []
-        for action in actions:
-            entry = self._validate_shape(action)
-            kwargs = self._resolve_arguments(entry, action["args"], context)
-            module_name, class_name = entry["api"]["import"].rsplit(".", 1)
-            behavior_type = getattr(importlib.import_module(module_name), class_name)
-            behavior = behavior_type(**kwargs)
-            compiled.append(behavior)
-        return compiled
+    def construct(self, action: dict[str, Any], kwargs: dict[str, Any]) -> Any:
+        return behavior_class(self.catalog.get(action["id"])["api"]["import"])(**kwargs)
 
-    def _validate_shape(self, action: Any) -> dict[str, Any]:
+    def compile(self, actions: list[dict[str, Any]], context: EntityContext) -> list[Any]:
+        # LLM exposure is enforced at the model review boundary, not for internal callers.
+        return [self.construct(action, kwargs) for action, kwargs in
+                (self.prepare(action, context) for action in actions)]
+
+    def prepare(self, action: Any, context: EntityContext) -> tuple[dict[str, Any], dict[str, Any]]:
         if not isinstance(action, dict) or set(action) != {"id", "args"}:
-            raise InstructionError(
-                "format error", "each action must contain exactly 'id' and 'args'"
-            )
-        if not isinstance(action["id"], str) or not isinstance(action["args"], dict):
-            raise InstructionError(
-                "format error",
-                "action 'id' must be a string and 'args' must be a JSON object",
-            )
-        entry = self.catalog.get(action["id"])
-        if entry.get("llm_exposure") != "eligible":
-            raise ActionNameError.disabled(action["id"])
-        return entry
-
-    def _resolve_arguments(
-        self, entry: dict[str, Any], args: dict[str, Any], context: EntityContext
-    ) -> dict[str, Any]:
-        params = self.catalog.required_model_params(entry)
-        unknown = set(args) - set(params)
-        if unknown:
-            raise ParameterError.unexpected(sorted(unknown))
-        kwargs: dict[str, Any] = {}
+            raise InstructionError("format error", "action must contain exactly id and args")
+        if not isinstance(action['id'], str) or not isinstance(action['args'], dict):
+            raise InstructionError("format error", "id must be a string and args an object")
+        entry = self.catalog.get(action['id'])
+        params = self.catalog.model_params(entry)
+        aliases = {symbol(name): name for name in params}
+        supplied = {}
+        for raw_name, value in action['args'].items():
+            if not isinstance(raw_name, str):
+                raise ParameterError.format('args', 'string parameter names')
+            name = aliases.get(symbol(raw_name), raw_name)
+            if name not in params:
+                raise ParameterError.unexpected([name])
+            if name in supplied:
+                raise ParameterError.duplicate(name)
+            supplied[name] = value
+        wire, kwargs = {}, {}
         for name, param in params.items():
-            if name not in args:
-                raise ParameterError.missing(name)
-            if entry["id"] == "combat.group.keep_group_safe" and name == "close_enemy" and args[name] == []:
-                kwargs[name] = []
-            elif entry["id"] == "macro.tech_up" and name == "desired_tech":
-                kwargs[name] = self._resolve_tech_up_target(args[name])
+            if name not in supplied:
+                if param['required']:
+                    raise ParameterError.missing(name)
+                continue  # Ares supplies its constructor default, including fresh collections.
+            wire[name], kwargs[name] = self.catalog.type_resolver.resolve(
+                supplied[name], param['type'], context, name)
+            if 'choices' in param and wire[name] is not None and wire[name] not in param['choices']:
+                raise ParameterError.invalid_value(name, wire[name], str(param['choices']))
+        for param in entry['params']:
+            if param['input'] != 'runtime':
+                continue
+            if 'value' in param:
+                _, kwargs[param['name']] = self.catalog.type_resolver.resolve(
+                    param['value'], param['type'], context, param['name'])
             else:
-                kwargs[name] = self._resolve_value(
-                    args[name], param["type"], context, args, name
-                )
-        for param in entry["params"]:
-            if param.get("input") == "derived":
-                kwargs[param["name"]] = context.derive_group_value(param["derive"], args.get("group"))
-                continue
-            if param.get("input") != "runtime":
-                continue
-            name = param["name"]
-            if "value" not in param:
-                raise InstructionError(
-                    "catalog error", f"runtime parameter '{name}' has no fixed value"
-                )
-            kwargs[name] = self._resolve_value(
-                param["value"], param["type"], context, args, name
-            )
-        return kwargs
+                kwargs[param['name']] = context.runtime_value(param['source'], kwargs)
+        self._validate_behavior(entry, kwargs)
+        return {"id": entry['name'], "args": wire}, kwargs
 
-    def _resolve_value(
-        self,
-        value: Any,
-        type_name: str,
-        context: EntityContext,
-        args: dict[str, Any],
-        name: str,
-    ) -> Any:
-        if value is None:
-            return None
-        if type_name == "boolean":
-            if not isinstance(value, bool):
-                raise ResolveError.format(name, "a JSON boolean")
-            return value
-        if type_name == "integer":
-            if isinstance(value, bool) or not isinstance(value, int):
-                raise ResolveError.format(name, "an integer")
-            return value
-        if type_name == "number":
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise ResolveError.format(name, "a number")
-            return value
-        if type_name == "army_composition":
-            return self._resolve_army_composition(value, name)
-        # The upstream generated catalog calls this a UnitTypeId even though
-        # SpawnController accepts a mapping of UnitTypeId to composition data.
-        # Keep the raw catalog intact during restoration and normalize its one
-        # known compound parameter at the runtime boundary.
-        if name == "army_composition_dict" and type_name == "unit_type_id":
-            return self._resolve_army_composition(value, name)
-        if type_name == "unit_ref":
-            return context.resolve_entity(value)
-        if type_name == "unit_refs":
-            if not isinstance(value, list) or not value:
-                raise ResolveError.format(name, "a non-empty observation unit ID list")
-            return [context.resolve_entity(alias) for alias in value]
-        if type_name == "unit_or_unit_type_id":
-            if context.has_entity_alias(value):
-                return context.resolve_entity(value, own_only=True)
-            from sc2.ids.unit_typeid import UnitTypeId
-
-            return self._resolve_enum(UnitTypeId, value, name)
-        if type_name == "point_ref":
-            return context.resolve_point(value)
-        if type_name == "point_or_unit_ref":
-            return (
-                context.resolve_entity(value)
-                if context.has_entity_alias(value)
-                else context.resolve_point(value)
-            )
-        if type_name == "grid_ref":
-            if not isinstance(value, str):
-                raise ResolveError.format(name, "a grid name")
-            normalized = value.strip().casefold().replace("-", "_").replace(" ", "_")
-            try:
-                return context.grids[normalized]
-            except KeyError as exc:
-                raise ResolveError.invalid_value(
-                    name, value, f"one of {sorted(context.grids)}"
-                ) from exc
-        if type_name == "unit_type_id":
-            from sc2.ids.unit_typeid import UnitTypeId
-
-            return self._resolve_enum(UnitTypeId, value, name)
-        if type_name == "ability_id":
-            from sc2.ids.ability_id import AbilityId
-
-            return self._resolve_enum(AbilityId, value, name)
-        if type_name == "upgrade_id":
-            from sc2.ids.upgrade_id import UpgradeId
-
-            return self._resolve_enum(UpgradeId, value, name)
-        if type_name == "upgrade_ids":
-            if not isinstance(value, list) or not value:
-                raise ResolveError.format(name, "a non-empty upgrade name list")
+    def _validate_behavior(self, entry: dict[str, Any], args: dict[str, Any]) -> None:
+        name = entry['name']
+        if name == 'TechUp':
+            self._resolve_tech_up_target(args['desired_tech'])
+        if name == 'BuildStructure':
+            from ares.dicts.structure_to_building_size import STRUCTURE_TO_BUILDING_SIZE
+            if args['structure_id'] not in STRUCTURE_TO_BUILDING_SIZE:
+                raise ParameterError.invalid_value('structure_id', args['structure_id'].name,
+                                                   'a structure supported by BuildStructure; use dedicated gas/add-on behaviors otherwise')
+        if name == 'UpgradeController':
             from sc2.dicts.upgrade_researched_from import UPGRADE_RESEARCHED_FROM
-            from sc2.ids.upgrade_id import UpgradeId
-
-            upgrades = [self._resolve_enum(UpgradeId, item, name) for item in value]
-            unsupported = [
-                upgrade.name
-                for upgrade in upgrades
-                if upgrade not in UPGRADE_RESEARCHED_FROM
-            ]
-            if unsupported:
-                raise ResolveError.invalid_value(
-                    name,
-                    unsupported,
-                    "upgrade names supported by Ares UpgradeController",
-                )
-            return upgrades
-        if type_name == "unit_role":
-            from ares.consts import UnitRole
-
-            return self._resolve_enum(UnitRole, value, name)
-        raise ResolveError.invalid_value(
-            name, type_name, "a catalog parameter type supported by the runtime"
-        )
-
-    @staticmethod
-    def _resolve_enum(enum_type: Any, value: Any, name: str) -> Any:
-        if not isinstance(value, str):
-            raise ResolveError.format(name, f"a {enum_type.__name__} name")
-        normalized = "".join(
-            character for character in value.strip().casefold() if character.isalnum()
-        )
-        if enum_type.__name__ == "UpgradeId":
-            normalized = UPGRADE_NAME_ALIASES.get(normalized, normalized)
-        for member_name, member in enum_type.__members__.items():
-            candidate = "".join(
-                character for character in member_name.casefold() if character.isalnum()
-            )
-            if candidate == normalized:
-                return member
-        raise ResolveError.invalid_value(
-            name, value, f"a valid {enum_type.__name__} name"
-        )
+            if not args['upgrade_list'] or any(u not in UPGRADE_RESEARCHED_FROM for u in args['upgrade_list']):
+                raise ParameterError.format('upgrade_list', 'a non-empty list of supported research upgrades')
+        if 'army_composition_dict' in args:
+            composition = args['army_composition_dict']
+            if not composition:
+                raise ParameterError.format('army_composition_dict', 'a non-empty composition')
+            from sc2.dicts.unit_trained_from import UNIT_TRAINED_FROM
+            from sc2.ids.unit_typeid import UnitTypeId
+            if any(u not in UNIT_TRAINED_FROM and u != UnitTypeId.ARCHON for u in composition):
+                raise ParameterError.format('army_composition_dict', 'trainable or morphable unit types')
+            if not args.get('freeflow_mode', False) and not isclose(
+                    sum(v['proportion'] for v in composition.values()), 1.0, abs_tol=1e-6):
+                raise ParameterError.format('army_composition_dict', 'proportions summing to 1')
+        if name == 'PlacePredictiveAoE' and not args['path']:
+            raise ParameterError.format('path', 'a non-empty path')
+        if 'group' in args and not args['group']:
+            raise ParameterError.format('group', 'a non-empty group')
+        for key in ('to_count', 'to_count_per_base', 'max_on_route', 'max_pending', 'maximum',
+                    'min_targets', 'ability_delay', 'workers_per_gas'):
+            if key in args and args[key] < 0:
+                raise ParameterError.invalid_value(key, args[key], 'a nonnegative integer')
 
     @staticmethod
     def _resolve_tech_up_target(value: Any) -> Any:
@@ -228,9 +120,6 @@ class AresActionAdapter:
         crash the game loop with a KeyError. Validate the same prerequisite
         lookup here so malformed targets become recoverable policy issues.
         """
-        if not isinstance(value, str):
-            raise ResolveError.format("desired_tech", "a unit or upgrade enum name")
-
         from ares.behaviors.macro.tech_up import BUILD_TECHLAB_FROM
         from ares.consts import ALL_STRUCTURES, GATEWAY_UNITS, TECHLAB_TYPES
         from ares.dicts.unit_tech_requirement import UNIT_TECH_REQUIREMENT
@@ -239,19 +128,7 @@ class AresActionAdapter:
         from sc2.ids.unit_typeid import UnitTypeId
         from sc2.ids.upgrade_id import UpgradeId
 
-        try:
-            desired_tech: Any = AresActionAdapter._resolve_enum(
-                UnitTypeId, value, "desired_tech"
-            )
-        except ResolveError:
-            try:
-                desired_tech = AresActionAdapter._resolve_enum(
-                    UpgradeId, value, "desired_tech"
-                )
-            except ResolveError as exc:
-                raise ResolveError.invalid_value(
-                    "desired_tech", value, "a valid unit or upgrade enum name"
-                ) from exc
+        desired_tech = value
 
         try:
             if isinstance(desired_tech, UpgradeId):
@@ -276,75 +153,3 @@ class AresActionAdapter:
             ) from exc
         return desired_tech
 
-    @staticmethod
-    def _resolve_army_composition(value: Any, name: str) -> dict[Any, dict[str, Any]]:
-        """Convert the only model-exposed composition shape to Ares enums.
-
-        Unit names remain enum-checked, while tactic policy stays outside the
-        generic Ares translation layer.
-        """
-        if not isinstance(value, dict) or not value:
-            raise ResolveError.format(name, "a non-empty army composition object")
-        from sc2.ids.unit_typeid import UnitTypeId
-
-        normalized_value: dict[Any, Any] = {}
-        for raw_unit_name, settings in value.items():
-            if not isinstance(raw_unit_name, str):
-                raise ResolveError.format(name, "an object with unit-name keys")
-            normalized_name = (
-                "BATTLECRUISER"
-                if raw_unit_name.strip().casefold() == "bc"
-                else raw_unit_name
-            )
-            unit_type = AresActionAdapter._resolve_enum(
-                UnitTypeId, normalized_name, name
-            )
-            if unit_type in normalized_value:
-                raise ResolveError.invalid_value(
-                    name, raw_unit_name, "each unit type exactly once"
-                )
-            normalized_value[unit_type] = settings
-        value = normalized_value
-
-        composition: dict[Any, dict[str, Any]] = {}
-        total = 0.0
-        for unit_type, settings in value.items():
-            unit_name = unit_type.name
-            if not isinstance(settings, dict) or set(settings) != {
-                "proportion",
-                "priority",
-            }:
-                raise ResolveError.format(
-                    f"{name}.{unit_name}",
-                    "an object containing exactly 'proportion' and 'priority'",
-                )
-            proportion = settings["proportion"]
-            priority = settings["priority"]
-            if isinstance(proportion, bool) or not isinstance(proportion, (int, float)):
-                raise ResolveError.format(f"{name}.{unit_name}.proportion", "a number")
-            if not 0.0 < float(proportion) <= 1.0:
-                raise ResolveError.invalid_value(
-                    f"{name}.{unit_name}.proportion",
-                    proportion,
-                    "a number in the interval (0, 1]",
-                )
-            if (
-                isinstance(priority, bool)
-                or not isinstance(priority, int)
-                or not 0 <= priority < 11
-            ):
-                raise ResolveError.invalid_value(
-                    f"{name}.{unit_name}.priority",
-                    priority,
-                    "an integer from 0 to 10",
-                )
-            total += float(proportion)
-            composition[unit_type] = {
-                "proportion": float(proportion),
-                "priority": priority,
-            }
-        if not isclose(total, 1.0, abs_tol=1e-6):
-            raise ResolveError.invalid_value(
-                name, total, "composition proportions that sum to 1.0"
-            )
-        return composition

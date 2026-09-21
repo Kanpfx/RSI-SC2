@@ -22,57 +22,57 @@
       "int": {
         "python_type": "int",
         "json": "integer",
-        "meaning": "Whole number; excludes booleans."
+        "meaning": "Whole number (not a boolean)."
       },
       "float": {
         "python_type": "float",
         "json": "number",
-        "meaning": "Finite numeric value; excludes booleans, NaN and infinity."
+        "meaning": "Finite number."
       },
       "str": {
         "python_type": "str",
         "json": "string",
-        "meaning": "Text, including dictionary field names."
+        "meaning": "Text."
       },
       "null": {
         "python_type": "NoneType",
         "json": "null",
-        "meaning": "Python None; valid only when explicitly included in the parameter type."
+        "meaning": "Python None."
       }
     },
     "containers": {
       "list[T]": {
         "python_type": "list[T]",
         "json": "array",
-        "meaning": "Ordered sequence of T; preserves duplicates."
+        "meaning": "Ordered list of T."
       },
       "set[T]": {
         "python_type": "set[T]",
         "json": "array",
-        "meaning": "Unique elements of T; order is insignificant. Resolve elements before constructing the set."
+        "meaning": "Unique elements of T (order irrelevant)."
       },
       "tuple[T1, T2]": {
         "python_type": "tuple[T1, T2]",
         "json": "array",
-        "meaning": "Exactly two ordered values with the specified positional types."
+        "meaning": "Exactly two values, typed in order."
       },
       "dict[K, V]": {
         "python_type": "dict[K, V]",
         "json": "object",
-        "meaning": "Mapping with typed keys and values. JSON keys are strings; decode integer keys and enum member names to K."
+        "meaning": "Typed key-value mapping; JSON keys are strings."
       }
     },
     "game_objects_and_enums": {
       "Unit": {
         "python_type": "sc2.unit.Unit",
         "json": "integer",
-        "meaning": "Current observation entity ID, resolved to a live Unit; not a unit type or an army count.",
+        "meaning": "Observation ID of a live unit (not a type or count).",
         "example": 851
       },
       "Units": {
         "python_type": "sc2.units.Units",
         "json": "array of Unit references",
-        "meaning": "SC2 unit collection constructed from resolved Units with BotAI context; supports SC2 collection methods.",
+        "meaning": "Collection of live units.",
         "example": [
           851,
           852
@@ -81,7 +81,7 @@
       "Point2": {
         "python_type": "sc2.position.Point2",
         "json": "{x: number, y: number} | string",
-        "meaning": "Finite map coordinates or a currently available landmark name, resolved to Point2.",
+        "meaning": "Map coordinates or an available landmark name.",
         "example": {
           "x": 10.0,
           "y": 20.0
@@ -90,7 +90,7 @@
       "Grid": {
         "python_type": "numpy.ndarray",
         "json": "string",
-        "meaning": "Reference to a runtime-supplied two-dimensional Ares pathing/influence grid; never an arbitrary model-generated matrix.",
+        "meaning": "Runtime pathing/influence grid; never a model-made matrix.",
         "values": [
           "ground",
           "air",
@@ -102,30 +102,30 @@
       "UnitTypeId": {
         "python_type": "sc2.ids.unit_typeid.UnitTypeId",
         "json": "string",
-        "meaning": "Unit or structure type enum, distinct from a live Unit reference.",
+        "meaning": "Unit/structure type enum (not a live unit).",
         "example": "MARINE"
       },
       "AbilityId": {
         "python_type": "sc2.ids.ability_id.AbilityId",
         "json": "string",
-        "meaning": "Ability enum; the actor must support the selected ability.",
+        "meaning": "Ability enum; actor must have it ready.",
         "example": "MOVE"
       },
       "UpgradeId": {
         "python_type": "sc2.ids.upgrade_id.UpgradeId",
         "json": "string",
-        "meaning": "Research upgrade enum; distinct from UnitTypeId and AbilityId.",
+        "meaning": "Upgrade/research enum.",
         "example": "STIMPACK"
       },
       "UnitRole": {
         "python_type": "ares.consts.UnitRole",
         "json": "string",
-        "meaning": "Ares unit-management role enum; valid names come from the local Ares version."
+        "meaning": "Ares unit-role enum."
       },
       "Behavior": {
         "python_type": "ares.behaviors.behavior.Behavior",
         "json": "object",
-        "meaning": "Nested behavior specification requiring construction of a concrete Ares behavior. The type table does not define a nested-action wire format."
+        "meaning": "Nested child behavior (runtime-compiled, not a model expression)."
       }
     },
     "composite": {
@@ -136,7 +136,7 @@
           "proportion": "float",
           "priority": "int"
         },
-        "meaning": "Both fields are required. proportion is the desired army fraction; priority is 0..10, with 0 highest.",
+        "meaning": "proportion: army fraction; priority: 0..10 (0 highest).",
         "example": {
           "proportion": 1.0,
           "priority": 0
@@ -146,7 +146,7 @@
         "python_type": "dict[UnitTypeId, dict[str, float | int]]",
         "json": "object",
         "type": "dict[UnitTypeId, CompositionEntry]",
-        "meaning": "Unit-type member names map to composition entries. Fractions sum to 1 for proportion-based spawning; SpawnController freeflow_mode ignores proportions.",
+        "meaning": "Unit type -> {proportion, priority}; proportions sum to 1.",
         "example": {
           "MARINE": {
             "proportion": 1.0,
@@ -158,7 +158,7 @@
         "python_type": "tuple[int, int]",
         "json": "array",
         "type": "tuple[int, int]",
-        "meaning": "Exactly two resource thresholds in order: minerals, vespene.",
+        "meaning": "Two thresholds in order: minerals, vespene.",
         "example": [
           400,
           400
@@ -168,7 +168,7 @@
         "python_type": "set[int]",
         "json": "array",
         "type": "set[int]",
-        "meaning": "Unique SC2 unit tags, distinct from live Unit objects. Group tags must match the resolved group members.",
+        "meaning": "Unique unit tags (not live units).",
         "example": [
           851,
           852
@@ -178,7 +178,7 @@
         "python_type": "dict[int, float]",
         "json": "object",
         "type": "dict[int, float]",
-        "meaning": "Worker tag to last action time in game seconds; mutable Mining bookkeeping supplied by the runtime.",
+        "meaning": "Worker tag -> last action time (game seconds); runtime bookkeeping.",
         "example": {
           "851": 12.5
         }

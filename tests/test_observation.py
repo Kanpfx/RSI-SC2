@@ -95,7 +95,7 @@ class CompactObservationTests(unittest.TestCase):
         text = observation_text(data)
         self.assertIn("# overview\ntime=00:10 Supply=8/13", text)
         self.assertIn(blocks[0], text)
-        self.assertIn("\n\n## enemy_memory\n", text)
+        self.assertIn("\n\n# memory_enemy_state\n", text)
         self.assertIn("\n\n# own_state\n## units\n", text)
         self.assertNotRegex(text, r"</?\w+>")
         self.assertNotIn("\n\n\n", text)

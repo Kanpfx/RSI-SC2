@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from textwrap import indent
 from typing import Any
 
 
@@ -15,11 +14,6 @@ def _section(name: str, content: str | list[str], *, empty: str = "[None]") -> s
     if isinstance(content, list):
         content = "\n".join(content) if content else empty
     return f"## {name}\n{content or empty}"
-
-
-def _heading(title: str, blocks: list[str]) -> str:
-    body = "\n".join(blocks) if blocks else "[None]"
-    return f"{title}:\n{indent(body, '  ')}"
 
 
 def observation_text(data: dict[str, Any]) -> str:
@@ -46,7 +40,7 @@ def observation_text(data: dict[str, Any]) -> str:
             _section("production_and_technology", technology),
         )
     )
-    enemy_state = "\n\n".join(
+    visible_enemy_state = "\n\n".join(
         (
             _section(
                 "visible_units",
@@ -58,21 +52,12 @@ def observation_text(data: dict[str, Any]) -> str:
                 data["enemy_structure_blocks"],
                 empty="[None visible]",
             ),
-            _section(
-                "enemy_memory",
-                "\n\n".join(
-                    (
-                        _heading(
-                            "Recently seen units",
-                            data["remembered_enemy_unit_blocks"],
-                        ),
-                        _heading(
-                            "Known structures",
-                            data["remembered_enemy_structure_blocks"],
-                        ),
-                    )
-                ),
-            ),
+        )
+    )
+    memory_enemy_state = "\n\n".join(
+        (
+            _section("Recently seen units", data["remembered_enemy_unit_blocks"]),
+            _section("Known structures", data["remembered_enemy_structure_blocks"]),
         )
     )
     recent_history = "\n\n".join(
@@ -85,7 +70,8 @@ def observation_text(data: dict[str, Any]) -> str:
         (
             _domain("overview", overview),
             _domain("own_state", own_state),
-            _domain("enemy_state", enemy_state),
+            _domain("visible_enemy_state", visible_enemy_state),
+            _domain("memory_enemy_state", memory_enemy_state),
             _domain("recent_history", recent_history),
         )
     )

@@ -227,7 +227,7 @@ class LLMGameController:
         *, from_queue: bool = False,
     ) -> list[dict[str, Any]]:
         states = []
-        for action in review.actions:
+        for action_index, action in enumerate(review.actions):
             key = self._action_key(action)
             retained = (
                 from_queue or action in self.deferred_actions.actions
@@ -248,7 +248,7 @@ class LLMGameController:
                     continue
                 persistent = self.persistent_actions.is_persistent(action)
                 # Check construction and parameters before replacing a valid old task.
-                behaviors = self.adapter.compile([action], context)
+                behaviors = [self.adapter.construct(action, review.arguments[action_index])]
                 if not persistent:
                     if (
                         action in self.deferred_actions.actions
@@ -353,8 +353,15 @@ class LLMGameController:
     def _run_persistent_actions(self, bot: Any, iteration: int, context: Any) -> None:
         for action in self.persistent_actions.actions:
             try:
-                behaviors = self.adapter.compile([action], context)
-                self._register_behaviors(bot, iteration, action, behaviors, True)
+                # Re-resolve current entities and runtime inputs. Temporary cooldowns
+                # do not invalidate a persistent intent; Ares handles readiness.
+                review = self.policy.review(bot, [action], context, persistent=True)
+                if review.issues:
+                    raise ValueError(review.issues[0].text())
+                current = review.actions[0]
+                self.persistent_actions.replace(current)
+                behaviors = [self.adapter.construct(current, review.arguments[0])]
+                self._register_behaviors(bot, iteration, current, behaviors, True)
             except (KeyError, TypeError, ValueError) as exc:
                 self.persistent_actions.discard(action)
                 self._record_failure(bot, iteration, action, str(exc))
