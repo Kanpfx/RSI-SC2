@@ -615,7 +615,7 @@
     {
       "id": "macro.production_controller",
       "name": "ProductionController",
-      "description": "Build production facilities and prerequisites; does not train units.",
+      "description": "Build production facilities and prerequisites; does not train units. One global persistent configuration is retained and replaced by each new call; it may keep adding production facilities while active.",
       "tags": [
         "technology",
         "production"
@@ -906,7 +906,7 @@
     {
       "id": "macro.spawn_controller",
       "name": "SpawnController",
-      "description": "Train units by priority; fixed freeflow mode ignores proportions.",
+      "description": "Train units by priority; fixed freeflow mode ignores proportions. Keep all desired unit types in one army_composition_dict: only one global persistent configuration is retained, and each new call replaces it entirely (the last call in a batch wins).",
       "tags": [
         "production"
       ],
@@ -1170,7 +1170,7 @@
     {
       "id": "macro.tech_up",
       "name": "TechUp",
-      "description": "Advance one prerequisite step toward a unit or upgrade; repeat as needed.",
+      "description": "Advance one prerequisite step toward a unit or upgrade; repeat as needed. This does not train units; once prerequisites are ready, use SpawnController to produce them.",
       "tags": [
         "technology"
       ],

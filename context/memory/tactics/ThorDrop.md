@@ -6,7 +6,7 @@ Reach Thor and Medivac production quickly, move individual Thors by Medivac to c
 **General guidance:**
 
 - Check emergency_defence first, then thor_drop_pressure. Otherwise use opening, thor_tech, first_drop, thor_drop_pressure.
-- Pair one Medivac with one Thor and morph every Thor to High Impact Mode when it is created.
+- Pair one Medivac with one Thor and morph every Thor to High Impact Mode (`MORPH_THORHIGHIMPACTMODE`) when it is created.
 - If a Medivac is below roughly one quarter health or a Thor below roughly two fifths health, send the pair to a safe repair point instead of forcing the drop.
 - Continue Marine, SCV, Supply Depot, and expansion production behind healthy Thor-Medivac cycles.
 
@@ -55,8 +55,8 @@ Reach Thor and Medivac production quickly, move individual Thors by Medivac to c
 
 **Guidance:**
 
-- Load one Thor into one Medivac and fly toward the attack target while avoiding visible anti-air.
-- Unload only to threaten workers, production, or isolated units, and keep the Medivac ready to reload the Thor.
+- Load one Thor (`LOAD_MEDIVAC`) into one Medivac and fly toward the attack target while avoiding visible anti-air.
+- Unload (`UNLOADALLAT_MEDIVAC`) only to threaten workers, production, or isolated units, and keep the Medivac ready to reload the Thor.
 
 ## thor_drop_pressure
 
@@ -71,7 +71,7 @@ Reach Thor and Medivac production quickly, move individual Thors by Medivac to c
 **Guidance:**
 
 - Keep each Thor paired with a Medivac, attack exposed targets, and reposition from anti-air or superior ground forces.
-- Send damaged pairs to the repair point; repair Thors with SCVs before returning.
+- Send damaged pairs to the repair point; repair Thors with SCVs (`EFFECT_REPAIR_SCV`) before returning.
 - Continue Thor and Medivac production, Marine support, and expansions.
 
 ## emergency_defence

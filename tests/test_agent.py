@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, Mock
 # Use the same local Ares bootstrap as the supported entry point.
 import run
 from agent.config import GameConfig, LLMConfig
-from agent.context.builder import ContextBuilder, MAX_WORKING_CHARS, available_tactics
+from agent.context.builder import ContextBuilder, available_tactics
 from agent.runtime.automation import AutomationController
 from agent.runtime.observation.builder import Observation
 from agent.runtime.parser import parse_model_payload
@@ -33,21 +33,20 @@ class ContextAndParserTests(unittest.TestCase):
         self.assertEqual(behaviors[0].to_count, 2)
         self.assertEqual(behaviors[1].desired_tech, UnitTypeId.BATTLECRUISER)
 
-    def test_actions_without_phase_and_optional_working(self):
-        result = parse_model_payload("# actions\nBuildWorkers(to_count=22)\n# working\nPrepare next expansion.")
+    def test_actions_only(self):
+        result = parse_model_payload("# actions\nBuildWorkers(to_count=22)")
         self.assertEqual(result["actions"], [{"id": "BuildWorkers", "args": {"to_count": 22}}])
-        self.assertEqual(result["working"], "Prepare next expansion.")
-        self.assertIsNone(parse_model_payload("# actions")["working"])
-        self.assertEqual(parse_model_payload("# actions\n# working")["working"], "")
+        self.assertNotIn("working", result)
+        self.assertEqual(parse_model_payload("# actions")["actions"], [])
 
     def test_invalid_action_keeps_valid_sibling(self):
-        result = parse_model_payload("# actions\nBad(unit=lookup(1))\nBuildWorkers(to_count=22)\n# working\nReassess.")
+        result = parse_model_payload("# actions\nBad(unit=lookup(1))\nBuildWorkers(to_count=22)")
         self.assertEqual(len(result["actions"]), 1)
         self.assertEqual(len(result["errors"]), 1)
-        self.assertEqual(result["working"], "Reassess.")
 
     def test_invalid_sections_are_rejected(self):
         for text in ("# phase\nopening\n# actions", "# working\nnote\n# actions",
+                     "# actions\nBuildWorkers(to_count=22)\n# working\nnote",
                      "# actions\n# actions", "# actions\n# working\nx\n# working\ny",
                      "# actions\\nBuildWorkers(to_count=20)"):
             with self.subTest(text=text), self.assertRaises(OutputFormatError):
@@ -56,14 +55,11 @@ class ContextAndParserTests(unittest.TestCase):
     def test_markdown_context_and_match_local_memory(self):
         for tactic in available_tactics():
             context = ContextBuilder(tactic)
-            messages = context.build("OBSERVATION", [], [])
+            messages = context.build("OBSERVATION", [])
             self.assertIn("OBSERVATION", messages[1]["content"])
             self.assertIn(f"# {tactic}", messages[1]["content"])
         context.update_working("Current priority")
         context.update_working(None)
-        self.assertEqual(context.working, "Current priority")
-        with self.assertRaises(ValueError):
-            context.update_working("x" * (MAX_WORKING_CHARS + 1))
         self.assertEqual(context.working, "Current priority")
         self.assertEqual(ContextBuilder().working, "")
         context.update_working("")
@@ -93,13 +89,14 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         builder.build = Mock(side_effect=lambda _bot, iteration: Observation(iteration, {}, "OBS", self.context))
         self.controller.action_exposure.build = Mock(return_value=SimpleNamespace(entries=[], validate=Mock()))
         self.gate = asyncio.Event()
-        self.reply = "# actions\nBuildWorkers(to_count=22)\n# working\nPrepare expansion."
+        self.working = "## Current phase\nopening\n## Guidance\nPrepare expansion."
+        self.reply = "# actions\nBuildWorkers(to_count=22)"
 
         async def complete(messages, *, trace, iteration):
             trace.model_conversation(stage="request", iteration=iteration, request=messages)
             await self.gate.wait()
             trace.model_conversation(stage="response", iteration=iteration, reply=self.reply)
-            return self.reply
+            return self.reply if messages[1]["content"].startswith("<core_missions>\n") else self.working
 
         self.controller.client.complete = AsyncMock(side_effect=complete)
 
@@ -126,26 +123,63 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
                          ["Mining", "AutoSupply", "Mining", "AutoSupply"])
         await self.deliver()
         self.assertEqual(self.controller.automation.worker_target, 22)
-        self.assertEqual(self.controller.context_builder.working, "Prepare expansion.")
-        self.assertEqual((self.directory / "working.md").read_text(), "Prepare expansion.")
-        await self.frame(4, 5)
+        self.assertEqual(self.controller.context_builder.working, self.working)
+        self.assertEqual((self.directory / "working.md").read_text(encoding="utf-8"), self.working)
         messages = self.controller.client.complete.call_args.args[0]
-        self.assertIn("Prepare expansion.", messages[1]["content"])
-        self.assertEqual(self.controller.client.complete.await_count, 2)
+        self.assertEqual([m["role"] for m in messages], ["system", "user"])
+        self.assertEqual(messages[0]["content"], self.controller.context_builder.sources["prompts/system_actions.md"])
+        first_messages = self.controller.client.complete.call_args_list[0].args[0]
+        self.assertEqual(first_messages[0]["content"], self.controller.context_builder.sources["prompts/system_working.md"])
+        self.assertNotEqual(messages[0]["content"], first_messages[0]["content"])
+        self.assertIn("<core_missions>\n" + self.working + "\n</core_missions>", messages[1]["content"])
+        self.assertIn("<general_guidance>", messages[1]["content"])
+        for line in self.controller.context_builder.sources["memory/general.md"].splitlines():
+            self.assertIn(line.strip(), messages[1]["content"])
+        self.assertIn("<tactical_guidance>", first_messages[1]["content"])
+        self.assertNotIn("<tactical_guidance>", messages[1]["content"])
+        for request in (first_messages, messages):
+            self.assertIn("# observation_guide\n", request[1]["content"])
+            self.assertNotIn("<observation_guide>", request[1]["content"])
+            self.assertLess(request[1]["content"].index("<actions_reference>"),
+                            request[1]["content"].index("<output_requirements>"))
+            for tag in ("general_guidance", "observation", "actions_reference", "output_requirements"):
+                self.assertIn(f"<{tag}>", request[1]["content"])
+                self.assertIn(f"<{tag}>", request[0]["content"])
+        self.assertNotIn(self.controller.context_builder.sources["memory/tactics/BattleCruiserRush.md"], messages[1]["content"])
+        self.assertIn("OBS", messages[1]["content"])
+        self.assertIn("execution_feedback", messages[1]["content"])
+        self.assertIn("actions_reference", messages[1]["content"])
+        await self.frame(4, 5)
+        messages = self.controller.client.complete.call_args_list[2].args[0]
+        self.assertNotIn("Prepare expansion.", messages[1]["content"])
+        self.assertEqual(self.controller.client.complete.await_count, 4)
         settings = (self.directory / "settings.json").read_text()
         self.assertNotIn("test-secret", settings)
         self.assertTrue((self.directory / "context/memory/tactics/BattleCruiserRush.md").exists())
         events = [json.loads(line) for line in (self.directory / "events.jsonl").read_text().splitlines()]
         self.assertTrue(any(event["event"] == "working_memory_updated" for event in events))
 
-    async def test_oversized_memory_preserves_old_memory_and_executes_actions(self):
-        self.controller.context_builder.update_working("keep")
-        self.reply = "# actions\nBuildWorkers(to_count=24)\n# working\n" + "x" * (MAX_WORKING_CHARS + 1)
+    async def test_second_round_failure_keeps_saved_working(self):
+        async def complete(messages, **kwargs):
+            if not messages[1]["content"].startswith("<core_missions>\n"):
+                return self.working
+            self.assertEqual((self.directory / "working.md").read_text(encoding="utf-8"), self.working)
+            raise RuntimeError("execution request failed")
+
+        self.controller.client.complete = AsyncMock(side_effect=complete)
+        await self.frame(1, 0)
+        await self.frame(2, 1)
+        self.assertEqual(self.controller.context_builder.working, self.working)
+        self.assertIsNone(self.controller.automation.worker_target)
+        self.assertTrue(self.controller._feedback)
+
+    async def test_action_reply_with_legacy_working_is_rejected(self):
+        self.reply += "\n# working\nUnwanted replacement"
         await self.frame(1, 0)
         await self.deliver()
-        self.assertEqual(self.controller.context_builder.working, "keep")
-        self.assertEqual(self.controller.automation.worker_target, 24)
-        self.assertTrue(any(item["kind"] == "working_memory" for item in self.controller._feedback))
+        self.assertEqual(self.controller.context_builder.working, self.working)
+        self.assertIsNone(self.controller.automation.worker_target)
+        self.assertTrue(self.controller._feedback)
 
     async def test_request_failure_keeps_existing_control_and_memory(self):
         self.controller.automation.replace_worker_override({"id": "BuildWorkers", "args": {"to_count": 23}})

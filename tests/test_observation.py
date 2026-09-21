@@ -93,7 +93,9 @@ class CompactObservationTests(unittest.TestCase):
                               "match": "matchup=TerranvsProtoss", "military": ""},
                     situational_hints={}, enemy_unit_blocks=blocks)
         text = observation_text(data)
-        self.assertIn("<overview>\n  time=00:10 Supply=8/13", text)
+        self.assertIn("# overview\ntime=00:10 Supply=8/13", text)
         self.assertIn(blocks[0], text)
-        self.assertIn("<enemy_memory>", text)
-        self.assertNotIn("\n\n", text)
+        self.assertIn("\n\n## enemy_memory\n", text)
+        self.assertIn("\n\n# own_state\n## units\n", text)
+        self.assertNotRegex(text, r"</?\w+>")
+        self.assertNotIn("\n\n\n", text)

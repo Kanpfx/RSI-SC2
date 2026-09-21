@@ -54,7 +54,8 @@
     .tick { font-variant-numeric:tabular-nums; color:var(--blue); font-weight:750; letter-spacing:-.1px; }
     .status { color:var(--muted); min-height:22px; text-align:right; font-size:12px; font-variant-numeric:tabular-nums; }
 
-    .summary { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:10px; margin:16px 0; }
+    .summary { display:flex; flex-wrap:wrap; gap:8px 22px; margin:16px 0; }
+    #viewer > details { margin-top:0; }
     .metric { border-radius:12px; padding:12px 14px 11px; min-width:0; position:relative; overflow:hidden; }
     .metric.opponent { grid-column:span 2; }
     .metric::before { content:""; position:absolute; left:0; top:0; width:3px; height:100%; background:#d9e6fb; }
@@ -98,6 +99,12 @@
     .raw-inputs pre { max-height:620px; }
     .raw-inputs .attempt + .attempt { margin-top:14px; padding-top:14px; border-top:1px solid var(--line); }
     .empty { color:var(--muted)!important; padding:18px 0; text-align:center; font-size:12.5px; }
+    .conversation { display:flex; flex-direction:column; gap:12px; }
+    .message { width:94%; border:1px solid var(--line); border-radius:10px; padding:12px; background:#f8fafc; }
+    .message.user { align-self:flex-end; background:var(--blue-soft); }
+    .message.assistant { align-self:flex-start; background:#f4f0ff; }
+    .message.system { width:100%; }
+    .message pre { margin-top:8px; max-height:430px; }
     .hidden { display:none; }
 
     @media (max-width:1040px) {
@@ -157,46 +164,38 @@
     <section class="summary hidden" id="summary"></section>
 
     <section class="grid hidden" id="viewer">
-      <article class="card">
-        <header class="head"><span class="tag model">OUTPUT</span><h2>模型输出</h2></header>
-        <div class="body" id="model-panel"></div>
-      </article>
-      <article class="card">
-        <header class="head"><span class="tag event">CHECK</span><h2>解析与校验</h2></header>
-        <div class="body" id="validation-panel"></div>
-      </article>
-      <article class="card wide" id="observation-details">
-        <header class="head"><span class="tag event">OBS</span><h2>游戏观测</h2></header>
-        <div class="body" id="observation-meta"></div>
-        <details><summary>干净 OBS</summary><pre id="observation-panel"></pre></details>
-      </article>
-      <article class="card wide" id="raw-inputs">
-        <header class="head"><span class="tag model">INPUT</span><h2 id="raw-model-summary">模型输入</h2></header>
-        <div class="body" id="raw-model-panel"></div>
+      <article class="card wide">
+        <header class="head"><span class="tag model">MODEL</span><h2>决策结果</h2></header>
+        <div class="grid body">
+          <section><h2>第一轮 · 阶段与指导</h2><div class="body" id="model-panel"></div></section>
+          <section><h2>第二轮 · 动作回复与解析</h2><div class="body" id="validation-panel"></div></section>
+        </div>
       </article>
       <article class="card wide">
         <header class="head"><span class="tag ok">ACTION</span><h2>动作处理与执行</h2></header>
         <div class="body" id="action-panel"></div>
       </article>
-      <article class="card wide">
-        <header class="head"><span class="tag event">SYSTEM</span><h2>系统日志</h2></header>
-        <div class="body" id="event-panel"></div>
-      </article>
+      <details class="wide" id="raw-inputs">
+        <summary>决策输入 · 两轮完整请求</summary>
+        <div id="raw-model-panel"></div>
+      </details>
+      <details class="wide" id="event-details">
+        <summary>异常与运行记录</summary>
+        <div id="event-panel"></div>
+        <details id="console-details">
+          <summary>控制台输出（整局）</summary>
+          <pre id="console-panel"></pre>
+        </details>
+      </details>
     </section>
 
     <details class="hidden" id="context-details">
-      <summary>本局配置、上下文快照与最新工作记忆</summary>
+      <summary>辅助资料 · 配置、上下文快照与最新工作记忆</summary>
       <div class="body" id="context-panel"></div>
-    </details>
-
-    <details class="hidden" id="metadata-details">
-      <summary>对局元数据</summary>
-      <pre id="metadata-panel"></pre>
-    </details>
-
-    <details class="hidden" id="console-details">
-      <summary>控制台原始输出</summary>
-      <pre id="console-panel"></pre>
+      <details id="metadata-details">
+        <summary>对局元数据</summary>
+        <pre id="metadata-panel"></pre>
+      </details>
     </details>
   </main>
 
@@ -321,7 +320,6 @@
       $("next").disabled = false;
       $("summary").classList.remove("hidden");
       $("viewer").classList.remove("hidden");
-      $("observation-details").classList.remove("hidden");
       $("raw-inputs").classList.remove("hidden");
       $("metadata-details").classList.remove("hidden");
       $("console-details").classList.remove("hidden");
@@ -359,14 +357,7 @@
         [meta.result || "未完整结束", "结果"],
         [meta.tactic || "未知战术", "战术"],
       ];
-      const container = $("summary");
-      container.replaceChildren(...metrics.map(([value, label]) => {
-        const item = document.createElement("div");
-        item.className = label === "对手" ? "metric opponent" : "metric";
-        item.innerHTML = `<b></b><span></span>`;
-        text(item.querySelector("b"), value); text(item.querySelector("span"), label);
-        return item;
-      }));
+      $("summary").replaceChildren(...metrics.map(([value, label]) => line(label, value)));
     }
 
     function renderCurrent() {
@@ -383,13 +374,7 @@
       renderActions(decision, iteration);
       renderEvents(iteration);
       renderRawInputs(iteration);
-      const validation = modelRecords(iteration).validation;
-      replacePanel("observation-meta", [
-        line("\u91c7\u96c6\u65f6\u95f4", observation?.timestamp || "\u65e7\u65e5\u5fd7\u672a\u8bb0\u5f55"),
-        line("\u6e38\u620f\u65f6\u95f4 / \u91c7\u96c6\u5e27", (observation?.time || "--:--") + " / " + (observation?.iteration ?? iteration)),
-        line("\u5e94\u7528\u65f6\u89c2\u6d4b\u5e74\u9f84", validation.observation_age_seconds == null ? "\u672a\u63d0\u4f9b" : validation.observation_age_seconds + " s"),
-      ]);
-      $("observation-panel").textContent = observation?.observation || "该 iteration 没有保存观测文本。";
+
     }
 
     function replacePanel(id, children) { $(id).replaceChildren(...children); }
@@ -409,59 +394,50 @@
     function modelRecords(iteration) {
       const rows = indexes.model.get(iteration) || [];
       const last = stage => rows.filter(row => row.stage === stage).at(-1);
-      const legacy = rows.filter(row => !row.stage).at(-1) || {};
+      const rounds = [];
+      for (const row of rows) {
+        if (row.stage === "request") rounds.push({ request: row, response: {} });
+        else if (row.stage === "response" && rounds.length) rounds.at(-1).response = row;
+      }
+      const [planning, execution] = rounds;
       return {
-        rows, request: last("request") || legacy, response: last("response") || legacy,
-        parsed: last("parsed") || legacy, validation: last("validated") || legacy,
+        rows, rounds, planning,
+        request: execution?.request || planning?.request || {},
+        response: execution?.response || {},
+        parsed: last("parsed") || {}, validation: last("validated") || {},
         failure: last("request_failed"),
       };
     }
 
-    function renderModel(iteration) {
-      const { rows, response, parsed, failure } = modelRecords(iteration);
-      if (!rows.length) return replacePanel("model-panel", [noData("\u6ca1\u6709\u6a21\u578b\u5bf9\u8bdd\u8bb0\u5f55\u3002")]);
+    function roundStats(response) {
       const usage = response.usage || {};
-      const total = response.total_latency_ms ?? failure?.latency_ms;
-      const nodes = [
-        line("\u54cd\u5e94\u65f6\u95f4", response.timestamp || "\u672a\u63d0\u4f9b"),
-        line("\u5c1d\u8bd5\u5e8f\u53f7 / HTTP", (response.attempt ?? "\u672a\u63d0\u4f9b") + " / " + (response.http_status ?? "\u672a\u63d0\u4f9b")),
-        line("\u8f93\u51fa tokens", String(usage.completion_tokens ?? usage.output_tokens ?? "\u672a\u63d0\u4f9b")),
-        line("\u8bf7\u6c42\u8017\u65f6", response.latency_ms == null ? "\u672a\u63d0\u4f9b" : response.latency_ms + " ms"),
-        line("\u542b\u91cd\u8bd5\u603b\u8017\u65f6", total == null ? "\u672a\u63d0\u4f9b" : total + " ms"),
-        line("\u7ed3\u675f\u539f\u56e0", response.finish_reason || (failure ? "\u8bf7\u6c42\u5931\u8d25\uff0c\u89c1\u7cfb\u7edf\u65e5\u5fd7" : "\u672a\u63d0\u4f9b")),
-        line("\u539f\u59cb\u8f93\u51fa", ""), pre(response.reply ?? "\u5c1a\u672a\u6536\u5230\u6587\u672c\u54cd\u5e94"),
-        line("\u63d0\u53d6\u7ed3\u679c", ""), pre(parsed.stage || parsed.actions
-          ? formatFields({ actions: parsed.actions || [] })
-          : "\u5c1a\u672a\u5b8c\u6210\u89e3\u6790"),
-      ];
-      const memoryEvents = (indexes.event.get(iteration) || []).filter(row => row.event?.startsWith("working_memory_"));
-      if (parsed.stage) {
-        nodes.push(line("本轮工作记忆提议", ""), pre(parsed.working == null
-          ? "未提供更新，保留原记忆" : parsed.working === "" ? "[清空记忆]" : parsed.working));
-      }
-      if (memoryEvents.length) nodes.push(fold("工作记忆应用记录", formatFields(memoryEvents)));
-      if (response.raw_response != null) nodes.push(fold("\u5b8c\u6574 API \u539f\u59cb\u54cd\u5e94", response.raw_response));
-      if (Object.keys(usage).length) nodes.push(fold("\u5b8c\u6574 token \u7528\u91cf", formatFields(usage)));
-      replacePanel("model-panel", nodes);
+      return line("用量 / 耗时", `输入 ${usage.prompt_tokens ?? usage.input_tokens ?? "—"} · 输出 ${usage.completion_tokens ?? usage.output_tokens ?? "—"} tokens · ${response.total_latency_ms ?? response.latency_ms ?? "—"} ms`);
+    }
+
+    function renderModel(iteration) {
+      const { planning } = modelRecords(iteration);
+      const response = planning?.response || {};
+      replacePanel("model-panel", [roundStats(response), pre(response.reply ?? "尚未收到第一轮回复")]);
     }
 
     function renderValidation(iteration) {
-      const { parsed, validation } = modelRecords(iteration);
+      const { response, parsed, validation } = modelRecords(iteration);
       const report = parsed.parse_report;
       const errors = report?.errors || parsed.validation_feedback || [];
       const checks = validation.validation_report || [];
+      const rejected = checks.filter(row => row.status === "rejected");
       const nodes = [
-        line("\u89e3\u6790\u6210\u529f / \u62a5\u544a\u9519\u8bef", (parsed.actions?.length ?? 0) + " / " + errors.length),
-        line("\u6821\u9a8c\u901a\u8fc7 / \u62d2\u7edd", validation.validation_report ? checks.filter(x => x.status === "passed").length + " / " + checks.filter(x => x.status === "rejected").length : "\u672a\u8bb0\u5f55"),
+        roundStats(response), pre(response.reply ?? "尚未收到第二轮回复"),
+        line("解析动作", parsed.actions ? String(parsed.actions.length) : "尚未解析"),
       ];
-
-      nodes.push(line("\u89e3\u6790\u5668\u62a5\u544a", ""), pre(errors.length ? formatFeedback(errors) : (report ? "\u901a\u8fc7" : "\u65e7\u65e5\u5fd7\u6216\u5c1a\u672a\u89e3\u6790")));
-      if (checks.length) nodes.push(line("\u6821\u9a8c\u5668\u62a5\u544a", ""), pre(formatFields(checks)));
-      if (validation.notices?.length) nodes.push(line("\u6210\u5458\u8c03\u6574\u63d0\u793a", ""), pre(formatFields(
+      if (parsed.actions?.length) nodes.push(pre(formatFields(parsed.actions)));
+      if (errors.length) nodes.push(line("解析错误", String(errors.length)), pre(formatFeedback(errors)));
+      if (checks.length) nodes.push(line("校验通过 / 拒绝", `${checks.filter(row => row.status === "passed").length} / ${rejected.length}`));
+      if (rejected.length) nodes.push(pre(formatFields(rejected)));
+      if (validation.notices?.length) nodes.push(line("成员调整提示", ""), pre(formatFields(
         validation.notices.map(item => ({ action_index: item.action_index, unit: item.action, reason: item.error }))
       )));
-      if (validation.normalizations?.length) nodes.push(fold("\u5f52\u4e00\u5316\u8bf4\u660e", formatFields(validation.normalizations)));
-      if (report?.sources?.length) nodes.push(fold("\u539f\u59cb\u52a8\u4f5c\u884c\u4e0e\u63d0\u53d6\u7ed3\u679c\u5bf9\u5e94", formatFields(report.sources)));
+      if (validation.normalizations?.length) nodes.push(fold("归一化说明", formatFields(validation.normalizations)));
       replacePanel("validation-panel", nodes);
     }
 
@@ -520,25 +496,24 @@
 
     function renderEvents(iteration) {
       const rows = indexes.event.get(iteration) || [];
-      const transportError = rows.some(row => row.event === "transport_error");
-      const system = rows.filter(row => {
-        if (row.stage === "parse" || row.stage === "validation" || row.event === "model_actions_normalized") return false;
-        if (row.event === "action_failed" && row.action === "Model request" && transportError) return false;
-        return !row.event?.startsWith("action_") || row.stage === "system";
-      });
-      const nodes = system.map(row => {
-        const { response_body, event, level, timestamp, ...metadata } = row;
-        const section = document.createElement("div"); section.className = "event-row";
-        section.append(line(row.event || "event", (row.level || "") + " " + (row.timestamp || "")), pre(formatFields(metadata)));
-        if (response_body) section.append(fold("\u9519\u8bef\u54cd\u5e94\u539f\u6587", response_body));
-        return section;
-      });
-      for (const row of modelRecords(iteration).rows.filter(x => x.stage === "response" && x.error)) {
-        nodes.push(fold("\u65e0\u6548 API \u54cd\u5e94 \u00b7 \u5c1d\u8bd5 " + row.attempt, row.raw_response || row.error));
-      }
-      const failure = modelRecords(iteration).failure;
-      if (failure && !transportError && !system.some(row => row.action === "Model request")) nodes.push(pre(formatFields(failure)));
-      replacePanel("event-panel", nodes.length ? nodes : [noData("\u65e0\u7cfb\u7edf\u5f02\u5e38\u6216\u989d\u5916\u4e8b\u4ef6\u3002")]);
+      const { rows: modelRows, failure } = modelRecords(iteration);
+      const isIssue = row => ["WARNING", "ERROR", "CRITICAL"].includes(row.level)
+        || row.error || row.status === "failed" || row.event === "transport_error";
+      const clean = ({ raw_response, response_body, ...row }) => row;
+      const issues = rows.filter(isIssue);
+      const routine = rows.filter(row => !isIssue(row) && !row.event?.startsWith("action_")
+        && !["parse", "validation"].includes(row.stage));
+      const invalidResponses = modelRows.filter(row => row.stage === "response" && row.error);
+      const nodes = [];
+      if (issues.length) nodes.push(pre(formatFields(issues.map(clean))));
+      if (invalidResponses.length) nodes.push(pre(formatFields(invalidResponses.map(row => ({
+        error: row.error, attempt: row.attempt, timestamp: row.timestamp,
+      })))));
+      if (failure && !issues.some(row => row.action === "Model request")) nodes.push(pre(formatFields(clean(failure))));
+      if (!nodes.length) nodes.push(noData("本决策无异常。"));
+      if (routine.length) nodes.push(fold(`普通事件（${routine.length}）`, formatFields(routine.map(clean))));
+      replacePanel("event-panel", nodes);
+      $("event-details").open = Boolean(issues.length || invalidResponses.length || failure);
     }
 
     function formatRequest(request) {
@@ -555,20 +530,12 @@
     }
 
     function renderRawInputs(iteration) {
-      const { request, response } = modelRecords(iteration);
-      const body = request.request_body || {};
-      const usage = response.usage || {};
-      const messages = body.messages || request.request;
-      const { messages: omitted, ...parameters } = body;
-      const nodes = [
-        line("\u6a21\u578b", body.model || state.metadata.model || "\u672a\u63d0\u4f9b"),
-        line("\u8f93\u5165 tokens", String(usage.prompt_tokens ?? usage.input_tokens ?? "\u672a\u63d0\u4f9b")),
-        line("\u8bf7\u6c42\u65f6\u95f4", request.timestamp || "\u672a\u63d0\u4f9b"),
-        line("\u51b3\u7b56 ID", request.decision_id || "iteration " + iteration),
-      ];
-      if (Object.keys(parameters).length) nodes.push(line("\u8bf7\u6c42\u53c2\u6570", ""), pre(formatFields(parameters)));
-      nodes.push(messages ? fold("\u5b9e\u9645\u53d1\u9001\u7684 messages", formatRequest(messages)) : noData("\u6ca1\u6709\u8bf7\u6c42\u8bb0\u5f55\u3002"));
-      replacePanel("raw-model-panel", nodes);
+      const { rounds } = modelRecords(iteration);
+      const nodes = rounds.map(({ request }, index) => fold(
+        `第 ${index + 1} 轮 · ${index === 0 ? "阶段与指导" : "动作生成"}`,
+        formatRequest(request.request_body?.messages || request.request || "没有请求消息。")
+      ));
+      replacePanel("raw-model-panel", nodes.length ? nodes : [noData("没有请求记录。")]);
     }
 
     $("tick-slider").addEventListener("input", renderCurrent);

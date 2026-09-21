@@ -21,13 +21,7 @@ def _heading_content(text: str, heading: str) -> tuple[str, int]:
     if len(matches) != 1:
         raise OutputFormatError.dsl_section(heading, len(matches))
     match = matches[0]
-    next_heading = re.search(
-        r"^[ \t]*#[ \t]+(?:actions|working)[ \t]*$",
-        text[match.end() :],
-        re.IGNORECASE | re.MULTILINE,
-    )
-    end = match.end() + next_heading.start() if next_heading else len(text)
-    return text[match.end() : end].strip(), match.start()
+    return text[match.end() :].strip(), match.start()
 
 
 def _dsl_value(node: ast.AST) -> Any:
@@ -146,15 +140,10 @@ def parse_model_payload(text: str) -> dict[str, Any]:
         candidate = "\n".join(lines[1:-1]).strip()
     actions_source, actions_position = _heading_content(candidate, "actions")
     headings = list(re.finditer(r"^[ \t]*#[ \t]+([^\n]+)$", candidate, re.MULTILINE))
-    if any(match.group(1).strip().lower() not in {"actions", "working"} for match in headings):
-        raise OutputFormatError("invalid DSL output", "only '# actions' and optional '# working' are allowed")
+    if any(match.group(1).strip().lower() != "actions" for match in headings):
+        raise OutputFormatError("invalid DSL output", "only '# actions' is allowed")
     if candidate[:actions_position].strip():
         raise OutputFormatError("invalid DSL output", "output must start with '# actions'")
-    working = None
-    if any(match.group(1).strip().lower() == "working" for match in headings):
-        working, working_position = _heading_content(candidate, "working")
-        if working_position < actions_position:
-            raise OutputFormatError("invalid DSL output", "'# working' must follow '# actions'")
 
     actions: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
@@ -181,4 +170,4 @@ def parse_model_payload(text: str) -> dict[str, Any]:
                     "error": str(exc),
                 }
             )
-    return {"working": working, "actions": actions, "errors": errors, "sources": sources}
+    return {"actions": actions, "errors": errors, "sources": sources}

@@ -41,7 +41,7 @@ Use fast Widow Mine and Medivac production to defend the home economy, repeatedl
 
 - Prioritize Widow Mines and Medivacs until the main ramp, mineral lines, and first drop group are covered.
 - Research Drilling Claws first; add High Capacity Fuel Tanks and infantry upgrades when the economy supports them.
-- Burrow Mines at the main ramp and mineral lines, spread them so one enemy spell cannot remove all local defence.
+- Burrow Mines (`BURROWDOWN_WIDOWMINE`) at the main ramp and mineral lines, spread them so one enemy spell cannot remove all local defence.
 - Keep the main force near the natural while the Mine count is still fragile.
 
 ## mine_drop_pressure
@@ -57,8 +57,8 @@ Use fast Widow Mine and Medivac production to defend the home economy, repeatedl
 
 **Guidance:**
 
-- Load four Mines into a healthy Medivac and target a completed enemy town hall with workers.
-- Unload Mines where workers must pass, then retreat the Medivac from anti-air instead of waiting for a losing fight.
+- Load four Mines (`LOAD_MEDIVAC`) into a healthy Medivac and target a completed enemy town hall with workers.
+- Unload Mines (`UNLOADALLAT_MEDIVAC`) where workers must pass, then retreat the Medivac from anti-air instead of waiting for a losing fight.
 - Use unassigned Mines to control approaches and likely counterattack routes; return surviving drop Mines to the attacking or defensive pool after a mission.
 
 ## bio_transition

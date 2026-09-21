@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 from time import perf_counter
 from urllib import request
 from urllib.error import HTTPError
@@ -79,6 +79,8 @@ class LLMClient:
         }
         if _is_official_deepseek_api(self.config.base_url):
             body["thinking"] = {"type": "disabled"}
+        elif urlparse(self.config.base_url).hostname == "openrouter.ai":
+            body["reasoning"] = {"enabled": False}
         return body
 
     def _complete_sync(
@@ -140,8 +142,13 @@ class ModelAgent:
         self.client = client
 
     async def run(self, messages: list[dict[str, str]], *, trace: Telemetry,
-                  iteration: int) -> ModelResult:
+                  iteration: int, action_message: dict[str, str], action_system: str,
+                  on_working: Callable[[str], None]) -> ModelResult:
         started = perf_counter()
+        working = await self.client.complete(messages, trace=trace, iteration=iteration)
+        on_working(working)
+        messages = [{"role": "system", "content": action_system}, {"role": "user", "content":
+                    "<core_missions>\n" + working + "\n</core_missions>\n\n" + action_message["content"]}]
         reply = await self.client.complete(messages, trace=trace, iteration=iteration)
         received = perf_counter()
         latency = round((received - started) * 1000)
@@ -157,5 +164,5 @@ class ModelAgent:
                     for error in payload["errors"]]
         report = {"valid": not feedback, "errors": feedback, "sources": payload["sources"]}
         trace.model_conversation(stage="parsed", iteration=iteration, actions=payload["actions"],
-                                 working=payload["working"], parse_report=report)
-        return ModelResult(payload["actions"], feedback, latency, payload["working"], received, report)
+                                 working=working, parse_report=report)
+        return ModelResult(payload["actions"], feedback, latency, working, received, report)

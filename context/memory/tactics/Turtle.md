@@ -39,7 +39,7 @@ Build a heavily fortified multi-base position with Marines and Siege Tanks, then
 
 **Guidance:**
 
-- Produce a Marine-Tank defensive force, keep the first Tank sieged at a useful home defensive point, and position later Tanks to cover bases.
+- Produce a Marine-Tank defensive force, keep the first Tank sieged (`SIEGEMODE_SIEGEMODE`) at a useful home defensive point, and position later Tanks to cover bases.
 - Build up to two Bunkers near each town hall and hold pressure rather than chasing it across the map.
 - Research High Capacity Fuel Tanks and building armor, and add an Engineering Bay for further defence.
 

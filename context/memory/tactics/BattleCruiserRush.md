@@ -93,7 +93,7 @@ Rush Battlecruiser tech with a compact opening, start the first Battlecruiser be
 - Do not exceed 90 workers, four total bases, or four Starports with Tech Labs; stop requesting additional growth after reaching each cap.
 - Avoid unrelated technology, upgrades, or static defense unless needed against a visible threat.
 - Prioritize significant enemy army concentrations when favorable; otherwise pressure known structures, the enemy starting area, and then likely expansions.
-- Avoid concentrated anti-air and unsafe routes; use Tactical Jump for long-distance engagement or safe repositioning near the target.
+- Avoid concentrated anti-air and unsafe routes; use Tactical Jump (`EFFECT_TACTICALJUMP`) for long-distance engagement or safe repositioning near the target.
 - Retreat badly damaged Battlecruisers, especially below roughly 225 health, rather than losing them unnecessarily.
 
 ## cleanup

@@ -9,7 +9,7 @@ from pathlib import Path
 @dataclass(frozen=True)
 class GameConfig:
     model_interval_seconds: float = 60 * 2 / 22.4
-    max_actions_per_decision: int = 8
+    max_actions_per_decision: int = 6
     max_action_units: int = 12
     max_action_targets: int = 8
     max_point_nudge_tiles: float = 2.0
@@ -24,7 +24,7 @@ class LLMConfig:
     base_url: str = ""
     api_key: str = ""
     temperature: float = 0.1
-    max_tokens: int = 2048
+    max_tokens: int = 512
     timeout_s: float = 20.0
     transport_retries: int = 2
 

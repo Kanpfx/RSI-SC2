@@ -6,19 +6,15 @@ from textwrap import indent
 from typing import Any
 
 
-def _tag(name: str, content: str | list[str]) -> str:
-    """Wrap one observation domain in a stable XML-like semantic tag."""
-    if isinstance(content, list):
-        body = "\n".join(content) if content else "[None]"
-    else:
-        body = content or "[None]"
-    return f"<{name}>\n{indent(body, '  ')}\n</{name}>"
+def _domain(name: str, content: str) -> str:
+    """Render a top-level observation domain as a Markdown heading."""
+    return f"# {name}\n{content or '[None]'}"
 
 
 def _section(name: str, content: str | list[str], *, empty: str = "[None]") -> str:
     if isinstance(content, list):
         content = "\n".join(content) if content else empty
-    return _tag(name, content or empty)
+    return f"## {name}\n{content or empty}"
 
 
 def _heading(title: str, blocks: list[str]) -> str:
@@ -43,14 +39,14 @@ def observation_text(data: dict[str, Any]) -> str:
         situation_alerts,
     )))
     technology = "\n".join(data["production_and_technology"])
-    own_state = "\n".join(
+    own_state = "\n\n".join(
         (
             _section("units", data["own_unit_blocks"]),
             _section("structures", data["own_structure_blocks"]),
             _section("production_and_technology", technology),
         )
     )
-    enemy_state = "\n".join(
+    enemy_state = "\n\n".join(
         (
             _section(
                 "visible_units",
@@ -62,9 +58,9 @@ def observation_text(data: dict[str, Any]) -> str:
                 data["enemy_structure_blocks"],
                 empty="[None visible]",
             ),
-            _tag(
+            _section(
                 "enemy_memory",
-                "\n".join(
+                "\n\n".join(
                     (
                         _heading(
                             "Recently seen units",
@@ -79,17 +75,17 @@ def observation_text(data: dict[str, Any]) -> str:
             ),
         )
     )
-    recent_history = "\n".join(
+    recent_history = "\n\n".join(
         (
             _section("state_changes", data["recent_changes"]),
             _section("action_history", data["action_history"]),
         )
     )
-    return "\n".join(
+    return "\n\n".join(
         (
-            _tag("overview", overview),
-            _tag("own_state", own_state),
-            _tag("enemy_state", enemy_state),
-            _tag("recent_history", recent_history),
+            _domain("overview", overview),
+            _domain("own_state", own_state),
+            _domain("enemy_state", enemy_state),
+            _domain("recent_history", recent_history),
         )
     )

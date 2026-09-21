@@ -7,7 +7,7 @@ Pull SCVs immediately at game start for the fastest possible worker attack, rely
 
 - Check emergency_defence first, then immediate_assault. Otherwise use immediate_assault, sustain_or_end.
 - Start moving at once with up to ten SCVs; do not wait to train workers, build supply, or gather a normal economic lead.
-- Keep attacking SCVs together, use a repair group for low-health workers, and do not donate isolated SCVs to enemy defenders.
+- Keep attacking SCVs together, use a repair group (`EFFECT_REPAIR_SCV`) for low-health workers, and do not donate isolated SCVs to enemy defenders.
 - This is the most committed worker rush. It has no intended macro recovery if it fails to gain a decisive advantage.
 
 ## immediate_assault

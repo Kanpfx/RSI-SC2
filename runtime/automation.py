@@ -1,4 +1,4 @@
-"""Only harvesting, routine supply, depot lowering and requested worker targets."""
+"""Harvesting, supply, worker scouting and requested worker targets."""
 from __future__ import annotations
 
 from typing import Any
@@ -6,14 +6,17 @@ from ares.behaviors.macro import AutoSupply, BuildWorkers
 from ares.behaviors.macro.mining import Mining
 from sc2.ids.ability_id import AbilityId
 from sc2.ids.unit_typeid import UnitTypeId
+from agent.runtime.scouting import ScoutController
 
 
 class AutomationController:
     def __init__(self) -> None:
         self.worker_target: int | None = None
         self._worker_override: dict[str, Any] | None = None
+        self.scouting = ScoutController()
 
     async def run(self, bot: Any, iteration: int) -> None:
+        self.scouting.run(bot)
         bot.register_behavior(Mining(workers_per_gas=3))
         bot.register_behavior(AutoSupply(base_location=bot.start_location))
         if iteration % 16 == 0:

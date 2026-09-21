@@ -74,7 +74,7 @@ class LLMGameController:
             "game": asdict(self.game_config),
             "model": {key: value for key, value in asdict(self.llm_config).items()
                       if key not in {"api_key", "base_url"}},
-            "automation": ["mining", "supply", "depot_lowering", "requested_workers"],
+            "automation": ["mining", "supply", "depot_lowering", "requested_workers", "worker_scouting"],
         })
         self._pending: asyncio.Task[ModelResult] | None = None
         self._request_iteration = -1
@@ -135,13 +135,23 @@ class LLMGameController:
         self._request_time = float(bot.time)
         self._next_model_time = self._request_time + self.game_config.model_interval_seconds
         # Pass detached prompt data only; the task must never access the live bot.
-        messages = self.context_builder.build(
+        messages = self.context_builder.build(observation.text, surface.entries)
+        action_message = self.context_builder.build_action_message(
             observation.text, surface.entries, feedback,
             max_actions=self.game_config.max_actions_per_decision,
         )
         self._pending = asyncio.create_task(
-            self.model_agent.run(messages, trace=self.telemetry, iteration=iteration)
+            self.model_agent.run(
+                messages, trace=self.telemetry, iteration=iteration,
+                action_message=action_message,
+                action_system=self.context_builder.sources["prompts/system_actions.md"],
+                on_working=lambda working: self._save_working(working, iteration),
+            )
         )
+
+    def _save_working(self, working: str, iteration: int) -> None:
+        self.context_builder.update_working(working)
+        self.telemetry.working_memory(working, request_iteration=iteration)
 
     async def _apply_pending(self, bot: Any, iteration: int) -> None:
         task, self._pending = self._pending, None
@@ -150,14 +160,6 @@ class LLMGameController:
         except Exception as exc:
             self._record_failure(bot, iteration, "Model request", str(exc), stage="system")
             return
-
-        try:
-            if self.context_builder.update_working(result.working):
-                self.telemetry.working_memory(self.context_builder.working, iteration=iteration,
-                                              request_iteration=self._request_iteration)
-        except ValueError as exc:
-            self._feedback.append({"kind": "working_memory", "error": str(exc)})
-            self._event("working_memory_rejected", iteration=iteration, reason=str(exc))
 
         # Resolve aliases and availability against this frame, not the request frame.
         context = self.observation_builder.execution_context(bot)

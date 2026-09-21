@@ -51,7 +51,7 @@ Use a fast four-Barracks Reaper opening to establish early mobile pressure, then
 - Keep available Barracks producing Reapers when resources and supply allow, but do not build more than four Barracks during this phase.
 - Regroup nearby reinforcements before attacking defended positions rather than sending individual Reapers across the map.
 - Scout around the enemy main and likely expansion routes; attack exposed workers, isolated units, proxies, or undefended production rather than blindly A-Moving into the enemy base.
-- Avoid concentrated ground armies and static defence; use Reaper mobility and Grenades to take favorable trades or disengage, with roughly 60% health only as a safety reference in dangerous fights.
+- Avoid concentrated ground armies and static defence; use Reaper mobility and Grenades (`KD8CHARGE_KD8CHARGE`) to take favorable trades or disengage, with roughly 60% health only as a safety reference in dangerous fights.
 - Do not expand, research upgrades, build an Engineering Bay, or add unrelated technology before the Factory has started.
 - Finish this phase when four Barracks are established or pending and the first Factory has started.
 

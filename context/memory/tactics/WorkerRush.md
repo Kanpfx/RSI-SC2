@@ -7,7 +7,7 @@ Send a large early SCV group across the map after a very short setup, use worker
 
 - Check emergency_defence first, then worker_assault. Otherwise use opening, worker_assault, marine_followup.
 - Start the worker attack at the early timing with up to eleven SCVs. Keep the main group compact and avoid isolated trades.
-- When an attacking SCV is below about 40 percent health, move it into the repair group; return it to combat when healthy enough or too few workers remain to sustain repairs.
+- When an attacking SCV is below about 40 percent health, move it into the repair group (`EFFECT_REPAIR_SCV`); return it to combat when healthy enough or too few workers remain to sustain repairs.
 - This tactic is all-in in spirit: do not delay the attack for standard macro, technology, or expansion.
 
 ## opening

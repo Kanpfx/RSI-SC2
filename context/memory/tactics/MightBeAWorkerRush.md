@@ -8,7 +8,7 @@ Launch a delayed SCV pressure with a hidden Barracks near the enemy main, then l
 - Check emergency_defence first, then worker_pressure. Otherwise use opening, approach, worker_pressure, proxy_marine_followup.
 - Send only one SCV to build the forward Barracks; the remaining attacking SCVs are the pressure group. Do not abandon all home mining.
 - Keep the strategy on one base with Marines and no gas, upgrades, expansion, or optional technology unless a later strategic instruction replaces it.
-- Use damaged SCVs as a repair group and return them to the fighting group when healthy enough.
+- Use damaged SCVs as a repair group (`EFFECT_REPAIR_SCV`) and return them to the fighting group when healthy enough.
 
 ## opening
 
