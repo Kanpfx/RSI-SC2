@@ -16,6 +16,7 @@ class ActionRecord:
     description: str
     status: str
     reason: str = ""
+    cycle: int = 0
 
 
 class ActionHistory:
@@ -23,6 +24,15 @@ class ActionHistory:
         self._recent: list[ActionRecord] = []
         self._active: dict[str, ActionRecord] = {}
         self._queued: dict[str, ActionRecord] = {}
+        self._notices: list[ActionRecord] = []
+        self._cycle = 0
+
+    def begin_decision(self) -> None:
+        """The next observation includes events from the preceding three cycles."""
+        self._cycle += 1
+        oldest = self._cycle - 3
+        self._recent = [record for record in self._recent if record.cycle >= oldest]
+        self._notices = [record for record in self._notices if record.cycle >= oldest]
 
     @staticmethod
     def _key(action: Any) -> str:
@@ -37,19 +47,25 @@ class ActionHistory:
             )
         self._active = active
 
-    def record(self, action: Any, time: str, status: str, reason: str = "") -> None:
-        if status not in {"accepted", "queued", "failed"}:
-            raise ValueError("history status must be accepted, queued or failed")
+    def record(self, action: Any, time: str, status: str, reason: str = "", *,
+               submitted_action: str | None = None) -> None:
+        if status not in {"accepted", "queued", "failed", "notice"}:
+            raise ValueError("history status must be accepted, queued, failed or notice")
         key = self._key(action)
         description = (
             format_action(action)
             if isinstance(action, dict) and set(action) == {"id", "args"}
             else str(action)
         )
+        if submitted_action is not None:
+            description = submitted_action
+        if status == "notice":
+            self._notices.append(ActionRecord(time, key, description, status, reason, self._cycle))
+            return
         self._queued.pop(key, None)
         if status == "queued":
             self._recent = [record for record in self._recent if record.key != key]
-            self._queued[key] = ActionRecord(time, key, description, status, reason)
+            self._queued[key] = ActionRecord(time, key, description, status, reason, self._cycle)
             return
         if status == "failed":
             self._active.pop(key, None)
@@ -57,9 +73,11 @@ class ActionHistory:
                 if record.key == key and record.status == "accepted":
                     record.status = status
                     record.reason = reason
+                    record.time = time
+                    record.description = description
+                    record.cycle = self._cycle
                     return
-        self._recent.append(ActionRecord(time, key, description, status, reason))
-        self._recent = self._recent[-10:]
+        self._recent.append(ActionRecord(time, key, description, status, reason, self._cycle))
 
     def forget_queued(self, action: Any) -> None:
         self._queued.pop(self._key(action), None)
@@ -74,13 +92,15 @@ class ActionHistory:
     def render(self) -> str:
         # Show the latest state once; live intents take precedence over history.
         records = {record.key: record for record in self._recent}
+        failures = [record for record in records.values() if record.status == "failed"]
         records.update(self._active)
         records.update(self._queued)
-        if not records:
+        if not records and not self._notices:
             return "[None]"
         rows = []
-        for status in ("active", "queued", "accepted", "failed"):
-            group = [record for record in records.values() if record.status == status]
+        for status in ("active", "queued", "accepted", "failed", "notice"):
+            group = (self._notices if status == "notice" else failures if status == "failed" else
+                     [record for record in records.values() if record.status == status])
             if not group:
                 continue
             rows.append(f"{status}:")

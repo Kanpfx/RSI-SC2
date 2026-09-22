@@ -46,6 +46,10 @@ class EntityContext:
     def entities(self) -> dict[str, Any]:
         return self.own_entities | self.enemy_entities
 
+    def observation_id(self, tag: Any) -> str:
+        return next((alias for alias, unit in self.entities.items() if str(unit.tag) == str(tag)),
+                    "[Unknown]")
+
     @staticmethod
     def canonical_entity_alias(alias: Any) -> str:
         """Accept common scalar representations of an observation ``[id]``.

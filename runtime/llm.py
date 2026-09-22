@@ -142,14 +142,13 @@ class ModelAgent:
         self.client = client
 
     async def run(self, messages: list[dict[str, str]], *, trace: Telemetry,
-                  iteration: int, action_message: dict[str, str], action_system: str,
+                  iteration: int, build_action_messages: Callable[[str], list[dict[str, str]]],
                   on_working: Callable[[str], None]) -> ModelResult:
         started = perf_counter()
         working_trace = trace.request_trace(iteration, "working")
         working = await self.client.complete(messages, trace=working_trace, iteration=iteration)
         on_working(working)
-        messages = [{"role": "system", "content": action_system}, {"role": "user", "content":
-                    "<core_missions>\n" + working + "\n</core_missions>\n\n" + action_message["content"]}]
+        messages = build_action_messages(working)
         action_trace = trace.request_trace(iteration, "actions")
         reply = await self.client.complete(messages, trace=action_trace, iteration=iteration)
         received = perf_counter()

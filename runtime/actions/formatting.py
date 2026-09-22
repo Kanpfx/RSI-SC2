@@ -53,8 +53,10 @@ def format_indexed_actions(actions: list[dict[str, Any]]) -> list[str]:
 def format_feedback(feedback: list[dict[str, Any]]) -> str:
     """Keep multiline submitted text readable without JSON serialization."""
     blocks = []
-    for index, item in enumerate(feedback, 1):
-        if "action" in item:
+    for item in feedback:
+        if "submitted_action" in item:
+            submitted = item["submitted_action"]
+        elif "action" in item:
             action = item["action"]
             submitted = format_action(action) if isinstance(action, dict) else str(action)
         else:
@@ -62,12 +64,11 @@ def format_feedback(feedback: list[dict[str, Any]]) -> str:
                 "submitted_action",
                 item.get("submitted_output", item.get("submitted_phase")),
             )
-        submitted_lines = str(submitted if submitted is not None else "[None]").splitlines()
-        if len(submitted_lines) <= 1:
-            lines = [f"{index}. Action: {submitted_lines[0] if submitted_lines else '[None]'}"]
-        else:
-            lines = [f"{index}. Action: "]
-            lines.extend(f"     {line}" for line in submitted_lines)
-        lines.append(f"   Error: {item.get('error', 'Unknown error')}")
-        blocks.append("\n".join(lines))
-    return "\n\n".join(blocks) or "[None]"
+        submitted = str(submitted if submitted is not None else "[None]").replace("\r", "\\r").replace("\n", "\\n")
+        notice = item.get("kind") == "action_notice"
+        index = item.get("action_index")
+        label = f"Action {index}" if index is not None else "Action"
+        label = f"Notice — {label}" if notice else f"Error — {label}"
+        reason = " ".join(str(item.get('error', 'Unknown error')).splitlines())
+        blocks.append(f"{label} — {submitted}: {reason}")
+    return "\n".join(blocks) or "[None]"

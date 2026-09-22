@@ -78,6 +78,17 @@ LLM_API_KEY=your-api-key
 conda activate sc2-agent
 python run.py --map_name Simple64 --difficulty VeryHard --enemy_race Terran --tactic Simple64
 ```
+添加示例：在 `PylonAIE_v4` 上对抗 VeryHard Terran AI，并使用
+BattleCruiserRush 战术。
+
+```powershell
+python run.py `
+  --map_name PylonAIE_v4 `
+  --difficulty VeryHard `
+  --build_mode RandomBuild `
+  --enemy_race Terran `
+  --tactic BattleCruiserRush
+```
 
 使用已有环境时，将 `sc2-agent` 换成对应环境名。
 
@@ -101,7 +112,7 @@ python run.py --map_name Simple64 --difficulty VeryHard --enemy_race Terran --ta
 - `output_working.md`：第一轮输出要求，仅生成“当前阶段”和“具体指导”。
 - `output.md`：第二轮输出要求，依据第一轮指导生成 DSL 动作。
 
-通用记忆保存在 `context/memory/general.md`，包含全局约束、控制范围与通用经验；战术经验保存在 `context/memory/tactics/`。这些文件开局加载并归档，修改后下一局生效。每个决策周期独立调用两轮：第一轮输入共享规则、完整战术和观测，回复保留在内存和系统日志中，不单独生成 `working.md`，不额外校验格式或长度；第二轮独立组装上下文，以本轮 working 为主要决策指导，提供共享规则、相同观测、动作表和执行反馈，不携带第一轮对话或战术表，仅生成动作。第一轮不输入旧 working；周期之间不累积完整对话。动作回复只接受 `# actions` 段，不兼容旧的 `# working` 段。
+通用记忆保存在 `context/memory/general.md`，包含全局约束、控制范围与通用经验；战术经验保存在 `context/memory/tactics/`。这些文件开局加载并归档，修改后下一局生效。每个决策周期独立调用两轮，共享同一份公共上下文，依次为通用规则、观测和动作表。错误与提示统一放在观测的 action_history 中，分别归入 failed 和 notice，包含事件时间、原始动作及原因，不再单独拼接 execution_feedback。第一轮在公共上下文后追加完整战术、上一轮 working（`previous_decision`）和输出要求；上一轮决策仅作为历史参考，需结合当前观测与反馈修正，不代表动作已执行，首轮显式标记无上一轮决策。回复保留在内存和系统日志中，不单独生成 `working.md`，不额外校验格式或长度。第二轮在公共上下文后追加本轮 working（`current_decision`）和输出要求，仅生成动作，不携带第一轮对话或战术表。周期之间不累积完整对话。动作回复只接受 `# actions` 段，不兼容旧的 `# working` 段。
 
 每局生成 `logs/<时间戳>/`，主要内容包括：
 

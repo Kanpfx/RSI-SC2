@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 
 from agent.context.action_reference import _actions_reference, _section
-from agent.runtime.actions.formatting import format_feedback
 
 CONTEXT_ROOT = Path(__file__).resolve().parent
 
@@ -34,28 +33,33 @@ class ContextBuilder:
         self.working = value
         return True
 
-    def build(self, observation: str, action_entries: list[dict[str, Any]]) -> list[dict[str, str]]:
-        sections = [
+    def build_common_context(self, observation: str, action_entries: list[dict[str, Any]]) -> str:
+        return "\n\n".join([
             _section("general_guidance", self.sources["memory/general.md"]),
-            _section("tactical_guidance", self.sources[f"memory/tactics/{self.tactic_name}.md"]),
             self._observation(observation),
             _actions_reference(action_entries),
+        ])
+
+    def build(self, common_context: str) -> list[dict[str, str]]:
+        sections = [
+            common_context,
+            _section("tactical_guidance", self.sources[f"memory/tactics/{self.tactic_name}.md"]),
+            _section("previous_decision", self.working or "No previous decision."),
             _section("output_requirements", self.sources["prompts/output_working.md"]),
         ]
         return [{"role": "system", "content": self.sources["prompts/system_working.md"]},
                 {"role": "user", "content": "\n\n".join(sections)}]
 
-    def build_action_message(self, observation: str, action_entries: list[dict[str, Any]],
-                             feedback: list[dict[str, Any]], *, max_actions: int = 6) -> dict[str, str]:
+    def build_action_messages(self, working: str, *, common_context: str,
+                              max_actions: int = 6) -> list[dict[str, str]]:
         output = self.sources["prompts/output.md"].replace("{max_actions}", str(max_actions))
         sections = [
-            _section("general_guidance", self.sources["memory/general.md"]),
-            self._observation(observation),
-            _actions_reference(action_entries),
-            _section("execution_feedback", format_feedback(feedback)),
+            common_context,
+            _section("current_decision", working),
             _section("output_requirements", output),
         ]
-        return {"role": "user", "content": "\n\n".join(sections)}
+        return [{"role": "system", "content": self.sources["prompts/system_actions.md"]},
+                {"role": "user", "content": "\n\n".join(sections)}]
 
     def _observation(self, observation: str) -> str:
         return _section("observation", "\n\n".join((

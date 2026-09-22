@@ -34,6 +34,13 @@ def type_names(expression: str) -> set[str]:
     return set(re.findall(r"[A-Za-z_][A-Za-z_0-9]*", expression))
 
 
+def _type_label(tree: tuple) -> str:
+    kind, args = tree
+    if kind == "union":
+        return " | ".join(_type_label(arg) for arg in args)
+    return kind + ("[" + ", ".join(_type_label(arg) for arg in args) + "]" if args else "")
+
+
 def resolve_enum(enum_type: Any, value: Any, name: str) -> Any:
     if not isinstance(value, str):
         raise ResolveError.format(name, f"a {enum_type.__name__} member name")
@@ -96,13 +103,12 @@ class TypeResolver:
             # Units and list[Unit] both accept arrays but produce different native
             # types, so prefer the concrete SC2 collection regardless of spelling.
             branches = sorted(args, key=lambda branch: branch[0] != "Units")
-            errors = []
             for branch in branches:
                 try:
                     return self._resolve(value, branch, context, path)
-                except ResolveError as exc:
-                    errors.append(str(exc))
-            raise ResolveError("union mismatch", " OR ".join(errors), parameter=path)
+                except ResolveError:
+                    pass
+            raise ResolveError.invalid_value(path, value, f"a valid {_type_label(tree)}")
         if kind == "null":
             if value is None:
                 return None, None

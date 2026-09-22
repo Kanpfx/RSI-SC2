@@ -2,4 +2,5 @@
 - @landmark(x,y) and @(x,y) mark a shared 12-unit cell center, not an exact entity position. Use IDs for precise unit targets.
 - Enemy memory gives last known positions without selectable IDs; entities may have moved or disappeared. last_seen is elapsed game time.
 - income is minerals/vespene per minute; combat_total killed_value records destroyed enemy units/structures; army_lost is cumulative own mineral/vespene losses.
-- History: accepted=submitted, active=ongoing, queued=waiting for resources, failed=see reason. Ares starting no new work alone is not failure.
+- History: accepted=submitted, active=ongoing, queued=waiting for resources, failed=parse, validation, request or execution error (see reason); notice=informational feedback, not failure. Both include event time and the submitted action when available. Ares starting no new work alone is not failure.
+- History retains events from the previous three decision cycles, without a record-count limit. Active and queued intents remain visible until they end; delayed feedback belongs to the cycle in which it occurs.

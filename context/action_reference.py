@@ -36,15 +36,14 @@ def _action_card(entry: dict[str, Any]) -> str:
     arguments = [f"{p['name']}: {p['type']}" for p in params]
     ongoing = entry['id'] in PERSISTENT_ACTION_IDS or entry['id'] == 'macro.build_workers'
     lifetime = ' [Persistent action]' if ongoing else ''
-    lines = [f"- `{entry['name']}({', '.join(arguments)})`{lifetime}",
-             f"  {entry['description']}"]
+    lines = [f"- `{entry['name']}({', '.join(arguments)})`:{lifetime} {entry['description']}"]
     for p in params:
         if p['name'] in GENERIC_PARAMS and (entry['id'], p['name']) not in GENERIC_PARAM_KEEP:
             continue
         details = p['description']
         choices = p.get('choices')
         if choices is not None:
-            details += ' Choices: ' + ', '.join(map(str, choices)) + '.'
+            details += ' Choices: ' + ', '.join(f'`{format_value(value)}`' for value in choices) + '.'
         lines.append(f"  - `{p['name']}`: {details}")
     return '\n'.join(lines)
 
@@ -68,13 +67,10 @@ def _type_legend(entries: list[dict[str, Any]], definitions: dict[str, Any]) -> 
     BASIC = ("bool", "int", "float", "str", "null")
     CONTAINERS = ("list", "set", "tuple", "dict")
     lines = []
-    basic_used = [name for name in BASIC if name in used]
-    if basic_used:
-        lines.append("- `" + "` `".join(basic_used) + "`: same with Python.")
-    container_used = [name for name in definitions
-                      if name.split('[')[0] in CONTAINERS and name.split('[')[0] in used]
-    if container_used:
-        lines.append("- `" + "` `".join(container_used) + "`: Python containers; JSON arrays/objects.")
+    containers = [name for name in definitions if name.split('[')[0] in CONTAINERS]
+    if containers:
+        lines.append('- ' + ', '.join(f'`{name}`' for name in containers)
+                     + ': Python containers; JSON arrays/objects.')
     for name, definition in definitions.items():
         base = name.split('[')[0]
         if base in BASIC or base in CONTAINERS:
@@ -85,9 +81,9 @@ def _type_legend(entries: list[dict[str, Any]], definitions: dict[str, Any]) -> 
         if 'fields' in definition:
             line += ' Fields: ' + ', '.join(f'{k}: {v}' for k, v in definition['fields'].items()) + '.'
         if 'values' in definition:
-            line += ' Choices: ' + ', '.join(definition['values']) + '.'
+            line += ' Choices: ' + ', '.join(f'`{format_value(value)}`' for value in definition['values']) + '.'
         if 'example' in definition:
-            line += f" Example: {format_value(definition['example'])}."
+            line += f" Example: `{format_value(definition['example'])}`."
         lines.append(line)
     return "# argument_definitions\n" + "\n".join(lines)
 

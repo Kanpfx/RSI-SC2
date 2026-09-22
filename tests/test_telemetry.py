@@ -34,7 +34,10 @@ class SystemTelemetryTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(client, "_complete_sync", side_effect=complete_sync):
                 await ModelAgent(client).run(
                     messages, trace=trace, iteration=4,
-                    action_message={"content": "actions input"}, action_system="system",
+                    build_action_messages=lambda working: [
+                        {"role": "system", "content": "system"},
+                        {"role": "user", "content": working + "\nactions input"},
+                    ],
                     on_working=lambda text: trace.working_memory(text, request_iteration=4),
                 )
             system = root / "system"

@@ -104,13 +104,13 @@ def validate_resolved(entry: dict[str, Any], args: dict[str, Any], context: Enti
     actor_tags = set()
     for u in units:
         if u.tag not in own_tags:
-            raise ParameterError.invalid_value(actor_param, u.tag, 'an own actor')
+            raise ParameterError.invalid_value(actor_param, context.observation_id(u.tag), 'an own actor')
         if allowed and u.type_id.name not in allowed:
             raise ParameterError.invalid_value(actor_param, u.type_id.name, str(sorted(allowed)))
         if not actor_supported(entry, u, ready=ready):
-            raise ActionSurfaceError('actor cannot execute', f"{u.tag}: {entry['name']}")
+            raise ActionSurfaceError('actor cannot execute', f"unit {context.observation_id(u.tag)}: {entry['name']}")
         if str(u.tag) in actor_tags:
-            raise ParameterError.invalid_value(actor_param, u.tag, 'distinct actor IDs')
+            raise ParameterError.invalid_value(actor_param, context.observation_id(u.tag), 'distinct actor IDs')
         actor_tags.add(str(u.tag))
     for table, entities in ((ENEMY_PARAMS_BY_ACTION, context.enemy_entities),
                             (ALLY_PARAMS_BY_ACTION, context.own_entities)):
@@ -119,7 +119,7 @@ def validate_resolved(entry: dict[str, Any], args: dict[str, Any], context: Enti
             values = args.get(name)
             values = [values] if hasattr(values, 'tag') else values or []
             if any(u.tag not in tags for u in values):
-                raise ParameterError.invalid_value(name, [u.tag for u in values],
+                raise ParameterError.invalid_value(name, [context.observation_id(u.tag) for u in values],
                                                    'entities on the required side')
     if ready:
         ability = args.get('ability', args.get('ability_id', args.get('aoe_ability')))
@@ -132,5 +132,5 @@ def validate_resolved(entry: dict[str, Any], args: dict[str, Any], context: Enti
     if entry['name'] in ATTACK_ACTIONS and hasattr(target, 'tag'):
         capability = 'can_attack_air' if getattr(target, 'is_flying', False) else 'can_attack_ground'
         if any(getattr(u, capability, True) is False for u in units):
-            raise ParameterError.invalid_value('target', target.tag, 'an attackable ground/air category')
+            raise ParameterError.invalid_value('target', context.observation_id(target.tag), 'an attackable ground/air category')
     return actor_tags

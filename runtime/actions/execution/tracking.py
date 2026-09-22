@@ -7,6 +7,7 @@ from typing import Any
 
 from loguru import logger
 from sc2.protocol import ProtocolError
+from agent.runtime.actions.errors import exception_reason
 
 
 class TrackedBehavior:
@@ -30,7 +31,7 @@ class TrackedBehavior:
             raise
         except Exception as exc:
             logger.exception("Ares behavior execution failed")
-            self.on_failure(str(exc))
+            self.on_failure(exception_reason(exc))
             return False
         self.on_result(result)
         return result

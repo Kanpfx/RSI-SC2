@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from time import perf_counter
 from dataclasses import asdict
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -121,27 +122,29 @@ class LLMGameController:
             self.automation.register_worker_production(bot)
 
     def _start_request(self, bot: Any, iteration: int) -> None:
+        self.observation_builder.action_history.begin_decision()
         observation = self.observation_builder.build(bot, iteration)
         surface = self.action_exposure.build(bot, observation.context)
         self.telemetry.observation(
             iteration=iteration, time=bot.time_formatted, observation=observation.text,
             game_time=float(bot.time), game_loop=getattr(getattr(bot, "state", None), "game_loop", None)
         )
-        feedback, self._feedback = self._feedback, []
+        self._feedback = []
         self._request_iteration = iteration
         self._request_time = float(bot.time)
         self._next_model_time = self._request_time + self.game_config.model_interval_seconds
         # Pass detached prompt data only; the task must never access the live bot.
-        messages = self.context_builder.build(observation.text, surface.entries)
-        action_message = self.context_builder.build_action_message(
-            observation.text, surface.entries, feedback,
-            max_actions=self.game_config.max_actions_per_decision,
+        common_context = self.context_builder.build_common_context(
+            observation.text, surface.entries,
         )
+        messages = self.context_builder.build(common_context)
         self._pending = asyncio.create_task(
             self.model_agent.run(
                 messages, trace=self.telemetry, iteration=iteration,
-                action_message=action_message,
-                action_system=self.context_builder.sources["prompts/system_actions.md"],
+                build_action_messages=partial(
+                    self.context_builder.build_action_messages, common_context=common_context,
+                    max_actions=self.game_config.max_actions_per_decision,
+                ),
                 on_working=lambda working: self._save_working(working, iteration),
             )
         )
@@ -162,9 +165,14 @@ class LLMGameController:
         context = self.observation_builder.execution_context(bot)
         surface = self.action_exposure.build(bot, context)
         review = self.policy.review(bot, result.actions, context, surface)
+        sources = {
+            item["parsed_index"] - 1: {"action_index": item["source_index"], "submitted_action": item["source"]}
+            for item in result.parse_report.get("sources", [])
+        }
         validation_feedback = list(result.validation_feedback)
         validation_feedback.extend(
-            {"kind": "action", "action": issue.action, "error": issue.text()}
+            {"kind": "action", "action": issue.action, "error": issue.reason,
+             **sources.get(issue.index, {"action_index": issue.index + 1})}
             for issue in review.issues
         )
         for feedback in validation_feedback:
@@ -175,13 +183,16 @@ class LLMGameController:
             self.executor.record_failure(
                 bot, iteration, submitted, feedback["error"],
                 stage="validation" if feedback.get("kind") == "action" else "parse",
+                **{key: feedback[key] for key in ("action_index", "submitted_action") if key in feedback},
             )
         notices = [
-            {"kind": "action_notice", "action_index": item.index + 1, "action": item.action, "error": item.reason}
+            {"kind": "action_notice", "action": item.action, "error": f"{item.action}: {item.reason}",
+             **sources.get(item.index, {"action_index": item.index + 1})}
             for item in review.notices
         ]
         validation_feedback.extend(notices)
-        self._feedback.extend(notices)
+        for notice in notices:
+            self.executor.record_feedback(bot, notice)
         rejected = {issue.index: issue for issue in review.issues}
         normalized = iter(review.actions)
         report = []
@@ -210,7 +221,10 @@ class LLMGameController:
                 "model_actions_normalized", iteration=iteration, notes=review.normalizations
             )
         feedback_start = len(self._feedback)
-        states = self.executor.dispatch(bot, iteration, review, context)
+        states = self.executor.dispatch(bot, iteration, review, context, sources=[
+            sources.get(index, {"action_index": index + 1})
+            for index in range(len(result.actions)) if index not in rejected
+        ])
         source_indices = {
             self.executor.action_key(action): item["parsed_index"]
             for action, item in zip(review.actions, (row for row in report if row["status"] == "passed"))

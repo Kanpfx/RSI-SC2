@@ -18,7 +18,14 @@ class ErrorDetails:
     actual: Any = None
 
     def render(self) -> str:
-        return f"{self.category}: {self.kind}; {self.detail}"
+        return f"{self.kind}; {self.detail}"
+
+
+def exception_reason(exc: Exception) -> str:
+    """Keep model errors concise and unexpected exceptions identifiable."""
+    if isinstance(exc, ActionError):
+        return str(exc)
+    return f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
 
 
 class ActionError(ValueError):

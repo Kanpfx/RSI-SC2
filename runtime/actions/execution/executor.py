@@ -8,6 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from agent.config import GameConfig
+from agent.runtime.actions.errors import exception_reason
 from agent.logger.recorder import Telemetry
 from agent.runtime.actions.execution.adapter import AresActionAdapter
 from agent.runtime.actions.execution.deferred import DeferredActionQueue
@@ -37,7 +38,7 @@ class ActionExecutor:
         self.observation_builder = observation_builder
         self.automation = automation
         self.telemetry = telemetry
-        self._on_feedback = on_feedback
+        self._feedback_sink = on_feedback
         self._request_iteration = request_iteration
         self.deferred_actions = DeferredActionQueue(
             catalog, config.deferred_action_ttl_iterations,
@@ -47,9 +48,22 @@ class ActionExecutor:
         self.persistent_actions = PersistentActionRegistry(catalog)
         self._action_origins: dict[str, dict[str, Any]] = {}
 
+    def record_feedback(self, bot: Any, item: dict[str, Any]) -> None:
+        origin = self._action_origins.get(self.action_key(item.get("action")), {})
+        item = {
+            **{key: origin[key] for key in ("action_index", "submitted_action") if key in origin},
+            **item,
+        }
+        self.observation_builder.action_history.record(
+            item.get("action", item.get("submitted_action", "Model output")),
+            bot.time_formatted, "notice" if item.get("kind") == "action_notice" else "failed",
+            item["error"], submitted_action=item.get("submitted_action"),
+        )
+        self._feedback_sink(item)
+
     def dispatch(
         self, bot: Any, iteration: int, review: ActionReview, context: Any,
-        *, from_queue: bool = False,
+        *, from_queue: bool = False, sources: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         states = []
         for action_index, action in enumerate(review.actions):
@@ -64,6 +78,7 @@ class ActionExecutor:
                     "decision_id": f"d{self._request_iteration()}",
                     "request_iteration": self._request_iteration(),
                     "action_id": uuid4().hex,
+                    **(sources[action_index] if sources is not None else {}),
                 }
             try:
                 action_id = self.catalog.get(action["id"])["id"]
@@ -93,7 +108,7 @@ class ActionExecutor:
                         continue
                     if resource_status == "blocked":
                         reason = "resource shortfall exceeds queue tolerance; not submitted"
-                        self._on_feedback({"kind": "action", "action": action, "error": reason})
+                        self.record_feedback(bot, {"kind": "action", "action": action, "error": reason})
                         self.event(
                             "action_not_submitted", game_time=float(bot.time),
                             game_loop=getattr(getattr(bot, "state", None), "game_loop", None), iteration=iteration, action=action, reason=reason
@@ -114,8 +129,8 @@ class ActionExecutor:
                     "status": "active" if persistent else "accepted",
                 })
             except (KeyError, TypeError, ValueError) as exc:
-                self.record_failure(bot, iteration, action, str(exc))
-                states.append({"action": action, "status": "failed", "reason": str(exc)})
+                self.record_failure(bot, iteration, action, exception_reason(exc))
+                states.append({"action": action, "status": "failed", "reason": exception_reason(exc)})
         for item in states:
             item.update(self._action_origins.get(self.action_key(item["action"]), {}))
         return states
@@ -151,7 +166,7 @@ class ActionExecutor:
         for action in expired:
             self.observation_builder.action_history.forget_queued(action)
             reason = "resource wait ended without submission; reconsider against current state"
-            self._on_feedback({"kind": "action", "action": action, "error": reason})
+            self.record_feedback(bot, {"kind": "action", "action": action, "error": reason})
             self.event(
                 "action_wait_ended", game_time=float(bot.time),
                 game_loop=getattr(getattr(bot, "state", None), "game_loop", None), iteration=iteration, action=action, reason=reason
@@ -173,11 +188,11 @@ class ActionExecutor:
                 review = self.policy.review(bot, [action], context, surface)
                 if review.issues:
                     for issue in review.issues:
-                        self.record_failure(bot, iteration, action, issue.text())
+                        self.record_failure(bot, iteration, action, issue.reason)
                     continue
                 self.dispatch(bot, iteration, review, context, from_queue=True)
             except (KeyError, TypeError, ValueError) as exc:
-                self.record_failure(bot, iteration, action, str(exc))
+                self.record_failure(bot, iteration, action, exception_reason(exc))
 
     def run_persistent(self, bot: Any, iteration: int, context: Any) -> None:
         for action in self.persistent_actions.actions:
@@ -186,14 +201,14 @@ class ActionExecutor:
                 # do not invalidate a persistent intent; Ares handles readiness.
                 review = self.policy.review(bot, [action], context, persistent=True)
                 if review.issues:
-                    raise ValueError(review.issues[0].text())
+                    raise ValueError(review.issues[0].reason)
                 current = review.actions[0]
                 self.persistent_actions.replace(current)
                 behaviors = [self.adapter.construct(current, review.arguments[0])]
                 self._register_behaviors(bot, iteration, current, behaviors, True)
             except (KeyError, TypeError, ValueError) as exc:
                 self.persistent_actions.discard(action)
-                self.record_failure(bot, iteration, action, str(exc))
+                self.record_failure(bot, iteration, action, exception_reason(exc))
         self.sync_active(bot)
 
     def _register_behaviors(
@@ -216,14 +231,15 @@ class ActionExecutor:
                 if result
                 else "Ares started no new work; check prerequisites, pending work and target counts before retrying"
             )
-            self.observation_builder.action_history.annotate(action, reason)
+            if result:
+                self.observation_builder.action_history.annotate(action, reason)
             self.event(
                 "action_execution", game_time=float(bot.time),
                 game_loop=getattr(getattr(bot, "state", None), "game_loop", None), iteration=iteration, action=action,
                 status="accepted", started=bool(result), reason=reason, **origin,
             )
             if not result:
-                self._on_feedback({"kind": "action", "action": action, "error": reason})
+                self.record_feedback(bot, {"kind": "action_notice", "action": action, "error": reason, **origin})
 
         for behavior in behaviors:
             bot.register_behavior(TrackedBehavior(
@@ -239,11 +255,9 @@ class ActionExecutor:
     def record_failure(
         self, bot: Any, iteration: int, action: Any, reason: str, **metadata: Any
     ) -> None:
-        self.observation_builder.record_failed_actions(
-            [action], bot.time_formatted, reason
-        )
-        feedback = {"kind": "action", "action": action, "error": reason}
-        self._on_feedback(feedback)
+        feedback = {"kind": "action", "action": action, "error": reason,
+                    **{key: metadata[key] for key in ("action_index", "submitted_action") if key in metadata}}
+        self.record_feedback(bot, feedback)
         self.event(
             "action_failed", game_time=float(bot.time),
             game_loop=getattr(getattr(bot, "state", None), "game_loop", None), iteration=iteration,

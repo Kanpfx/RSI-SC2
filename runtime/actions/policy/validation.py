@@ -9,6 +9,7 @@ from agent.config import GameConfig
 from agent.runtime.actions.execution.adapter import AresActionAdapter
 from agent.runtime.actions.errors import (
     ActionNameError,
+    exception_reason,
     ConflictError,
     InstructionError,
     OutputFormatError,
@@ -100,7 +101,7 @@ class PolicyValidator:
                     surface.validate(entry, normalized['args'])
                 overlap = seen & actor_tags
                 if overlap:
-                    raise ConflictError.unit_reused(sorted(overlap)[0])
+                    raise ConflictError.unit_reused(context.observation_id(sorted(overlap)[0]))
                 self._validate_limits(entry, kwargs)
                 seen.update(actor_tags)
                 valid.append(normalized)
@@ -108,7 +109,7 @@ class PolicyValidator:
                 if normalized != action:
                     notes.append(f'Action {index + 1}: normalized names, references or coordinates')
             except (KeyError, TypeError, ValueError) as exc:
-                issues.append(ValidationIssue(index, current, str(exc)))
+                issues.append(ValidationIssue(index, current, exception_reason(exc)))
         return ActionReview(valid, issues, notes, notices, arguments)
 
     @staticmethod
