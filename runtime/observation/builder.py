@@ -7,7 +7,6 @@ from typing import Any
 
 from agent.runtime.observation.action_history import ActionHistory
 from agent.runtime.actions.resolution.resolver import EntityContext
-from agent.runtime.observation.hints import SituationHintBuilder
 from agent.runtime.observation.overview import OverviewBuilder
 from agent.runtime.observation.renderer import observation_text
 from agent.runtime.observation.state import TagIdMapper
@@ -61,7 +60,6 @@ class ObservationBuilder:
         self.entities = EntityRenderer(ids)
         self.change_tracker = ChangeTracker()
         self.overview_builder = OverviewBuilder()
-        self.hint_builder = SituationHintBuilder()
         self.technology_builder = ProductionTechnologyBuilder()
         self.action_history = ActionHistory()
 
@@ -75,17 +73,12 @@ class ObservationBuilder:
         self, actions: list[dict[str, Any]], time: str = "--:--"
     ) -> None:
         self.action_history.sync_active(actions, time)
-        self.entities.sync_active_actions(actions, time)
 
     def record_failed_actions(
         self, actions: list[Any], time: str = "--:--", reason: str = ""
     ) -> None:
         for action in actions:
             self.action_history.record(action, time, "failed", reason)
-
-    def collect_frame(self, bot: Any) -> None:
-        """Collect short-lived facts even when no model observation is due."""
-        self.hint_builder.collect_frame(bot)
 
     def build(self, bot: Any, iteration: int) -> Observation:
         own_units = list(bot.units)
@@ -124,16 +117,9 @@ class ObservationBuilder:
             enemy_structures, context, bot, own=False
         )
         facts = self.change_tracker.facts(own_counts, structures, enemies, enemy_structures, bot)
-        overview = self.overview_builder.build(
-            bot,
-            structures,
-            own_units,
-            enemies,
-            enemy_structures,
-        )
+        overview = self.overview_builder.build(bot)
         data = {
             "overview": overview,
-            "situational_hints": self.hint_builder.build(bot),
             "own_unit_blocks": own_unit_blocks,
             "own_structure_blocks": own_structure_blocks,
             "enemy_unit_blocks": enemy_unit_blocks,
@@ -147,7 +133,7 @@ class ObservationBuilder:
             "production_and_technology": self.technology_builder.build(
                 bot, structures, pending
             ),
-            "action_history": self._action_history_text(),
+            "action_history": self.action_history.render(),
             "recent_changes": self.change_tracker.recent_changes(facts),
         }
         self.change_tracker.previous_facts = facts
@@ -166,5 +152,3 @@ class ObservationBuilder:
                 pending[name] = int(bot.already_pending(getattr(UnitTypeId, name)))
         return pending
 
-    def _action_history_text(self) -> str:
-        return self.action_history.render()

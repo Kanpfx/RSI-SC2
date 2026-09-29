@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.runtime.observation.entities import count_entities, entity_display_name
+from agent.runtime.observation.entities import count_entities
 from agent.runtime.observation.execution_context import safe_mediator
 
 
@@ -77,11 +77,11 @@ class ChangeTracker:
                 and after > before
             ):
                 changes.append(
-                    f"Enemy {entity_display_name(key.split(':', 1)[1])} first seen."
+                    f"Enemy {key.split(':', 1)[1]} first seen."
                 )
             elif key.startswith("own:") and isinstance(after, int) and after > before:
                 changes.append(
-                    f"Our {entity_display_name(key.split(':', 1)[1])} count increased to {after}."
+                    f"Our {key.split(':', 1)[1]} count increased to {after}."
                 )
             elif (
                 key.startswith("ready_structure:")
@@ -89,7 +89,7 @@ class ChangeTracker:
                 and after > before
             ):
                 changes.append(
-                    f"Our {entity_display_name(key.split(':', 1)[1])} became ready."
+                    f"Our {key.split(':', 1)[1]} became ready."
                 )
             elif (
                 key.startswith("structure:")
@@ -102,7 +102,7 @@ class ChangeTracker:
                     ready_key, 0
                 )
                 if not ready_increased:
-                    changes.append(f"Our {entity_display_name(name)} started building.")
+                    changes.append(f"Our {name} started building.")
             if len(changes) == 5:
                 break
         return changes

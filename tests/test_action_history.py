@@ -6,13 +6,13 @@ from agent.runtime.observation.action_history import ActionHistory
 
 
 class ActionHistoryTests(unittest.TestCase):
-    def test_previous_three_cycles_without_record_limit(self):
+    def test_previous_two_cycles_without_record_limit(self):
         history = ActionHistory()
         history.begin_decision()
         for index in range(15):
             history.record(f"Action{index}()", "00:10", "failed", "invalid")
             history.record(f"Action{index}()", "00:10", "notice", "info")
-        for _ in range(3):
+        for _ in range(2):
             history.begin_decision()
         self.assertEqual(history.render().count("time@00:10"), 30)
         history.begin_decision()

@@ -5,6 +5,8 @@ Content:
 Format:
 - Return 0-{max_actions} actions, one DSL call per line. If no new action is needed, return only `# actions`.
 - Use bare names for enums and landmarks, true/false for booleans, [...] for lists, and {key:value} for objects.
+- Use the UnitTypeId names shown in the observation for type arguments, such as structure_id=SUPPLYDEPOT.
+- For a point argument, use a bare landmark (base_location=main) or an {x,y} object (base_location={x:28,y:60}); do not copy observation labels such as @main(28,60).
 - Return only the format below, with actual line breaks and no explanations.
 
 ```text

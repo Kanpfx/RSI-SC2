@@ -32,7 +32,14 @@ class AresActionAdapter:
         return compiled
 
     def construct(self, action: dict[str, Any], kwargs: dict[str, Any]) -> Any:
-        return behavior_class(self.catalog.get(action["id"])["api"]["import"])(**kwargs)
+        entry = self.catalog.get(action["id"])
+        kwargs = dict(kwargs)
+        # Project defaults override Ares defaults; explicit model values still win.
+        if entry['name'] == 'SpawnController':
+            kwargs.setdefault('over_produce_on_low_tech', False)
+        elif entry['name'] == 'UpgradeController':
+            kwargs.setdefault('auto_tech_up_enabled', False)
+        return behavior_class(entry["api"]["import"])(**kwargs)
 
     def compile(self, actions: list[dict[str, Any]], context: EntityContext) -> list[Any]:
         # LLM exposure is enforced at the model review boundary, not for internal callers.

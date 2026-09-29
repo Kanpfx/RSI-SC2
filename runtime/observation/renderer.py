@@ -18,19 +18,12 @@ def _section(name: str, content: str | list[str], *, empty: str = "[None]") -> s
 
 def observation_text(data: dict[str, Any]) -> str:
     """Render the factual observation read by model."""
-    hint_sections = data["situational_hints"]
-    alert_lines = [
-        f"- {item}"
-        for items in hint_sections.values()
-        for item in items
-    ]
-    situation_alerts = "alerts: " + " | ".join(dict.fromkeys(line[2:] for line in alert_lines)) if alert_lines else ""
     overview = "\n".join(filter(None, (
-        data["overview"]["resources"],
-        data["overview"]["economy"],
         data["overview"]["match"],
+        data["overview"]["resources"],
+        data["overview"]["supply"],
+        data["overview"]["economy"],
         data["overview"]["military"],
-        situation_alerts,
     )))
     technology = "\n".join(data["production_and_technology"])
     own_state = "\n\n".join(

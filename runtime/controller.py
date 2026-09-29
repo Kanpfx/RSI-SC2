@@ -98,7 +98,6 @@ class LLMGameController:
             return
         await self.automation.run(bot, iteration)
         try:
-            self.observation_builder.collect_frame(bot)
             applied = self._pending is not None and self._pending.done()
             if applied:
                 try:

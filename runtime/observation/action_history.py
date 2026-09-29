@@ -28,9 +28,9 @@ class ActionHistory:
         self._cycle = 0
 
     def begin_decision(self) -> None:
-        """The next observation includes events from the preceding three cycles."""
+        """The next observation includes events from the preceding two cycles."""
         self._cycle += 1
-        oldest = self._cycle - 3
+        oldest = self._cycle - 2
         self._recent = [record for record in self._recent if record.cycle >= oldest]
         self._notices = [record for record in self._notices if record.cycle >= oldest]
 

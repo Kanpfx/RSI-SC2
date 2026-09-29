@@ -86,7 +86,17 @@ def _normalize_dsl_symbols(source: str) -> str:
 
 def _parse_dsl_action(source: str) -> dict[str, Any]:
     try:
-        expression = ast.parse(_normalize_dsl_symbols(source), mode="eval").body
+        normalized = _normalize_dsl_symbols(source)
+        try:
+            expression = ast.parse(normalized, mode="eval").body
+        except SyntaxError:
+            # Accept a copied observation landmark such as @main(28,60) as a point.
+            normalized = re.sub(
+                r"@\s*[A-Za-z_][A-Za-z_0-9]*\s*\(\s*([+-]?\d+(?:\.\d+)?)\s*,\s*([+-]?\d+(?:\.\d+)?)\s*\)",
+                r"{x:\1,y:\2}",
+                normalized,
+            )
+            expression = ast.parse(normalized, mode="eval").body
     except (SyntaxError, tokenize.TokenError, IndentationError) as exc:
         raise OutputFormatError.dsl_action(source, "invalid function syntax") from exc
 

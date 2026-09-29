@@ -790,7 +790,7 @@
     {
       "id": "macro.spawn_controller",
       "name": "SpawnController",
-      "description": "Train units by priority; fixed freeflow mode ignores proportions. Keep all desired unit types in one army_composition_dict: only one global persistent configuration is retained, and each new call replaces it entirely (the last call in a batch wins).",
+      "description": "Train units by proportion and priority; proportions must sum to 1. Keep all desired unit types in one army_composition_dict: only one global persistent configuration is retained, and each new call replaces it entirely (the last call in a batch wins).",
       "tags": [
         "production"
       ],
@@ -818,11 +818,11 @@
         {
           "name": "freeflow_mode",
           "type": "bool",
-          "description": "Ignore army proportions when true. The existing agent policy supplies true; the Ares constructor default is false.",
+          "description": "Ignore army proportions when true. The agent supplies false, matching the Ares constructor default.",
           "input": "runtime",
           "required": false,
           "default": false,
-          "value": true
+          "value": false
         },
         {
           "name": "ignore_proportions_below_unit_count",
@@ -838,7 +838,7 @@
           "description": "If only one tech is available for a unit, this allows that unit to be constantly produced.",
           "input": "model",
           "required": false,
-          "default": true
+          "default": false
         },
         {
           "name": "ignored_build_from_tags",
@@ -1029,7 +1029,7 @@
     {
       "id": "macro.upgrade_controller",
       "name": "UpgradeController",
-      "description": "Research upgrades, building prerequisites if needed.",
+      "description": "Research upgrades. By default, missing prerequisites must be requested separately through TechUp.",
       "tags": [
         "technology"
       ],
@@ -1064,10 +1064,10 @@
         {
           "name": "auto_tech_up_enabled",
           "type": "bool",
-          "description": "bool",
+          "description": "Automatically build missing research prerequisites when true; disabled by default.",
           "input": "model",
           "required": false,
-          "default": true
+          "default": false
         },
         {
           "name": "prioritize",

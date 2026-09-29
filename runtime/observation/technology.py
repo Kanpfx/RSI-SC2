@@ -2,46 +2,13 @@
 
 from __future__ import annotations
 
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Any
 
 
 def _type_name(unit: Any) -> str:
     return getattr(getattr(unit, "type_id", None), "name", "UNKNOWN")
-
-
-DISPLAY_NAMES = {
-    "SCV": "SCV",
-    "MULE": "MULE",
-    "SIEGETANK": "Siege Tank",
-    "SIEGETANKSIEGED": "Siege Tank",
-    "WIDOWMINE": "Widow Mine",
-    "WIDOWMINEBURROWED": "Widow Mine",
-    "BARRACKSREACTOR": "Barracks Reactor",
-    "BARRACKSTECHLAB": "Barracks Tech Lab",
-    "COMMANDCENTER": "Command Center",
-    "ENGINEERINGBAY": "Engineering Bay",
-    "FACTORYREACTOR": "Factory Reactor",
-    "FACTORYTECHLAB": "Factory Tech Lab",
-    "FUSIONCORE": "Fusion Core",
-    "GHOSTACADEMY": "Ghost Academy",
-    "HELLIONTANK": "Hellbat",
-    "MISSILETURRET": "Missile Turret",
-    "ORBITALCOMMAND": "Orbital Command",
-    "PLANETARYFORTRESS": "Planetary Fortress",
-    "SENSORTOWER": "Sensor Tower",
-    "STARPORTREACTOR": "Starport Reactor",
-    "STARPORTTECHLAB": "Starport Tech Lab",
-    "SUPPLYDEPOT": "Supply Depot",
-    "VIKINGFIGHTER": "Viking",
-}
-
-
-def display_name(name: str, count: int = 1) -> str:
-    value = DISPLAY_NAMES.get(name, name.replace("_", " ").title())
-    if count != 1 and value not in {"Barracks"}:
-        value = {"Refinery": "Refineries"}.get(value, value + "s")
-    return value
 
 
 @dataclass(frozen=True)
@@ -114,33 +81,25 @@ class ProductionTechnologyBuilder:
         production, research = self._orders(ready)
         if not production:
             production = [
-                f"{count} {display_name(name, count)}"
+                f"{name}×{count}"
                 for name, count in sorted((pending or {}).items())
                 if count > 0 and name in PRODUCTION_UNIT_TYPES
             ]
         upgrades = sorted(
-            getattr(upgrade, "name", str(upgrade)).replace("_", " ").title()
+            getattr(upgrade, "name", str(upgrade))
             for upgrade in getattr(getattr(bot, "state", None), "upgrades", set())
         )
         technology_steps = self._next_technology(ready_types)
         return [
-            "Production in progress: "
-            + ("; ".join(production) if production else "[None]")
-            + ".",
-            "Research in progress: "
-            + ("; ".join(research) if research else "[None]")
-            + ".",
-            "Completed upgrades: "
-            + (", ".join(upgrades) if upgrades else "[None]")
-            + ".",
-            "Available technology steps: "
-            + (", ".join(technology_steps) if technology_steps else "[None]")
-            + ".",
+            "production: " + ("; ".join(production) if production else "[None]"),
+            "research: " + ("; ".join(research) if research else "[None]"),
+            "upgrade: " + (", ".join(upgrades) if upgrades else "[None]"),
+            "Available technology: " + (", ".join(technology_steps) if technology_steps else "[None]"),
         ]
 
     def _orders(self, structures: list[Any]) -> tuple[list[str], list[str]]:
-        production: list[str] = []
-        research: list[str] = []
+        production: dict[str, Counter[int]] = defaultdict(Counter)
+        research: dict[str, Counter[int]] = defaultdict(Counter)
         for structure in structures:
             for order in getattr(structure, "orders", []):
                 name = self._order_name(order)
@@ -148,10 +107,23 @@ class ProductionTechnologyBuilder:
                     continue
                 progress = int(float(getattr(order, "progress", 0.0)) * 100)
                 if self._is_research_order(name):
-                    research.append(f"{name} at {progress}%")
+                    research[name][progress] += 1
                 elif _type_name(structure) in PRODUCTION_TYPES:
-                    production.append(f"{name} at {progress}%")
-        return production, research
+                    unit_name = next(
+                        (unit for unit in PRODUCTION_UNIT_TYPES if name.endswith(unit)), name
+                    )
+                    production[unit_name][progress] += 1
+        return self._format_orders(production), self._format_orders(research)
+
+    @staticmethod
+    def _format_orders(orders: dict[str, Counter[int]]) -> list[str]:
+        return [
+            f"{name} " + ",".join(
+                f"{progress}%" + (f"×{count}" if count > 1 else "")
+                for progress, count in sorted(progresses.items())
+            )
+            for name, progresses in sorted(orders.items())
+        ]
 
     @staticmethod
     def _next_technology(ready_types: set[str]) -> list[str]:
@@ -164,24 +136,17 @@ class ProductionTechnologyBuilder:
             for node in TERRAN_TECH_FRONTIER
             if node.structure not in effective and node.requires.issubset(effective)
         ][:3]
-        return [display_name(node.structure) for node in candidates]
+        return [node.structure for node in candidates]
 
     @staticmethod
     def _order_name(order: Any) -> str:
         ability = getattr(order, "ability", None)
-        name = getattr(ability, "friendly_name", getattr(ability, "name", ""))
-        if not name:
-            return ""
-        text = str(name)
-        for prefix in ("Train ", "Research ", "Upgrade to "):
-            if text.startswith(prefix):
-                text = text[len(prefix) :]
-        return text.replace("_", " ").strip()
+        return str(getattr(ability, "name", "") or "")
 
     @staticmethod
     def _is_research_order(name: str) -> bool:
         lowered = name.casefold()
-        return any(
+        return "research" in lowered or any(
             token in lowered
             for token in ("level ", "weapons", "armor", "plating", "yamato", "stim", "shield")
         )
