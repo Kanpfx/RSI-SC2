@@ -6,8 +6,8 @@ requires-python = ">=3.11,<3.13"
 
 dependencies = [
     "burnysc2",
-    "ares-sc2==3.15.0",
-    "loguru>=0.7.3",
+    "ares-sc2",
+    "loguru",
 ]
 
 [tool.uv]

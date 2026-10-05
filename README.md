@@ -26,8 +26,9 @@ rsi_sc2_agent/
 ├── logs/                   # 生成的对局记录与录像
 ├── ares-sc2/               # 本地 Ares 源码
 ├── .env.example            # 模型连接配置示例
-├── pyproject.toml          # 依赖与 uv 配置
-└── requirements.txt        # 旧版环境快照
+├── .gitignore              # 本地配置与生成文件的忽略规则
+├── .gitattributes          # 文本换行与二进制文件规则
+└── pyproject.toml          # 项目依赖与 uv 配置
 ```
 
 ## 运行流程
@@ -77,16 +78,24 @@ rsi_sc2_agent/
 
 ## 环境准备
 
-使用 Python 3.11–3.12，需要安装 StarCraft II、对局地图、Git 和 uv。依赖与本地 Ares 源设置见 [pyproject.toml](pyproject.toml)。以下命令在项目根目录的 PowerShell 中执行。
+需要安装 Python、StarCraft II、对局地图、Git 和 uv。项目直接依赖以下库，其余依赖由安装工具自动解析：
 
-获取 Ares 3.15.0 源码并安装依赖：
+| 库 | 用途 |
+| --- | --- |
+| `ares-sc2` | 游戏管理、自动化与 Behavior 执行 |
+| `burnysc2`（python-sc2） | StarCraft II 接口、单位与地图数据 |
+| `loguru` | 运行日志 |
+
+[pyproject.toml](pyproject.toml) 统一管理依赖和本地 Ares 源。以下命令在项目根目录的 PowerShell 中执行。
+
+首次准备环境时，获取 Ares 源码并安装依赖：
 
 ```powershell
-git clone --depth 1 --branch v3.15.0 https://github.com/AresSC2/ares-sc2.git ares-sc2
-uv sync --python 3.12
+git clone --depth 1 https://github.com/AresSC2/ares-sc2.git ares-sc2
+uv sync
 ```
 
-已有 Conda 环境可按 [pyproject.toml](pyproject.toml) 配置依赖。`requirements.txt` 保存旧版环境快照。
+已有 `ares-sc2/` 目录时可直接执行 `uv sync`。使用 Conda 环境时，按 `pyproject.toml` 配置依赖。
 
 [run.py](run.py) 自动加载本地 Ares 与 `sc2_helper`；uv 使用本地 editable Ares 包。
 
