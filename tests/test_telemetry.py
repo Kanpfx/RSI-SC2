@@ -1,4 +1,4 @@
-"""System log correlation and loaded-input snapshots, without network calls."""
+"""Flat match log correlation and settings, without network calls."""
 
 import json
 import tempfile
@@ -9,16 +9,16 @@ from unittest.mock import patch
 import run
 from agent.config import LLMConfig
 from agent.logger.recorder import Telemetry
-from agent.runtime.llm import LLMClient, ModelAgent
+from agent.harness.llm import LLMClient, ModelAgent
 
 
 class SystemTelemetryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_two_round_requests_retries_and_snapshots(self):
+    async def test_two_round_requests_retries_and_flat_logs(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             with patch("agent.logger.recorder.runtime_manifest", return_value={}):
                 trace = Telemetry(directory=root)
-            trace.snapshot_context({"general.md": "guidance", "test.md": "tactic"}, {"model": "test"})
+            trace.save_settings({"model": "test"})
             trace.observation(iteration=4, game_loop=80, game_time=3.5, observation="OBS")
             replies = iter([OSError("temporary"), "working", "# actions\nBuildWorkers(to_count=22)"])
             messages = [{"role": "user", "content": "original input"}]
@@ -34,17 +34,17 @@ class SystemTelemetryTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(client, "_complete_sync", side_effect=complete_sync):
                 await ModelAgent(client).run(
                     messages, trace=trace, iteration=4,
-                    build_action_messages=lambda working: [
+                    build_excutor_messages=lambda working: [
                         {"role": "system", "content": "system"},
                         {"role": "user", "content": working + "\nactions input"},
                     ],
                     on_working=lambda text: trace.working_memory(text, request_iteration=4),
                 )
-            system = root / "system"
+            system = root
             model = [json.loads(line) for line in (system / "model.jsonl").read_text().splitlines()]
             events = [json.loads(line) for line in (system / "events.jsonl").read_text().splitlines()]
             requests = [row for row in model if row["stage"] == "request"]
-            self.assertEqual([row["request_phase"] for row in requests], ["working", "actions"])
+            self.assertEqual([row["request_phase"] for row in requests], ["planner", "excutor"])
             self.assertNotEqual(requests[0]["request_id"], requests[1]["request_id"])
             self.assertEqual(requests[0]["request_body"]["messages"], messages)
             attempts = [row for row in events if row["event"] == "transport_attempt_started"]
@@ -57,8 +57,10 @@ class SystemTelemetryTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(row["observation_game_time"], 3.5)
             metadata = json.loads((system / "metadata.json").read_text())
             self.assertEqual(metadata["log_schema_version"], 3)
-            self.assertIn("sha256", metadata["context_snapshot"])
+            self.assertNotIn("context_snapshot", metadata)
             self.assertFalse((system / "snapshots").exists())
             self.assertNotIn("action_catalog_snapshot", metadata)
-            self.assertEqual((root / "context/general.md").read_text(), "guidance")
+            self.assertFalse((root / "context").exists())
+            self.assertFalse((root / "system").exists())
+            self.assertEqual(json.loads((root / "settings.json").read_text()), {"model": "test"})
             self.assertNotIn("secret", (system / "model.jsonl").read_text())

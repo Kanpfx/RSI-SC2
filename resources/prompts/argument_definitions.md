@@ -1,0 +1,6 @@
+- Unit / Units: current observation ID / ID array, e.g. `unit=12`, `group=[12,13]`.
+- Point2: `{x,y}` or `main`, `natural`, `enemy_main`, e.g. `target={x:40,y:60}`.
+- UnitTypeId / UpgradeId / AbilityId: enum names, e.g. `MARINE`, `STIMPACK`, `EFFECT_STIM`.
+- Containers: arrays `[...]` or objects `{...}`.
+- army_composition_dict: `{MARINE:{proportion:0.7,priority:0}, MARAUDER:{proportion:0.3,priority:1}}`; proportions sum to 1; priority is an integer in 0..10.
+- Submit only listed parameters; optional parameters marked `= null` may be omitted.

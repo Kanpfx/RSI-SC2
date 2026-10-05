@@ -1,0 +1,1165 @@
+{
+  "ares_version": "3.14.0",
+  "actions": [
+    {
+      "name": "AMove",
+      "description": "Attack-move or attack a unit unless already near the target.",
+      "import": "ares.behaviors.combat.individual.a_move.AMove",
+      "enabled": true,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "target",
+          "type": "Point2 | Unit",
+          "description": "Target position or unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "success_at_distance",
+          "type": "float",
+          "description": "Distance below which new movement orders stop.",
+          "source": "fixed",
+          "required": false,
+          "value": 7.0
+        }
+      ]
+    },
+    {
+      "name": "AttackTarget",
+      "description": "Issue an attack order against a selected unit.",
+      "import": "ares.behaviors.combat.individual.attack_target.AttackTarget",
+      "enabled": false,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "target",
+          "type": "Unit",
+          "description": "Target unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "extra_range",
+          "type": "float",
+          "description": "Unused by this implementation.",
+          "source": "fixed",
+          "required": false,
+          "value": 0.0
+        }
+      ]
+    },
+    {
+      "name": "AutoUseAOEAbility",
+      "description": "Automatically select an available area ability and cast position.",
+      "import": "ares.behaviors.combat.individual.auto_use_aoe_ability.AutoUseAOEAbility",
+      "enabled": true,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "targets",
+          "type": "list[Unit]",
+          "description": "Visible enemy IDs eligible for this ability or attack.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "bonus_tags",
+          "type": "set | null",
+          "description": "Target tags given extra weight in area placement.",
+          "source": "fixed",
+          "required": false,
+          "value": []
+        },
+        {
+          "name": "recalculate",
+          "type": "bool",
+          "description": "Recalculate while already using the ability.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        },
+        {
+          "name": "stack_same_spell",
+          "type": "bool",
+          "description": "Allow overlapping applications of the same spell.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "DropCargo",
+      "description": "Unload cargo at the current position; target is unused.",
+      "import": "ares.behaviors.combat.individual.drop_cargo.DropCargo",
+      "enabled": true,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "target",
+          "type": "Point2",
+          "description": "Unused by this implementation; filled with current unit position.",
+          "source": "runtime",
+          "required": true,
+          "value": "unit_position"
+        }
+      ]
+    },
+    {
+      "name": "GhostSnipe",
+      "description": "Automatically select a snipe target against Zerg opponents.",
+      "import": "ares.behaviors.combat.individual.ghost_snipe.GhostSnipe",
+      "enabled": true,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "close_enemy",
+          "type": "list[Unit] | Units",
+          "description": "Visible enemy IDs eligible for this behavior.",
+          "source": "model",
+          "required": true,
+          "value": null
+        }
+      ]
+    },
+    {
+      "name": "KeepUnitSafe",
+      "description": "Move away from danger using an influence grid.",
+      "import": "ares.behaviors.combat.individual.keep_unit_safe.KeepUnitSafe",
+      "enabled": true,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "grid",
+          "type": "ndarray",
+          "description": "Ground or air influence grid for the selected unit.",
+          "source": "runtime",
+          "required": true,
+          "value": "unit_grid"
+        }
+      ]
+    },
+    {
+      "name": "MedivacHeal",
+      "description": "Heal a selected set of allies while avoiding danger.",
+      "import": "ares.behaviors.combat.individual.medivac_heal.MedivacHeal",
+      "enabled": true,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "close_allied",
+          "type": "list[Unit]",
+          "description": "Allied unit IDs eligible for healing.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "grid",
+          "type": "ndarray",
+          "description": "Ground or air influence grid for the selected unit.",
+          "source": "runtime",
+          "required": true,
+          "value": "unit_grid"
+        },
+        {
+          "name": "keep_safe",
+          "type": "bool",
+          "description": "Avoid danger before healing.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        }
+      ]
+    },
+    {
+      "name": "MoveToSafeTarget",
+      "description": "Move toward a safe position near the destination.",
+      "import": "ares.behaviors.combat.individual.move_to_safe_target.MoveToSafeTarget",
+      "enabled": false,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "target",
+          "type": "Point2",
+          "description": "Destination coordinates.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "grid",
+          "type": "ndarray",
+          "description": "Ground or air influence grid for the selected unit.",
+          "source": "runtime",
+          "required": true,
+          "value": "unit_grid"
+        },
+        {
+          "name": "use_pathing",
+          "type": "bool",
+          "description": "Use pathfinding to reach the safe position.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        },
+        {
+          "name": "success_at_distance",
+          "type": "float",
+          "description": "Distance below which new movement orders stop.",
+          "source": "fixed",
+          "required": false,
+          "value": 1.0
+        },
+        {
+          "name": "sensitivity",
+          "type": "int",
+          "description": "Pathfinding sensitivity.",
+          "source": "fixed",
+          "required": false,
+          "value": 5
+        },
+        {
+          "name": "smoothing",
+          "type": "bool",
+          "description": "Smooth the path.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        },
+        {
+          "name": "sense_danger",
+          "type": "bool",
+          "description": "Skip path queries when no danger is detected.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        },
+        {
+          "name": "danger_distance",
+          "type": "float",
+          "description": "Danger detection distance. Not forwarded to pathfinding in this version.",
+          "source": "fixed",
+          "required": false,
+          "value": 20.0
+        },
+        {
+          "name": "danger_threshold",
+          "type": "float",
+          "description": "Danger influence threshold. Not forwarded to pathfinding in this version.",
+          "source": "fixed",
+          "required": false,
+          "value": 5.0
+        },
+        {
+          "name": "radius",
+          "type": "float",
+          "description": "Search radius around the destination for a safe position.",
+          "source": "fixed",
+          "required": false,
+          "value": 12.0
+        }
+      ]
+    },
+    {
+      "name": "NydusPathUnitToTarget",
+      "description": "Path toward a destination using available Nydus connections.",
+      "import": "ares.behaviors.combat.individual.nydus_path_unit_to_target.NydusPathUnitToTarget",
+      "enabled": false,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "target",
+          "type": "Point2",
+          "description": "Destination coordinates.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "grid",
+          "type": "ndarray",
+          "description": "Ground or air influence grid for the selected unit.",
+          "source": "runtime",
+          "required": true,
+          "value": "unit_grid"
+        },
+        {
+          "name": "success_at_distance",
+          "type": "float",
+          "description": "Distance below which new movement orders stop.",
+          "source": "fixed",
+          "required": false,
+          "value": 0.0
+        },
+        {
+          "name": "large",
+          "type": "bool",
+          "description": "Large-unit pathing flag; unused by this implementation.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        },
+        {
+          "name": "sensitivity",
+          "type": "int",
+          "description": "Pathfinding sensitivity.",
+          "source": "fixed",
+          "required": false,
+          "value": 5
+        },
+        {
+          "name": "smoothing",
+          "type": "bool",
+          "description": "Smooth the path.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        },
+        {
+          "name": "exit_nydus_max_influence",
+          "type": "float",
+          "description": "Maximum acceptable influence at a Nydus exit.",
+          "source": "fixed",
+          "required": false,
+          "value": 10.0
+        }
+      ]
+    },
+    {
+      "name": "PathUnitToTarget",
+      "description": "Move toward a destination using pathfinding.",
+      "import": "ares.behaviors.combat.individual.path_unit_to_target.PathUnitToTarget",
+      "enabled": true,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "target",
+          "type": "Point2",
+          "description": "Destination coordinates.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "grid",
+          "type": "ndarray",
+          "description": "Ground or air influence grid for the selected unit.",
+          "source": "runtime",
+          "required": true,
+          "value": "unit_grid"
+        },
+        {
+          "name": "success_at_distance",
+          "type": "float",
+          "description": "Distance below which new movement orders stop.",
+          "source": "fixed",
+          "required": false,
+          "value": 0.0
+        },
+        {
+          "name": "sensitivity",
+          "type": "int",
+          "description": "Pathfinding sensitivity.",
+          "source": "fixed",
+          "required": false,
+          "value": 5
+        },
+        {
+          "name": "smoothing",
+          "type": "bool",
+          "description": "Smooth the path.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        },
+        {
+          "name": "sense_danger",
+          "type": "bool",
+          "description": "Skip path queries when no danger is detected.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        },
+        {
+          "name": "danger_distance",
+          "type": "float",
+          "description": "Danger detection distance.",
+          "source": "fixed",
+          "required": false,
+          "value": 20.0
+        },
+        {
+          "name": "danger_threshold",
+          "type": "float",
+          "description": "Danger influence threshold.",
+          "source": "fixed",
+          "required": false,
+          "value": 5.0
+        }
+      ]
+    },
+    {
+      "name": "PickUpAndDropCargo",
+      "description": "Load selected units, travel to a destination, and unload.",
+      "import": "ares.behaviors.combat.individual.pick_up_and_drop_cargo.PickUpAndDropCargo",
+      "enabled": true,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "pickup_targets",
+          "type": "list[Unit] | Units",
+          "description": "Own unit IDs to load.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "target",
+          "type": "Point2",
+          "description": "Destination coordinates.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "grid",
+          "type": "ndarray",
+          "description": "Ground or air influence grid for the selected unit.",
+          "source": "runtime",
+          "required": true,
+          "value": "unit_grid"
+        },
+        {
+          "name": "cargo_switch_to_role",
+          "type": "UnitRole | null",
+          "description": "Optional role assigned to loaded units.",
+          "source": "fixed",
+          "required": false,
+          "value": null
+        },
+        {
+          "name": "should_drop_units",
+          "type": "bool",
+          "description": "Unload after reaching the destination.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        },
+        {
+          "name": "keep_dropship_safe",
+          "type": "bool",
+          "description": "Seek safety if cargo remains and no other action runs.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        },
+        {
+          "name": "success_at_distance",
+          "type": "float",
+          "description": "Distance below which new movement orders stop.",
+          "source": "fixed",
+          "required": false,
+          "value": 2.0
+        }
+      ]
+    },
+    {
+      "name": "PickUpCargo",
+      "description": "Approach and load the nearest selected passenger.",
+      "import": "ares.behaviors.combat.individual.pick_up_cargo.PickUpCargo",
+      "enabled": true,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "pickup_targets",
+          "type": "list[Unit] | Units",
+          "description": "Own unit IDs to load.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "grid",
+          "type": "ndarray",
+          "description": "Ground or air influence grid for the selected unit.",
+          "source": "runtime",
+          "required": true,
+          "value": "unit_grid"
+        },
+        {
+          "name": "cargo_switch_to_role",
+          "type": "UnitRole | null",
+          "description": "Optional role assigned to loaded units.",
+          "source": "fixed",
+          "required": false,
+          "value": null
+        }
+      ]
+    },
+    {
+      "name": "PlacePredictiveAoE",
+      "description": "Predict a chasing enemy position from a supplied movement path.",
+      "import": "ares.behaviors.combat.individual.place_predictive_aoe.PlacePredictiveAoE",
+      "enabled": false,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "enemy_center_unit",
+          "type": "Unit",
+          "description": "Visible enemy ID used for chase prediction.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "aoe_ability",
+          "type": "AbilityId",
+          "description": "Area ability to use.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "path",
+          "type": "list[Point2]",
+          "description": "Existing planned movement path for the selected unit.",
+          "source": "runtime",
+          "required": true,
+          "value": "unit_planned_path"
+        },
+        {
+          "name": "ability_delay",
+          "type": "int",
+          "description": "Ability impact delay in game loops from a verified lookup.",
+          "source": "runtime",
+          "required": true,
+          "value": "aoe_ability_delay"
+        },
+        {
+          "name": "reaper_grenade_range",
+          "type": "float",
+          "description": "Maximum grenade or predicted-cast distance.",
+          "source": "fixed",
+          "required": false,
+          "value": 5.0
+        }
+      ]
+    },
+    {
+      "name": "QueenSpreadCreep",
+      "description": "Automatically choose creep placements and move or cast.",
+      "import": "ares.behaviors.combat.individual.queen_spread_creep.QueenSpreadCreep",
+      "enabled": false,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "cancel_if_close_enemy",
+          "type": "bool",
+          "description": "Allow avoiding danger while spreading creep.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        },
+        {
+          "name": "pre_move_queen_to_tumor",
+          "type": "bool",
+          "description": "Move toward a creep placement before energy is ready.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        }
+      ]
+    },
+    {
+      "name": "RavenAutoTurret",
+      "description": "Automatically place a turret near selected enemies.",
+      "import": "ares.behaviors.combat.individual.raven_auto_turret.RavenAutoTurret",
+      "enabled": true,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "all_close_enemy",
+          "type": "list[Unit]",
+          "description": "Visible enemy IDs considered for turret placement.",
+          "source": "model",
+          "required": true,
+          "value": null
+        }
+      ]
+    },
+    {
+      "name": "ReaperGrenade",
+      "description": "Automatically place a grenade against selected enemies.",
+      "import": "ares.behaviors.combat.individual.reaper_grenade.ReaperGrenade",
+      "enabled": true,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "enemy_units",
+          "type": "Units | list[Unit]",
+          "description": "Visible enemy IDs eligible for this behavior.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "retreat_target",
+          "type": "Point2",
+          "description": "Unused by this implementation; filled with current unit position.",
+          "source": "runtime",
+          "required": true,
+          "value": "unit_position"
+        },
+        {
+          "name": "grid",
+          "type": "ndarray",
+          "description": "Ground or air influence grid for the selected unit.",
+          "source": "runtime",
+          "required": true,
+          "value": "unit_grid"
+        },
+        {
+          "name": "place_predictive",
+          "type": "bool",
+          "description": "Attempt predictive grenade placement first.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        },
+        {
+          "name": "reaper_grenade_range",
+          "type": "float",
+          "description": "Maximum grenade or predicted-cast distance.",
+          "source": "fixed",
+          "required": false,
+          "value": 5.0
+        }
+      ]
+    },
+    {
+      "name": "ShootAndMoveToTarget",
+      "description": "Shoot selected enemies in range, otherwise move toward a destination.",
+      "import": "ares.behaviors.combat.individual.shoot_and_move_to_target.ShootAndMoveToTarget",
+      "enabled": false,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "enemy_units",
+          "type": "Units | list[Unit]",
+          "description": "Visible enemy IDs eligible for this behavior.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "target",
+          "type": "Point2",
+          "description": "Destination coordinates.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "grid",
+          "type": "ndarray",
+          "description": "Ground or air influence grid for the selected unit.",
+          "source": "runtime",
+          "required": true,
+          "value": "unit_grid"
+        },
+        {
+          "name": "dist_to_target",
+          "type": "float",
+          "description": "Distance at which pathfinding stops.",
+          "source": "fixed",
+          "required": false,
+          "value": 4.0
+        },
+        {
+          "name": "attack_destructables",
+          "type": "bool",
+          "description": "Also attack destructibles in range.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        }
+      ]
+    },
+    {
+      "name": "ShootTargetInRange",
+      "description": "Automatically select and attack a target in weapon range.",
+      "import": "ares.behaviors.combat.individual.shoot_target_in_range.ShootTargetInRange",
+      "enabled": false,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "targets",
+          "type": "list[Unit] | Units",
+          "description": "Visible enemy IDs eligible for this ability or attack.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "extra_range",
+          "type": "float",
+          "description": "Additional target-search range.",
+          "source": "fixed",
+          "required": false,
+          "value": 0.0
+        }
+      ]
+    },
+    {
+      "name": "SiegeTankDecision",
+      "description": "Automatically decide whether to siege or unsiege.",
+      "import": "ares.behaviors.combat.individual.siege_tank_decision.SiegeTankDecision",
+      "enabled": true,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "close_enemy",
+          "type": "list[Unit]",
+          "description": "Visible enemy IDs eligible for this behavior.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "target",
+          "type": "Point2",
+          "description": "Destination coordinates.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "stay_sieged_near_target",
+          "type": "bool",
+          "description": "Favor remaining sieged near the destination.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        },
+        {
+          "name": "remain_sieged",
+          "type": "bool",
+          "description": "Favor remaining sieged unless an earlier unsiege condition applies.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        },
+        {
+          "name": "force_unsiege",
+          "type": "bool",
+          "description": "Force unsiege and prevent new siege orders.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "StutterUnitBack",
+      "description": "Attack the target when ready, otherwise seek safety if in danger.",
+      "import": "ares.behaviors.combat.individual.stutter_unit_back.StutterUnitBack",
+      "enabled": true,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "target",
+          "type": "Unit",
+          "description": "Target unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "kite_via_pathing",
+          "type": "bool",
+          "description": "Use influence-based safety movement during cooldown.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        },
+        {
+          "name": "grid",
+          "type": "ndarray | null",
+          "description": "Ground or air influence grid for the selected unit.",
+          "source": "runtime",
+          "required": false,
+          "value": "unit_grid"
+        }
+      ]
+    },
+    {
+      "name": "StutterUnitForward",
+      "description": "Attack the target when ready, otherwise move toward it.",
+      "import": "ares.behaviors.combat.individual.stutter_unit_forward.StutterUnitForward",
+      "enabled": true,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "target",
+          "type": "Unit",
+          "description": "Target unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        }
+      ]
+    },
+    {
+      "name": "TumorSpreadCreep",
+      "description": "Automatically spread creep near an edge or random valid position.",
+      "import": "ares.behaviors.combat.individual.tumor_spread_creep.TumorSpreadCreep",
+      "enabled": false,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "target",
+          "type": "Point2",
+          "description": "Unused by this implementation; filled with current unit position.",
+          "source": "runtime",
+          "required": true,
+          "value": "unit_position"
+        }
+      ]
+    },
+    {
+      "name": "UseAbility",
+      "description": "Issue a selected ability with an optional target.",
+      "import": "ares.behaviors.combat.individual.use_ability.UseAbility",
+      "enabled": true,
+      "params": [
+        {
+          "name": "ability",
+          "type": "AbilityId",
+          "description": "Ability name.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "target",
+          "type": "Point2 | Unit | null",
+          "description": "Target position, unit ID, or null; omission uses null.",
+          "source": "model",
+          "required": false,
+          "value": null
+        }
+      ]
+    },
+    {
+      "name": "UseAOEAbility",
+      "description": "Choose a cast position for a selected area ability and enemy set.",
+      "import": "ares.behaviors.combat.individual.use_aoe_ability.UseAOEAbility",
+      "enabled": false,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "ability_id",
+          "type": "AbilityId",
+          "description": "Area ability supported by AOE_ABILITY_SPELLS_INFO.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "targets",
+          "type": "list[Unit]",
+          "description": "Visible enemy IDs eligible for this ability or attack.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "min_targets",
+          "type": "int",
+          "description": "Minimum targets, using the upstream AutoUseAOEAbility policy.",
+          "source": "runtime",
+          "required": true,
+          "value": "aoe_min_targets"
+        },
+        {
+          "name": "avoid_own_flying",
+          "type": "bool",
+          "description": "Avoid friendly flying units at the cast position.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        },
+        {
+          "name": "avoid_own_ground",
+          "type": "bool",
+          "description": "Avoid friendly ground units at the cast position.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        },
+        {
+          "name": "bonus_tags",
+          "type": "set | null",
+          "description": "Target tags given extra weight in area placement.",
+          "source": "fixed",
+          "required": false,
+          "value": []
+        },
+        {
+          "name": "recalculate",
+          "type": "bool",
+          "description": "Recalculate while already using the ability.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        },
+        {
+          "name": "stack_same_spell",
+          "type": "bool",
+          "description": "Allow overlapping applications of the same spell.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "UseTransfuse",
+      "description": "Automatically select a wounded ally for transfusion.",
+      "import": "ares.behaviors.combat.individual.use_transfuse.UseTransfuse",
+      "enabled": false,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "targets",
+          "type": "list[Unit] | Units",
+          "description": "Own unit IDs eligible for transfusion.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "extra_range",
+          "type": "float",
+          "description": "Additional target-search range.",
+          "source": "fixed",
+          "required": false,
+          "value": 0.0
+        }
+      ]
+    },
+    {
+      "name": "WorkerKiteBack",
+      "description": "Attack the target when ready, otherwise retreat using mineral walking.",
+      "import": "ares.behaviors.combat.individual.worker_kite_back.WorkerKiteBack",
+      "enabled": false,
+      "params": [
+        {
+          "name": "unit",
+          "type": "Unit",
+          "description": "Own unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "target",
+          "type": "Unit",
+          "description": "Target unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "should_attack",
+          "type": "bool",
+          "description": "Attack when ready before mineral-walking retreat.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        }
+      ]
+    }
+  ]
+}

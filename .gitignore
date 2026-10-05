@@ -45,5 +45,5 @@ Desktop.ini
 !/docs/
 !/docs/**
 
-# Local dependency checkout (installed through Poetry).
+# Local dependency checkout (managed through pyproject.toml).
 /ares-sc2/

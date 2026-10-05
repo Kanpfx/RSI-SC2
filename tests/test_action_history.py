@@ -2,7 +2,7 @@
 
 import unittest
 
-from agent.runtime.observation.action_history import ActionHistory
+from agent.game.observation.action_history import ActionHistory
 
 
 class ActionHistoryTests(unittest.TestCase):
@@ -11,10 +11,9 @@ class ActionHistoryTests(unittest.TestCase):
         history.begin_decision()
         for index in range(15):
             history.record(f"Action{index}()", "00:10", "failed", "invalid")
-            history.record(f"Action{index}()", "00:10", "notice", "info")
         for _ in range(2):
             history.begin_decision()
-        self.assertEqual(history.render().count("time@00:10"), 30)
+        self.assertEqual(history.render().count("time@00:10"), 15)
         history.begin_decision()
         self.assertEqual(history.render(), "[None]")
 
@@ -42,16 +41,23 @@ class ActionHistoryTests(unittest.TestCase):
         self.assertEqual(history.render(), "failed:\n- time@02:57 BuildWorkers(to_count=-1): "
                          "invalid value; 'to_count' = -1; expected a nonnegative integer")
 
-    def test_notice_does_not_remove_active_or_queued_actions(self):
+    def test_annotations_attach_to_active_or_queued_actions(self):
         history = ActionHistory()
         action = {"id": "BuildWorkers", "args": {"to_count": 20}}
         history.sync_active([action], "02:50")
-        history.record(action, "02:57", "notice", "unchanged target")
+        history.annotate(action, "no new work started")
         self.assertIn("active:\n- time@02:50 BuildWorkers(to_count=20)", history.render())
-        self.assertIn("notice:\n- time@02:57 BuildWorkers(to_count=20): unchanged target", history.render())
+        self.assertIn("BuildWorkers(to_count=20): no new work started", history.render())
+        self.assertNotIn("notice:", history.render())
         history.record(action, "03:00", "queued")
-        history.record(action, "03:01", "notice", "still waiting")
+        history.annotate(action, "still waiting")
         self.assertIn("queued:\n- time@03:00", history.render())
+        self.assertIn("BuildWorkers(to_count=20): still waiting", history.render())
+
+    def test_unmatched_annotation_does_not_add_history(self):
+        history = ActionHistory()
+        history.annotate("Unknown()", "no new work started")
+        self.assertEqual(history.render(), "[None]")
 
     def test_grouped_statuses_preserve_arguments_and_reasons(self):
         history = ActionHistory()

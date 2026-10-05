@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import os
 import sys
 from contextlib import contextmanager
@@ -18,14 +17,8 @@ from sc2.data import AIBuild, Difficulty, Race
 from sc2.main import run_game
 from sc2.player import Bot, Computer
 
-PROJECT_ROOT = Path(__file__).resolve().parent
-# Support direct execution even when the standalone repository is renamed.
-if __package__ in (None, ""):
-    spec = importlib.util.spec_from_file_location("agent", PROJECT_ROOT / "__init__.py")
-    package = importlib.util.module_from_spec(spec)
-    sys.modules["agent"] = package
-    spec.loader.exec_module(package)
-ARES_ROOT = PROJECT_ROOT / "ares-sc2"
+from agent.paths import ARES_ROOT, PROJECT_ROOT
+
 if ARES_ROOT.is_dir():
     # Prepend, so the vendored clone wins over any pip-installed ares-sc2:
     # a wheel install ships no sc2_helper, and would silently shadow this one.
@@ -33,8 +26,8 @@ if ARES_ROOT.is_dir():
         sys.path.insert(0, entry)
 
 from agent.config import load_environment, require_environment
-from agent.runtime.bot import WhyBot
-from agent.context.builder import available_tactics
+from agent.game.bot import WhyBot
+from agent.harness.context import available_tactics
 
 
 class _TeeStream:
@@ -126,8 +119,7 @@ def main() -> None:
     enemy_race = Race[args.enemy_race]
     match_log_directory = PROJECT_ROOT / "logs" / datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     match_log_directory.mkdir(parents=True, exist_ok=False)
-    (match_log_directory / "system").mkdir()
-    with mirror_console(match_log_directory / "system" / "console.log"):
+    with mirror_console(match_log_directory / "console.log"):
         configure_console_logging()
         try:
             bot = Bot(

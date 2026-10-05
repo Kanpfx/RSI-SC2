@@ -1,0 +1,800 @@
+{
+  "ares_version": "3.14.0",
+  "actions": [
+    {
+      "name": "AddonSwap",
+      "description": "Move a structure to a matching addon, relocating its current owner if needed.",
+      "import": "ares.behaviors.macro.addon_swap.AddonSwap",
+      "enabled": false,
+      "params": [
+        {
+          "name": "structure_needing_addon",
+          "type": "Unit | UnitTypeId",
+          "description": "Own structure ID; the native API also accepts a structure type.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "addon_required",
+          "type": "UnitTypeId",
+          "description": "Required addon type.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "precise_addon_structure_id",
+          "type": "UnitTypeId | null",
+          "description": "Optional addon subtype filter.",
+          "source": "fixed",
+          "required": false,
+          "value": null
+        }
+      ]
+    },
+    {
+      "name": "AutoSupply",
+      "description": "Automatically add supply when needed.",
+      "import": "ares.behaviors.macro.auto_supply.AutoSupply",
+      "enabled": false,
+      "params": [
+        {
+          "name": "base_location",
+          "type": "Point2",
+          "description": "Base coordinates used for placement search, not an exact building footprint.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "return_true_if_supply_required",
+          "type": "bool",
+          "description": "Report success when supply is needed, even if unaffordable.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        },
+        {
+          "name": "closest_to",
+          "type": "Point2 | null",
+          "description": "Optional position used to rank placements or geysers.",
+          "source": "fixed",
+          "required": false,
+          "value": null
+        }
+      ]
+    },
+    {
+      "name": "BuildStructure",
+      "description": "Build a structure using automatic worker and placement selection.",
+      "import": "ares.behaviors.macro.build_structure.BuildStructure",
+      "enabled": true,
+      "params": [
+        {
+          "name": "base_location",
+          "type": "Point2",
+          "description": "Base coordinates used for placement search, not an exact building footprint.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "structure_id",
+          "type": "UnitTypeId",
+          "description": "Structure type to build.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "max_on_route",
+          "type": "int",
+          "description": "Maximum workers travelling to build this structure type.",
+          "source": "fixed",
+          "required": false,
+          "value": 1
+        },
+        {
+          "name": "first_pylon",
+          "type": "bool",
+          "description": "Prefer the predefined first-pylon placement.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        },
+        {
+          "name": "static_defence",
+          "type": "bool",
+          "description": "Prefer static-defence placements.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        },
+        {
+          "name": "wall",
+          "type": "bool",
+          "description": "Prefer wall placements.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        },
+        {
+          "name": "closest_to",
+          "type": "Point2 | null",
+          "description": "Optional position used to rank placements or geysers.",
+          "source": "fixed",
+          "required": false,
+          "value": null
+        },
+        {
+          "name": "to_count",
+          "type": "int",
+          "description": "Total structure cap; zero disables the check.",
+          "source": "fixed",
+          "required": false,
+          "value": 0
+        },
+        {
+          "name": "to_count_per_base",
+          "type": "int",
+          "description": "Per-base structure cap; zero disables the check.",
+          "source": "fixed",
+          "required": false,
+          "value": 0
+        },
+        {
+          "name": "tech_progress_check",
+          "type": "float",
+          "description": "Minimum prerequisite progress; zero disables the check.",
+          "source": "fixed",
+          "required": false,
+          "value": 0.85
+        },
+        {
+          "name": "supply_depot",
+          "type": "bool",
+          "description": "Prefer supply-depot placements.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        },
+        {
+          "name": "missile_turret",
+          "type": "bool",
+          "description": "Prefer missile-turret placements.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        },
+        {
+          "name": "sensor_tower",
+          "type": "bool",
+          "description": "Prefer sensor-tower placements.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        },
+        {
+          "name": "upgrade_structure",
+          "type": "bool",
+          "description": "Prefer upgrade-structure placements.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        },
+        {
+          "name": "production",
+          "type": "bool",
+          "description": "Prefer production placements.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        },
+        {
+          "name": "bunker",
+          "type": "bool",
+          "description": "Prefer bunker placements.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        },
+        {
+          "name": "reaper_wall",
+          "type": "bool",
+          "description": "Prefer reaper-wall placements.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        },
+        {
+          "name": "find_alternative",
+          "type": "bool",
+          "description": "Allow placement search at other bases.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        }
+      ]
+    },
+    {
+      "name": "BuildWorkers",
+      "description": "Train workers toward a target count.",
+      "import": "ares.behaviors.macro.build_workers.BuildWorkers",
+      "enabled": true,
+      "params": [
+        {
+          "name": "to_count",
+          "type": "int",
+          "description": "Target total count, not an additional quantity.",
+          "source": "model",
+          "required": true,
+          "value": null
+        }
+      ]
+    },
+    {
+      "name": "ExpansionController",
+      "description": "Expand toward a target base count using automatic site selection.",
+      "import": "ares.behaviors.macro.expansion_controller.ExpansionController",
+      "enabled": true,
+      "params": [
+        {
+          "name": "to_count",
+          "type": "int",
+          "description": "Target total count, not an additional quantity.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "can_afford_check",
+          "type": "bool",
+          "description": "Check affordability before dispatching a worker.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        },
+        {
+          "name": "check_location_is_safe",
+          "type": "bool",
+          "description": "Skip unsafe expansion sites.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        },
+        {
+          "name": "max_pending",
+          "type": "int",
+          "description": "Maximum simultaneously pending structures.",
+          "source": "fixed",
+          "required": false,
+          "value": 1
+        },
+        {
+          "name": "prioritize",
+          "type": "bool",
+          "description": "Block later MacroPlan spending when waiting for resources.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "GasBuildingController",
+      "description": "Build gas structures toward a target count.",
+      "import": "ares.behaviors.macro.gas_building_controller.GasBuildingController",
+      "enabled": true,
+      "params": [
+        {
+          "name": "to_count",
+          "type": "int",
+          "description": "Target total count, not an additional quantity.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "max_pending",
+          "type": "int",
+          "description": "Maximum simultaneously pending structures.",
+          "source": "fixed",
+          "required": false,
+          "value": 1
+        },
+        {
+          "name": "closest_to",
+          "type": "Point2 | null",
+          "description": "Optional position used to rank placements or geysers.",
+          "source": "fixed",
+          "required": false,
+          "value": null
+        }
+      ]
+    },
+    {
+      "name": "Mining",
+      "description": "Automatically assign and control mining workers.",
+      "import": "ares.behaviors.macro.mining.Mining",
+      "enabled": false,
+      "params": [
+        {
+          "name": "flee_at_health_perc",
+          "type": "float",
+          "description": "Worker health fraction triggering retreat.",
+          "source": "fixed",
+          "required": false,
+          "value": 0.5
+        },
+        {
+          "name": "keep_safe",
+          "type": "bool",
+          "description": "Allow workers to flee danger.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        },
+        {
+          "name": "long_distance_mine",
+          "type": "bool",
+          "description": "Allow long-distance mining.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        },
+        {
+          "name": "mineral_boost",
+          "type": "bool",
+          "description": "Enable mineral speed mining.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        },
+        {
+          "name": "vespene_boost",
+          "type": "bool",
+          "description": "Enable gas speed mining.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        },
+        {
+          "name": "workers_per_gas",
+          "type": "int",
+          "description": "Workers assigned to each gas structure.",
+          "source": "fixed",
+          "required": false,
+          "value": 3
+        },
+        {
+          "name": "self_defence_active",
+          "type": "bool",
+          "description": "Allow worker self-defence attacks.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        },
+        {
+          "name": "safe_long_distance_mineral_fields",
+          "type": "Units | null",
+          "description": "Internal cached safe mineral fields.",
+          "source": "fixed",
+          "required": false,
+          "value": null
+        },
+        {
+          "name": "locked_action_tags",
+          "type": "dict[int, float]",
+          "description": "Internal worker action-lock expiry times.",
+          "source": "fixed",
+          "required": false,
+          "value": {}
+        },
+        {
+          "name": "weight_safety_limit",
+          "type": "float",
+          "description": "Enemy influence threshold for retreat.",
+          "source": "fixed",
+          "required": false,
+          "value": 12.0
+        }
+      ]
+    },
+    {
+      "name": "ProductionController",
+      "description": "Add production facilities for a desired army composition.",
+      "import": "ares.behaviors.macro.production_controller.ProductionController",
+      "enabled": true,
+      "params": [
+        {
+          "name": "army_composition_dict",
+          "type": "dict[UnitTypeId, dict[str, float | int]]",
+          "description": "Unit types mapped to proportion and priority; proportions sum to 1, priority 0-10 (0 highest).",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "base_location",
+          "type": "Point2",
+          "description": "Base coordinates used for placement search, not an exact building footprint.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "add_production_at_bank",
+          "type": "tuple[int, int]",
+          "description": "Mineral and gas bank thresholds for adding production.",
+          "source": "fixed",
+          "required": false,
+          "value": [
+            400,
+            400
+          ]
+        },
+        {
+          "name": "alpha",
+          "type": "float",
+          "description": "Production scaling factor above the resource threshold.",
+          "source": "fixed",
+          "required": false,
+          "value": 0.9
+        },
+        {
+          "name": "unit_pending_progress",
+          "type": "float",
+          "description": "Progress threshold when considering pending production.",
+          "source": "fixed",
+          "required": false,
+          "value": 0.75
+        },
+        {
+          "name": "ignore_below_proportion",
+          "type": "float",
+          "description": "Skip extra production below this desired proportion.",
+          "source": "fixed",
+          "required": false,
+          "value": 0.05
+        },
+        {
+          "name": "should_repower_structures",
+          "type": "bool",
+          "description": "Automatically restore power to Protoss structures.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        },
+        {
+          "name": "max_production_structures",
+          "type": "int",
+          "description": "Maximum production structures.",
+          "source": "fixed",
+          "required": false,
+          "value": 12
+        }
+      ]
+    },
+    {
+      "name": "ProtossStaticDefence",
+      "description": "Maintain Protoss static defence at bases.",
+      "import": "ares.behaviors.macro.protoss_static_defence.ProtossStaticDefence",
+      "enabled": false,
+      "params": [
+        {
+          "name": "pylons_per_base",
+          "type": "int",
+          "description": "Target pylons per base.",
+          "source": "fixed",
+          "required": false,
+          "value": 1
+        },
+        {
+          "name": "photon_cannons_per_base",
+          "type": "int",
+          "description": "Target photon cannons per base.",
+          "source": "fixed",
+          "required": false,
+          "value": 1
+        },
+        {
+          "name": "shield_batteries_per_base",
+          "type": "int",
+          "description": "Target shield batteries per base.",
+          "source": "fixed",
+          "required": false,
+          "value": 1
+        },
+        {
+          "name": "exclude_base_locations",
+          "type": "set[Point2]",
+          "description": "Base coordinates excluded from defence construction.",
+          "source": "fixed",
+          "required": false,
+          "value": []
+        },
+        {
+          "name": "max_on_route",
+          "type": "int",
+          "description": "Maximum workers travelling to build this structure type.",
+          "source": "fixed",
+          "required": false,
+          "value": 1
+        },
+        {
+          "name": "tech_base_location",
+          "type": "Point2 | null",
+          "description": "Optional base for prerequisite structures.",
+          "source": "fixed",
+          "required": false,
+          "value": null
+        },
+        {
+          "name": "_placements_disabled_warned",
+          "type": "bool",
+          "description": "Internal flag for suppressing repeated placement warnings.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "RestorePower",
+      "description": "Build pylons to restore power to Protoss structures.",
+      "import": "ares.behaviors.macro.restore_power.RestorePower",
+      "enabled": false,
+      "params": [
+        {
+          "name": "_placements_disabled_warned",
+          "type": "bool",
+          "description": "Internal flag for suppressing repeated placement warnings.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "SpawnController",
+      "description": "Train available units toward a desired army composition.",
+      "import": "ares.behaviors.macro.spawn_controller.SpawnController",
+      "enabled": true,
+      "params": [
+        {
+          "name": "army_composition_dict",
+          "type": "dict[UnitTypeId, dict[str, float | int]]",
+          "description": "Unit types mapped to proportion and priority; proportions sum to 1, priority 0-10 (0 highest).",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "freeflow_mode",
+          "type": "bool",
+          "description": "Ignore army proportions when spending resources.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        },
+        {
+          "name": "ignore_proportions_below_unit_count",
+          "type": "int",
+          "description": "Army count below which proportions are ignored.",
+          "source": "fixed",
+          "required": false,
+          "value": 0
+        },
+        {
+          "name": "over_produce_on_low_tech",
+          "type": "bool",
+          "description": "Allow overproduction when only one unit type is available.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        },
+        {
+          "name": "ignored_build_from_tags",
+          "type": "set[int]",
+          "description": "Producer tags excluded from unit production.",
+          "source": "fixed",
+          "required": false,
+          "value": []
+        },
+        {
+          "name": "maximum",
+          "type": "int",
+          "description": "Maximum units of a type produced per execution.",
+          "source": "fixed",
+          "required": false,
+          "value": 20
+        },
+        {
+          "name": "spawn_target",
+          "type": "Point2 | null",
+          "description": "Optional position used to rank producers.",
+          "source": "fixed",
+          "required": false,
+          "value": null
+        },
+        {
+          "name": "_SpawnController__build_dict",
+          "type": "dict[Unit, UnitTypeId]",
+          "description": "Internal pending production commands.",
+          "source": "fixed",
+          "required": false,
+          "value": {}
+        },
+        {
+          "name": "_SpawnController__excluded_structure_tags",
+          "type": "set[int]",
+          "description": "Internal producer exclusion tags.",
+          "source": "fixed",
+          "required": false,
+          "value": []
+        },
+        {
+          "name": "_SpawnController__supply_available",
+          "type": "float",
+          "description": "Internal remaining supply budget.",
+          "source": "fixed",
+          "required": false,
+          "value": 0.0
+        }
+      ]
+    },
+    {
+      "name": "SpeedMining",
+      "description": "Speed-mine with a selected worker and resource.",
+      "import": "ares.behaviors.macro.speed_mining.SpeedMining",
+      "enabled": false,
+      "params": [
+        {
+          "name": "worker",
+          "type": "Unit",
+          "description": "Own worker ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "target",
+          "type": "Point2 | Unit",
+          "description": "Mineral-field or own gas-building ID; coordinates are not supported by execution.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "worker_position",
+          "type": "Point2",
+          "description": "Current position of the selected worker.",
+          "source": "runtime",
+          "required": true,
+          "value": "worker_position"
+        },
+        {
+          "name": "resource_target_pos",
+          "type": "Point2",
+          "description": "Resource approach point derived using Ares mining geometry.",
+          "source": "runtime",
+          "required": true,
+          "value": "resource_target_pos"
+        },
+        {
+          "name": "distance_to_townhall_factor",
+          "type": "float",
+          "description": "Townhall approach-distance multiplier.",
+          "source": "fixed",
+          "required": false,
+          "value": 1.08
+        },
+        {
+          "name": "townhall",
+          "type": "Unit | null",
+          "description": "Return-resource townhall; null selects the nearest automatically.",
+          "source": "fixed",
+          "required": false,
+          "value": null
+        }
+      ]
+    },
+    {
+      "name": "TechUp",
+      "description": "Automatically build prerequisites for a unit or upgrade.",
+      "import": "ares.behaviors.macro.tech_up.TechUp",
+      "enabled": true,
+      "params": [
+        {
+          "name": "desired_tech",
+          "type": "UpgradeId | UnitTypeId",
+          "description": "Desired unit type or upgrade.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "base_location",
+          "type": "Point2",
+          "description": "Base coordinates used for placement search, not an exact building footprint.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "ignore_existing_techlabs",
+          "type": "bool",
+          "description": "Allow extra tech labs despite existing ones.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "UpgradeCCs",
+      "description": "Upgrade an automatically selected idle command center.",
+      "import": "ares.behaviors.macro.upgrade_ccs.UpgradeCCs",
+      "enabled": true,
+      "params": [
+        {
+          "name": "to",
+          "type": "UnitTypeId",
+          "description": "ORBITALCOMMAND or PLANETARYFORTRESS.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "prioritize",
+          "type": "bool",
+          "description": "Block later MacroPlan spending when waiting for resources.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "UpgradeController",
+      "description": "Research selected upgrades and optionally build prerequisites.",
+      "import": "ares.behaviors.macro.upgrade_controller.UpgradeController",
+      "enabled": true,
+      "params": [
+        {
+          "name": "upgrade_list",
+          "type": "list[UpgradeId]",
+          "description": "Upgrade names in desired processing order.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "base_location",
+          "type": "Point2",
+          "description": "Base coordinates used for placement search, not an exact building footprint.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "auto_tech_up_enabled",
+          "type": "bool",
+          "description": "Automatically build missing upgrade prerequisites.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        },
+        {
+          "name": "prioritize",
+          "type": "bool",
+          "description": "Block later MacroPlan spending when waiting for resources.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        }
+      ]
+    }
+  ]
+}

@@ -20,47 +20,41 @@
 ```text
 rsi_sc2_agent/
 ├── run.py                  # 对局启动入口
-├── config.py               # 游戏与模型配置
-├── runtime/
-│   ├── bot.py              # Ares 生命周期
-│   ├── controller.py       # 异步决策与执行调度
-│   ├── automation.py       # 基础自动化
-│   ├── llm.py              # 模型调用与决策结果
-│   ├── parser.py           # 模型输出解析
-│   ├── observation/        # 状态采集、压缩与历史
-│   └── actions/            # 动作校验与执行，catalog/ 存放 JSON 定义
-├── context/                # Prompt、记忆、经验与上下文组装
-├── logger/                 # 日志记录与快照代码
-├── logs/                   # 运行时生成的对局记录与录像
+├── agent/                  # Python 实现
+│   ├── config.py           # 游戏与模型配置
+│   ├── paths.py            # 项目与资源路径
+│   ├── harness/            # 上下文组装、模型调用与决策调度
+│   ├── game/               # Ares 生命周期、自动化与侦察
+│   │   ├── observation/    # 状态采集、压缩与历史
+│   │   └── actions/        # DSL 解析、动作校验与执行
+│   └── logger/             # 日志记录与快照代码
+├── resources/
+│   ├── knowledge/          # 通用经验、tactics/ 战术与 actions/ 动作定义
+│   └── prompts/            # working/、actions/ 提示词与共用观测说明
+├── tools/                  # 日志查看器
+├── logs/                   # 对局记录与录像
 ├── tests/                  # 本项目测试
-├── ares-sc2/               # 固定版本的 Ares 源码
-└── requirements.txt        # Python 依赖清单
+├── ares-sc2/               # 本地 Ares 源码
+├── pyproject.toml          # 当前依赖与 uv 源设置
+└── requirements.txt        # 旧版环境依赖快照
 ```
 
-`context/` 是后续 RSI 修改 Prompt 与经验的主要边界；`logger/` 独立保留，便于单独管理日志工具权限。实际对局数据位于 `logs/`。
+`resources/` 是后续 RSI 修改 Prompt 与经验的主要边界；`agent/logger/` 独立保留，便于单独管理日志工具权限。实际对局数据位于 `logs/`。
 
 ## 环境准备
 
-使用 **Conda 管理 Python 环境，pip 安装项目依赖**，无需 Poetry。需要本机安装 StarCraft II、对局地图和 Git。以下命令在项目根目录的 PowerShell 中执行。
+使用 Python 3.11–3.12；依赖与本地 Ares 源设置见 [pyproject.toml](pyproject.toml)，无需 Poetry。需要本机安装 StarCraft II、对局地图、Git 和 uv。以下命令在项目根目录的 PowerShell 中执行。
 
-已验证可运行的 Conda 环境可以直接沿用。新环境以 Python 3.12 为基准：
-
-```powershell
-conda create -n sc2-agent python=3.12 pip -y
-conda activate sc2-agent
-python -m pip install -r requirements.txt
-python -m pip install --no-deps cython-extensions-sc2==0.15.0
-```
-
-`cython-extensions-sc2` 单独安装，以避免其依赖声明引入 Jupyter 等额外组件。依赖版本与 Git commit 由 [requirements.txt](requirements.txt) 固定；新环境安装流程仍需在目标机器上验证。
-
-若项目中尚无 `ares-sc2/`，获取固定版本源码：
+首次准备环境，先获取最新 Ares 源码，再安装依赖：
 
 ```powershell
-git clone --depth 1 --branch v3.9.6 https://github.com/AresSC2/ares-sc2.git ares-sc2
+git clone --depth 1 https://github.com/AresSC2/ares-sc2.git ares-sc2
+uv sync --python 3.12
 ```
 
-[run.py](run.py) 自动加载本地 `ares-sc2/src` 与 `ares-sc2/`，以包含源码根目录中的 `sc2_helper`。无需另行安装 Ares 包。
+当前本地源码为 Ares 3.15.0，commit `70a151a66fdd00d6c1ee44718735d0da396b902e`。该版本要求 `cython-extensions-sc2 ^0.18.0`；已有 Conda 环境需要匹配新版依赖。[requirements.txt](requirements.txt) 保留为旧版环境快照，不适用于本次升级后的依赖安装。新环境安装流程仍需在目标机器上验证。
+
+[run.py](run.py) 自动加载本地 `ares-sc2/src` 与 `ares-sc2/`，以包含源码根目录中的 `sc2_helper`。uv 使用本地 editable Ares 包。
 
 ## 配置与启动
 
@@ -72,17 +66,16 @@ LLM_BASE_URL=https://your-provider.example/v1
 LLM_API_KEY=your-api-key
 ```
 
-模型服务需兼容 Chat Completions 接口。已有 shell 环境变量优先于 `.env`；请求超时、输出长度和动作限制等默认值见 [config.py](config.py)。
+模型服务需兼容 Chat Completions 接口。已有 shell 环境变量优先于 `.env`；请求超时、输出长度和动作限制等默认值见 [config.py](agent/config.py)。
 
 ```powershell
-conda activate sc2-agent
-python run.py --map_name Simple64 --difficulty VeryHard --enemy_race Terran --tactic Simple64
+uv run python run.py --map_name Simple64 --difficulty VeryHard --enemy_race Terran --tactic Simple64
 ```
 添加示例：在 `PylonAIE_v4` 上对抗 VeryHard Terran AI，并使用
 BattleCruiserRush 战术。
 
 ```powershell
-python run.py `
+uv run python run.py `
   --map_name PylonAIE_v4 `
   --difficulty VeryHard `
   --build_mode RandomBuild `
@@ -90,7 +83,7 @@ python run.py `
   --tactic BattleCruiserRush
 ```
 
-使用已有环境时，将 `sc2-agent` 换成对应环境名。
+使用依赖匹配的已有 Conda 环境时，也可以直接运行 `python run.py`。
 
 | 参数 | 说明 | 默认值 |
 | --- | --- | --- |
@@ -98,34 +91,37 @@ python run.py `
 | `--difficulty` | 内置 AI 难度 | `Hard` |
 | `--enemy_race` | `Terran`、`Zerg` 或 `Protoss` | `Terran` |
 | `--build_mode` | 内置 AI 开局类型 | `RandomBuild` |
-| `--tactic` | `context/memory/tactics/` 中的 Markdown 文件名，不含扩展名 | `BattleCruiserRush` |
+| `--tactic` | `resources/knowledge/tactics/` 中的 Markdown 文件名，不含扩展名 | `BattleCruiserRush` |
 
 己方目前仅支持 `Terran`，对局使用实时模式。完整参数及可选值可通过 `python run.py --help` 查看。
 
 ## 记忆与日志
 
-提示词在 `context/prompts/` 中按职责组织：
+动作表位于 `resources/knowledge/actions/`，采用 `individual_actions.json`、`group_actions.json` 和 `macro_actions.json`，共 47 个 Ares Behavior。表内使用类名作为动作标识；仅 `source: model` 的参数允许模型提交，`fixed` 参数按表内值逐实例注入，`runtime` 参数根据当前帧计算。单位归属、可用性、参数限制与持续执行由代码管理。可选模型参数也会展示，例如 `UseAbility.target`。
 
-- `system_working.md`：第一轮角色，依据全局规则与经验、战术和观测生成自然语言指导。
-- `system_actions.md`：第二轮角色，以 working 为核心，结合全局规则与经验、观测、动作表和反馈生成 DSL 动作。
+动作表沿用 `ares_base_agent/aciton_list/` 的 Ares 3.14.0 定义，已针对本地 Ares 3.15.0 核对构造参数和必填性。固定默认值包含 `SpawnController.over_produce_on_low_tech=true`、`UpgradeController.auto_tech_up_enabled=true`，遵循表内约定。持续 Behavior 复用实例以保留内部状态；混合空地群体需要拆分后提交，网格由 runtime 选择。`PlacePredictiveAoE` 保持关闭，未记录路径时不会推断路径。
+
+提示词在 `resources/prompts/` 中按职责组织：
+
+- `working/system.md`：第一轮角色，依据全局规则与经验、战术和观测生成自然语言指导。
+- `actions/system.md`：第二轮角色，以 working 为核心，结合全局规则与经验、观测、动作表和反馈生成 DSL 动作。
 - `observation.md`：观测字段说明，随当前观测一起提供。
-- `output_working.md`：第一轮输出要求，仅生成“当前阶段”和“具体指导”。
-- `output.md`：第二轮输出要求，依据第一轮指导生成 DSL 动作。
+- `working/output.md`：第一轮输出要求，仅生成“当前阶段”和“具体指导”。
+- `actions/output.md`：第二轮输出要求，依据第一轮指导生成 DSL 动作。
 
-通用记忆保存在 `context/memory/general.md`，包含全局约束、控制范围与通用经验；战术经验保存在 `context/memory/tactics/`。这些文件开局加载并归档，修改后下一局生效。每个决策周期独立调用两轮，共享同一份公共上下文，依次为通用规则、观测和动作表。错误与提示统一放在观测的 action_history 中，分别归入 failed 和 notice，包含事件时间、原始动作及原因，不再单独拼接 execution_feedback。第一轮在公共上下文后追加完整战术、上一轮 working（`previous_decision`）和输出要求；上一轮决策仅作为历史参考，需结合当前观测与反馈修正，不代表动作已执行，首轮显式标记无上一轮决策。回复保留在内存和系统日志中，不单独生成 `working.md`，不额外校验格式或长度。第二轮在公共上下文后追加本轮 working（`current_decision`）和输出要求，仅生成动作，不携带第一轮对话或战术表。周期之间不累积完整对话。动作回复只接受 `# actions` 段，不兼容旧的 `# working` 段。
+通用记忆保存在 `resources/knowledge/general.md`，包含全局约束、控制范围与通用经验；战术经验保存在 `resources/knowledge/tactics/`。这些文件开局加载，修改后下一局生效。每个决策周期独立调用两轮，共享同一份公共上下文，依次为通用规则、观测和动作表。错误与提示统一放在观测的 action_history 中，分别归入 failed 和 notice，包含事件时间、原始动作及原因，不再单独拼接 execution_feedback。第一轮在公共上下文后追加完整战术、上一轮 working（`previous_decision`）和输出要求；上一轮决策仅作为历史参考，需结合当前观测与反馈修正，不代表动作已执行，首轮显式标记无上一轮决策。回复保留在内存和系统日志中，不单独生成 `working.md`，不额外校验格式或长度。第二轮在公共上下文后追加本轮 working（`current_decision`）和输出要求，仅生成动作，不携带第一轮对话或战术表。周期之间不累积完整对话。动作回复只接受 `# actions` 段，不兼容旧的 `# working` 段。
 
 每局生成 `logs/<时间戳>/`，主要内容包括：
 
-- `system/obs.jsonl`、`system/model.jsonl`：观测、模型请求与回复。
-- `system/accepted_actions.jsonl`、`system/events.jsonl`：采纳动作、校验与执行事件。
-- `context/general.md`、`context/<本局战术>.md`：本局使用的通用记忆和战术文件，与 `system/`、`data/` 平级。
-- `system/settings.json`：运行设置。
-- `system/metadata.json`：对局信息与结果。
-- `system/console.log`、`replay.SC2Replay`：控制台输出与对局录像。
+- `obs.jsonl`、`model.jsonl`：观测、模型请求与回复。
+- `accepted_actions.jsonl`、`events.jsonl`：采纳动作、校验与执行事件。
+- `settings.json`：运行设置。
+- `metadata.json`：对局信息与结果。
+- `console.log`、`replay.SC2Replay`：控制台输出与对局录像。
 
 系统日志采用 schema version 3，每条 JSONL 记录包含 `run_id`。模型两轮请求分别标记 `working` / `actions`，具有独立 `request_id`，重试使用所属请求的 `attempt_id`。观测与执行分别记录迭代编号、可获取的 SC2 game loop 和游戏时间；异步响应只关联原观测，不推测当前游戏帧。
 
-不单独归档动作表或其 hash，也不单独归档固定 Prompt 文件；模型日志仍保留实际发送的完整 messages。metadata 保存上述两份 context 文件的 SHA-256、代码及 Ares commit、工作区修改状态、Python/关键依赖版本和可获取的 SC2 base build；未知版本与未显式配置的随机种子记为 null。未提交代码只记录修改状态，不保存代码补丁，因此不能仅凭 commit 完整还原修改中的工作区。后续 RSI 数据预留在 `data/`，目前只有未接入的接口框架。日志查看器仅支持当前格式，请选择包含 `system/` 和 `context/` 的对局目录。
+所有日志直接保存在对局目录，不生成 `system/` 或 `context/` 子目录，也不保存资源快照或其 hash；模型日志仍保留实际发送的完整 messages。metadata 保存代码及 Ares commit、工作区修改状态、Python/关键依赖版本和可获取的 SC2 base build；未知版本与未显式配置的随机种子记为 null。未提交代码只记录修改状态，不保存代码补丁，因此不能仅凭 commit 完整还原修改中的工作区。后续 RSI 数据预留在 `data/`，目前只有未接入的接口框架。`tools/日志查看器.html` 读取平铺日志，也兼容旧的 `system/` 目录布局；请选择对局日志目录。
 
 ## 测试
 
@@ -135,4 +131,4 @@ python run.py `
 python -c "import run, unittest; unittest.main(module=None, argv=['unittest', 'discover', '-s', 'tests', '-v'])"
 ```
 
-先导入 `run`，复用入口的本地 Ares 路径与 `agent` 包初始化，使测试不依赖项目文件夹名称。测试使用本地模拟回复，不调用模型服务或启动 SC2。
+先导入 `run`，复用入口的本地 Ares 路径；实现代码使用标准 `agent` 包，使测试不依赖项目文件夹名称。测试使用本地模拟回复，不调用模型服务或启动 SC2。

@@ -10,19 +10,19 @@ from unittest.mock import AsyncMock, Mock
 # Use the same local Ares bootstrap as the supported entry point.
 import run
 from agent.config import GameConfig, LLMConfig
-from agent.context.builder import ContextBuilder, available_tactics
-from agent.context.action_reference import _section
-from agent.runtime.automation import AutomationController
-from agent.runtime.observation.builder import Observation
-from agent.runtime.parser import parse_model_payload
-from agent.runtime.actions.errors import OutputFormatError
-from agent.runtime.actions.resolution.resolver import EntityContext
-from agent.runtime.controller import LLMGameController
+from agent.harness.context import ContextBuilder, available_tactics
+from agent.harness.action_reference import _section
+from agent.game.automation import AutomationController
+from agent.game.observation.builder import Observation
+from agent.game.actions.parser import parse_model_payload
+from agent.game.actions.errors import OutputFormatError
+from agent.game.actions.resolution.resolver import EntityContext
+from agent.harness.controller import LLMGameController
 
 
 class ContextAndParserTests(unittest.TestCase):
     def test_feedback_is_one_line_with_original_action_and_severity(self):
-        from agent.runtime.actions.formatting import format_feedback
+        from agent.game.actions.formatting import format_feedback
         text = format_feedback([
             {"action_index": 2, "submitted_action": "BuildWorkers(to_count=-1)",
              "error": "to_count must be nonnegative"},
@@ -35,19 +35,19 @@ class ContextAndParserTests(unittest.TestCase):
         ])
 
     def test_runtime_exception_and_union_error_are_identifiable(self):
-        from agent.runtime.actions.execution.tracking import TrackedBehavior
-        from agent.runtime.actions.resolution.loader import ActionCatalog
+        from agent.game.actions.execution.adapter import TrackedBehavior
+        from agent.game.actions.resolution.loader import ActionCatalog
         failure = Mock()
         TrackedBehavior(Mock(execute=Mock(side_effect=AssertionError())),
                         on_failure=failure, on_result=Mock()).execute(None, {}, None)
-        failure.assert_called_once_with("AssertionError")
+        failure.assert_called_once_with("execution_error: AssertionError")
         with self.assertRaisesRegex(ValueError, r"target.*valid Point2 \| Unit"):
             ActionCatalog.load().type_resolver.resolve([], "Point2 | Unit", EntityContext(), "target")
         self.assertEqual(EntityContext(own_entities={"851": SimpleNamespace(tag=999999)}).observation_id(999999), "851")
 
     def test_migrated_catalog_constructs_real_ares_behaviors(self):
-        from agent.runtime.actions.resolution.loader import ActionCatalog
-        from agent.runtime.actions.execution.adapter import AresActionAdapter
+        from agent.game.actions.resolution.loader import ActionCatalog
+        from agent.game.actions.execution.adapter import AresActionAdapter
         from sc2.ids.unit_typeid import UnitTypeId
 
         actions = parse_model_payload(
@@ -70,9 +70,7 @@ class ContextAndParserTests(unittest.TestCase):
         self.assertEqual(len(result["errors"]), 1)
 
     def test_invalid_sections_are_rejected(self):
-        for text in ("# phase\nopening\n# actions", "# working\nnote\n# actions",
-                     "# actions\nBuildWorkers(to_count=22)\n# working\nnote",
-                     "# actions\n# actions", "# actions\n# working\nx\n# working\ny",
+        for text in ("BuildWorkers(to_count=22)", "# actions\n# actions",
                      "# actions\\nBuildWorkers(to_count=20)"):
             with self.subTest(text=text), self.assertRaises(OutputFormatError):
                 parse_model_payload(text)
@@ -80,9 +78,9 @@ class ContextAndParserTests(unittest.TestCase):
     def test_markdown_context_and_match_local_memory(self):
         for tactic in available_tactics():
             context = ContextBuilder(tactic)
-            messages = context.build(context.build_common_context("OBSERVATION", []))
+            messages = context.build_planner_messages("OBSERVATION", [])
             self.assertIn("OBSERVATION", messages[1]["content"])
-            self.assertIn(_section("tactical_guidance", context.sources[f"memory/tactics/{tactic}.md"]),
+            self.assertIn(_section("tactical_guidance", context.sources[f"knowledge/tactics/{tactic}.md"]),
                           messages[1]["content"])
         context.update_working("Current priority")
         context.update_working(None)
@@ -90,6 +88,21 @@ class ContextAndParserTests(unittest.TestCase):
         self.assertEqual(ContextBuilder().working, "")
         context.update_working("")
         self.assertEqual(context.working, "")
+
+    def test_planner_capabilities_and_two_timestamped_decisions(self):
+        context = ContextBuilder()
+        for time, phase in (("00:10", "old"), ("00:20", "opening"), ("00:30", "growth")):
+            context.update_working(f"## Current phase\n{phase}\n## Guidance\n1. Build army.\n2. Expand.", time)
+        entries = [{"name": "BuildWorkers", "description": "Set worker target."}]
+        content = context.build_planner_messages("LATEST", entries)[1]["content"]
+        self.assertNotIn("time=00:10", content)
+        self.assertIn("time=00:20 phase=opening guidance=1. Build army. | 2. Expand.", content)
+        self.assertIn("time=00:30 phase=growth", content)
+        self.assertLess(content.index("time=00:20"), content.index("time=00:30"))
+        self.assertIn("BuildWorkers: [Persistent] Set worker target.", content)
+        self.assertNotIn("argument_definitions", content)
+        self.assertNotIn("BuildWorkers(", content)
+        self.assertIn(_section("static_knowledge", context.sources["knowledge/terran.md"]), content)
 
 
 class RuntimeTests(unittest.IsolatedAsyncioTestCase):
@@ -112,13 +125,13 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         builder = self.controller.observation_builder
         builder.collect_frame = Mock()
         builder.execution_context = Mock(side_effect=lambda _bot: self.context)
-        builder.build = Mock(side_effect=lambda _bot, iteration: Observation(iteration, {}, "OBS\n" + builder.action_history.render(), self.context))
+        builder.build = Mock(side_effect=lambda _bot, iteration: Observation(iteration, {}, f"OBS frame={iteration}\n" + builder.action_history.render(), self.context))
         self.controller.action_exposure.build = Mock(return_value=SimpleNamespace(entries=[], validate=Mock()))
         self.gate = asyncio.Event()
         self.working = "## Current phase\nopening\n## Guidance\nPrepare expansion."
         self.reply = "# actions\nBuildWorkers(to_count=22)"
 
-        async def complete(messages, *, trace, iteration):
+        async def complete(messages, *, phase, trace, iteration):
             trace.model_conversation(stage="request", iteration=iteration, request=messages)
             await self.gate.wait()
             trace.model_conversation(stage="response", iteration=iteration, reply=self.reply)
@@ -137,6 +150,8 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def deliver(self):
         self.gate.set()
+        await asyncio.sleep(0)
+        await self.frame(2, 1)
         await self.controller._pending
         await self.frame(3, 2)
 
@@ -151,76 +166,83 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         await self.deliver()
         self.assertEqual(self.controller.automation.worker_target, 22)
         self.assertEqual(self.controller.context_builder.working, self.working)
-        self.assertFalse((self.directory / "system/working.md").exists())
+        self.assertFalse((self.directory / "working.md").exists())
         messages = self.controller.client.complete.call_args.args[0]
         self.assertEqual([m["role"] for m in messages], ["system", "user"])
-        self.assertEqual(messages[0]["content"], self.controller.context_builder.sources["prompts/system_actions.md"])
+        self.assertEqual(messages[0]["content"], self.controller.context_builder.sources["prompts/excutor/system.md"])
         first_messages = self.controller.client.complete.call_args_list[0].args[0]
         first_content = first_messages[1]["content"]
         action_content = messages[1]["content"]
         self.assertIn(_section("previous_decision", "No previous decision."), first_content)
-        common_context = first_content.split("<tactical_guidance>", 1)[0]
-        self.assertEqual(common_context, action_content.split("<current_decision>", 1)[0])
-        self.assertIn("prior action failed", common_context)
+        self.assertIn("OBS frame=1", first_content)
+        self.assertIn("OBS frame=2", action_content)
+        self.assertNotIn("OBS frame=1", action_content)
+        self.assertIn(_section("general_guidance", self.controller.context_builder.sources["prompts/planner/rules.md"]),
+                      first_messages[1]["content"])
+        self.assertIn("prior action failed", first_content)
         for content, tags in (
-            (first_content, ("general_guidance", "observation",
-                             "actions_reference", "tactical_guidance", "previous_decision", "output_requirements")),
-            (action_content, ("general_guidance", "observation",
-                              "actions_reference", "current_decision", "output_requirements")),
+            (first_content, ("general_guidance", "static_knowledge", "tactical_guidance",
+                             "action_capabilities", "previous_decision", "observation", "output_requirements")),
+            (action_content, ("general_guidance", "static_knowledge", "actions_reference",
+                              "current_decision", "observation", "output_requirements")),
         ):
-            positions = [content.index(f"<{tag}>") for tag in tags]
+            positions = [content.index(f"<{tag}>\n") for tag in tags]
             self.assertEqual(positions, sorted(positions))
-        self.assertEqual(first_messages[0]["content"], self.controller.context_builder.sources["prompts/system_working.md"])
+        self.assertEqual(first_messages[0]["content"], self.controller.context_builder.sources["prompts/planner/system.md"])
         self.assertNotEqual(messages[0]["content"], first_messages[0]["content"])
         self.assertIn(_section("current_decision", self.working), messages[1]["content"])
+        self.assertIn(_section("static_knowledge", self.controller.context_builder.sources["knowledge/terran.md"]),
+                      messages[1]["content"])
         self.assertIn("<general_guidance>", messages[1]["content"])
-        for line in self.controller.context_builder.sources["memory/general.md"].splitlines():
+        for line in self.controller.context_builder.sources["prompts/excutor/rules.md"].splitlines():
             self.assertIn(line.strip(), messages[1]["content"])
         self.assertIn("<tactical_guidance>", first_messages[1]["content"])
         self.assertNotIn("<tactical_guidance>", messages[1]["content"])
         for request in (first_messages, messages):
             self.assertIn("# observation_guide\n", request[1]["content"])
             self.assertNotIn("<observation_guide>", request[1]["content"])
-            self.assertLess(request[1]["content"].index("<actions_reference>"),
+            action_tag = "action_capabilities" if request is first_messages else "actions_reference"
+            self.assertLess(request[1]["content"].index(f"<{action_tag}>"),
                             request[1]["content"].index("<output_requirements>"))
-            for tag in ("general_guidance", "observation", "actions_reference", "output_requirements"):
+            for tag in ("general_guidance", "observation", action_tag, "output_requirements"):
                 self.assertIn(f"<{tag}>", request[1]["content"])
                 self.assertIn(f"<{tag}>", request[0]["content"])
-        self.assertNotIn(self.controller.context_builder.sources["memory/tactics/BattleCruiserRush.md"], messages[1]["content"])
+        self.assertNotIn(self.controller.context_builder.sources["knowledge/tactics/BattleCruiserRush.md"], messages[1]["content"])
         self.assertIn("OBS", messages[1]["content"])
         self.assertNotIn("<execution_feedback>", messages[1]["content"])
         self.assertIn("actions_reference", messages[1]["content"])
         await self.frame(4, 5)
         messages = self.controller.client.complete.call_args_list[2].args[0]
-        self.assertIn(_section("previous_decision", self.working), messages[1]["content"])
-        self.assertEqual(self.controller.client.complete.await_count, 4)
-        settings = (self.directory / "system/settings.json").read_text()
+        self.assertIn("time=00:00 phase=opening guidance=Prepare expansion.", messages[1]["content"])
+        self.assertEqual(self.controller.client.complete.await_count, 3)
+        settings = (self.directory / "settings.json").read_text()
         self.assertNotIn("test-secret", settings)
-        self.assertTrue((self.directory / "context/BattleCruiserRush.md").exists())
-        events = [json.loads(line) for line in (self.directory / "system/events.jsonl").read_text().splitlines()]
+        self.assertFalse((self.directory / "context").exists())
+        events = [json.loads(line) for line in (self.directory / "events.jsonl").read_text().splitlines()]
         self.assertTrue(any(event["event"] == "working_memory_updated" for event in events))
 
     async def test_second_round_failure_keeps_saved_working(self):
         async def complete(messages, **kwargs):
             if not ("<current_decision>\n" in messages[1]["content"]):
                 return self.working
-            self.assertFalse((self.directory / "system/working.md").exists())
+            self.assertFalse((self.directory / "working.md").exists())
             raise RuntimeError("execution request failed")
 
         self.controller.client.complete = AsyncMock(side_effect=complete)
         await self.frame(1, 0)
         await self.frame(2, 1)
+        await self.frame(3, 2)
         self.assertEqual(self.controller.context_builder.working, self.working)
         self.assertIsNone(self.controller.automation.worker_target)
         self.assertTrue(self.controller._feedback)
 
-    async def test_action_reply_with_legacy_working_is_rejected(self):
+    async def test_action_reply_ignores_extra_working_section(self):
         self.reply += "\n# working\nUnwanted replacement"
         await self.frame(1, 0)
         await self.deliver()
         self.assertEqual(self.controller.context_builder.working, self.working)
-        self.assertIsNone(self.controller.automation.worker_target)
-        self.assertTrue(self.controller._feedback)
+        self.assertEqual(self.controller.automation.worker_target, 22)
+        self.assertFalse(self.controller._feedback)
 
     async def test_feedback_retains_source_after_parse_failure_and_execution(self):
         self.reply = "# actions\nBad(unit=lookup(1))\nBuildWorkers()\nBuildWorkers(to_count=22)"
@@ -231,7 +253,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(feedback[1]["submitted_action"], "BuildWorkers()")
         history = self.controller.observation_builder.action_history.render()
         self.assertIn("Bad(unit=lookup(1)):", history)
-        self.assertIn("BuildWorkers(): missing parameter", history)
+        self.assertIn("BuildWorkers(): format_error: 'to_count' is required", history)
         action = self.controller.automation.worker_action
         self.controller.executor.record_failure(self.bot, 4, action, "later failure")
         self.assertEqual(feedback[-1]["action_index"], 3)
@@ -242,8 +264,9 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         await self.frame(5, 5)
         content = self.controller.client.complete.call_args_list[2].args[0][1]["content"]
         self.assertIn("failed:", content)
-        self.assertIn("notice:", content)
-        self.assertIn("BuildWorkers(to_count=22): no new work started", content)
+        self.assertNotIn("notice:", content)
+        self.assertIn("BuildWorkers(to_count=22): later failure", content)
+        self.assertNotIn("BuildWorkers(to_count=22): no new work started", content)
         self.assertNotIn("<execution_feedback>", content)
 
     async def test_request_failure_keeps_existing_control_and_memory(self):

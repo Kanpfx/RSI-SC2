@@ -5,7 +5,7 @@ from unittest.mock import Mock
 import run
 from ares.consts import UnitRole
 from sc2.position import Point2
-from agent.runtime.scouting import ScoutController
+from agent.game.scouting import ScoutController
 
 
 class ScoutTests(unittest.TestCase):

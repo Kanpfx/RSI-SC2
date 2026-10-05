@@ -1,0 +1,18 @@
+[project]
+name = "rsi-sc2-agent"
+version = "0.1.0"
+description = "LLM-controlled StarCraft II agent with Ares"
+requires-python = ">=3.11,<3.13"
+
+dependencies = [
+    "burnysc2",
+    "ares-sc2==3.15.0",
+    "loguru>=0.7.3",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+burnysc2 = { git = "https://github.com/august-k/python-sc2", branch = "develop" }
+ares-sc2 = { path = "ares-sc2", editable = true }

@@ -1,0 +1,333 @@
+{
+  "ares_version": "3.14.0",
+  "actions": [
+    {
+      "name": "AMoveGroup",
+      "description": "Attack-move to a position or attack a unit.",
+      "import": "ares.behaviors.combat.group.a_move_group.AMoveGroup",
+      "enabled": true,
+      "params": [
+        {
+          "name": "group",
+          "type": "list[Unit]",
+          "description": "Non-empty list of own unit IDs.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "target",
+          "type": "Point2 | Unit",
+          "description": "Target position or unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "group_tags",
+          "type": "set[int]",
+          "description": "SC2 tags derived from group.",
+          "source": "runtime",
+          "required": true,
+          "value": "group_tags"
+        }
+      ]
+    },
+    {
+      "name": "GroupUseAbility",
+      "description": "Issue the same ability to the group.",
+      "import": "ares.behaviors.combat.group.group_use_ability.GroupUseAbility",
+      "enabled": true,
+      "params": [
+        {
+          "name": "ability",
+          "type": "AbilityId",
+          "description": "Ability to use.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "group",
+          "type": "list[Unit]",
+          "description": "Non-empty list of own unit IDs.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "target",
+          "type": "Point2 | Unit | null",
+          "description": "Target position, unit ID, or explicit null.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "group_tags",
+          "type": "set[int]",
+          "description": "SC2 tags derived from group.",
+          "source": "runtime",
+          "required": true,
+          "value": "group_tags"
+        },
+        {
+          "name": "sync_command",
+          "type": "bool",
+          "description": "Require all units ready; otherwise require any. Commands reach the whole group. Default: true.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        }
+      ]
+    },
+    {
+      "name": "KeepGroupSafe",
+      "description": "Move units to safety, optionally attacking enemies in range.",
+      "import": "ares.behaviors.combat.group.keep_group_safe.KeepGroupSafe",
+      "enabled": false,
+      "params": [
+        {
+          "name": "group",
+          "type": "list[Unit]",
+          "description": "Non-empty list of own unit IDs.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "close_enemy",
+          "type": "list[Unit]",
+          "description": "Visible enemy IDs eligible for attacks; may be empty.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "grid",
+          "type": "ndarray",
+          "description": "Ground or air influence grid for the group.",
+          "source": "runtime",
+          "required": true,
+          "value": "group_grid"
+        },
+        {
+          "name": "attack_in_range_enemy",
+          "type": "bool",
+          "description": "Attack enemies in range when weapons are ready. Default: true.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        }
+      ]
+    },
+    {
+      "name": "PathGroupToTarget",
+      "description": "Move the group along a path toward the target.",
+      "import": "ares.behaviors.combat.group.path_group_to_target.PathGroupToTarget",
+      "enabled": true,
+      "params": [
+        {
+          "name": "group",
+          "type": "list[Unit]",
+          "description": "Non-empty list of own unit IDs.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "target",
+          "type": "Point2",
+          "description": "Destination coordinates.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "start",
+          "type": "Point2",
+          "description": "Current group center.",
+          "source": "runtime",
+          "required": true,
+          "value": "group_center"
+        },
+        {
+          "name": "group_tags",
+          "type": "set[int]",
+          "description": "SC2 tags derived from group.",
+          "source": "runtime",
+          "required": true,
+          "value": "group_tags"
+        },
+        {
+          "name": "grid",
+          "type": "ndarray",
+          "description": "Ground or air influence grid for the group.",
+          "source": "runtime",
+          "required": true,
+          "value": "group_grid"
+        },
+        {
+          "name": "distance_check_squared",
+          "type": "float",
+          "description": "Squared distance threshold for duplicate orders. Default: 26.25.",
+          "source": "fixed",
+          "required": false,
+          "value": 26.25
+        },
+        {
+          "name": "success_at_distance",
+          "type": "float",
+          "description": "Stop issuing moves within this distance. Default: 0.0.",
+          "source": "fixed",
+          "required": false,
+          "value": 0.0
+        },
+        {
+          "name": "sensitivity",
+          "type": "int",
+          "description": "Pathfinding sensitivity. Default: 12.",
+          "source": "fixed",
+          "required": false,
+          "value": 12
+        },
+        {
+          "name": "smoothing",
+          "type": "bool",
+          "description": "Smooth the path. Default: false.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        },
+        {
+          "name": "sense_danger",
+          "type": "bool",
+          "description": "Enable danger-aware path queries. Default: false.",
+          "source": "fixed",
+          "required": false,
+          "value": false
+        },
+        {
+          "name": "danger_distance",
+          "type": "float",
+          "description": "Danger detection distance. Default: 20.0.",
+          "source": "fixed",
+          "required": false,
+          "value": 20.0
+        },
+        {
+          "name": "danger_threshold",
+          "type": "float",
+          "description": "Danger influence threshold. Default: 5.0.",
+          "source": "fixed",
+          "required": false,
+          "value": 5.0
+        },
+        {
+          "name": "prevent_duplicate",
+          "type": "bool",
+          "description": "Suppress duplicate or similar moves. Default: true.",
+          "source": "fixed",
+          "required": false,
+          "value": true
+        }
+      ]
+    },
+    {
+      "name": "StutterGroupBack",
+      "description": "Attack toward the target position and retreat from danger during weapon cooldown.",
+      "import": "ares.behaviors.combat.group.stutter_group_back.StutterGroupBack",
+      "enabled": true,
+      "params": [
+        {
+          "name": "group",
+          "type": "list[Unit]",
+          "description": "Non-empty list of own unit IDs.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "target",
+          "type": "Point2 | Unit",
+          "description": "Target position or unit ID.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "group_tags",
+          "type": "set[int]",
+          "description": "SC2 tags derived from group.",
+          "source": "runtime",
+          "required": true,
+          "value": "group_tags"
+        },
+        {
+          "name": "group_position",
+          "type": "Point2",
+          "description": "Current group center.",
+          "source": "runtime",
+          "required": true,
+          "value": "group_center"
+        },
+        {
+          "name": "grid",
+          "type": "ndarray",
+          "description": "Ground or air influence grid for the group.",
+          "source": "runtime",
+          "required": true,
+          "value": "group_grid"
+        }
+      ]
+    },
+    {
+      "name": "StutterGroupForward",
+      "description": "Alternate movement and attacks toward the enemy group center.",
+      "import": "ares.behaviors.combat.group.stutter_group_forward.StutterGroupForward",
+      "enabled": true,
+      "params": [
+        {
+          "name": "group",
+          "type": "list[Unit]",
+          "description": "Non-empty list of own unit IDs.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "enemies",
+          "type": "list[Unit]",
+          "description": "Visible enemy IDs to advance toward; empty means no action.",
+          "source": "model",
+          "required": true,
+          "value": null
+        },
+        {
+          "name": "group_tags",
+          "type": "set[int]",
+          "description": "SC2 tags derived from group.",
+          "source": "runtime",
+          "required": true,
+          "value": "group_tags"
+        },
+        {
+          "name": "group_position",
+          "type": "Point2",
+          "description": "Current group center.",
+          "source": "runtime",
+          "required": true,
+          "value": "group_center"
+        },
+        {
+          "name": "target",
+          "type": "Point2 | Unit",
+          "description": "Center of the selected enemies, used as a reference target.",
+          "source": "runtime",
+          "required": true,
+          "value": "enemy_center"
+        }
+      ]
+    }
+  ]
+}
