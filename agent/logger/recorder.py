@@ -14,7 +14,7 @@ from agent.logger.system.manifest import runtime_manifest
 class Telemetry:
     """Keep observation, conversations and accepted decisions separate.
 
-    A single instance belongs to one match.  The directory name is timestamped
+    A single instance belongs to one match. The directory name is timestamped
     so later matches can never overwrite an earlier trace.
     """
 

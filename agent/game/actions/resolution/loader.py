@@ -1,4 +1,5 @@
 """Load the clean Ares action tables without expanding their schema."""
+
 from __future__ import annotations
 
 import json
@@ -6,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from agent.paths import KNOWLEDGE_ROOT
+from agent.paths import ACTIONS_ROOT
 from agent.game.actions.errors import ActionNameError
 from agent.game.actions.resolution.types import TypeResolver, symbol
 from agent.game.actions.resolution.resolver import RUNTIME_SOURCES
@@ -14,7 +15,7 @@ from agent.game.actions.resolution.resolver import RUNTIME_SOURCES
 
 def catalog_root() -> Path:
     configured = os.getenv("AGENT_KNOWLEDGE_ROOT")
-    return Path(configured).resolve() if configured else KNOWLEDGE_ROOT / "actions"
+    return Path(configured).resolve() if configured else ACTIONS_ROOT
 
 
 def resolved_catalog_root() -> Path:

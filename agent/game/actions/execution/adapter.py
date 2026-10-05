@@ -1,4 +1,5 @@
 """Resolve catalog arguments and construct Ares behaviors."""
+
 from __future__ import annotations
 
 import importlib

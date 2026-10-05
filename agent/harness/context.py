@@ -1,11 +1,11 @@
 """Own prompt sources and per-match working memory, independent of SC2."""
+
 from __future__ import annotations
 
 import re
 from typing import Any
 
 from agent.harness.action_reference import _action_capabilities, _actions_reference, _section
-
 from agent.paths import RESOURCES_ROOT
 
 CONTEXT_ROOT = RESOURCES_ROOT

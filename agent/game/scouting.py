@@ -1,4 +1,5 @@
 """One worker loops through enemy starts and expansion locations."""
+
 from __future__ import annotations
 
 from ares.consts import UnitRole

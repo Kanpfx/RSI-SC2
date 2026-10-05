@@ -1,4 +1,5 @@
-"""Best-effort version discovery and snapshots of loaded research inputs."""
+"""Collect runtime versions and repository state for match metadata."""
+
 import platform
 import subprocess
 from importlib.metadata import PackageNotFoundError, version

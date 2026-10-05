@@ -12,7 +12,6 @@ from agent.game.actions.errors import (
     exception_reason,
     ConflictError,
     InstructionError,
-    OutputFormatError,
     ParameterError,
 )
 from agent.game.actions.policy.exposure import ActionSurface

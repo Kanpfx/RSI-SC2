@@ -1,4 +1,4 @@
-"""Prompt builder for the single-model observation contract."""
+"""Render action capabilities and DSL references for model prompts."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from typing import Any
 
 from agent.game.actions.execution.lifecycle import PERSISTENT_ACTION_IDS
 from agent.paths import PROMPTS_ROOT
+
 
 def _section(tag: str, content: str, **attributes: str) -> str:
     """Use XML only for major semantic sections, not every nested field."""

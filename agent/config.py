@@ -1,4 +1,5 @@
 """Runtime settings and project-local environment loading."""
+
 from __future__ import annotations
 
 import os

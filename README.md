@@ -1,60 +1,94 @@
-# Minimal SC2 Agent
+# RSI SC2 Agent
 
-基于 Ares 与 python-sc2 的 LLM 人族 Agent，在本地 StarCraft II 中与内置 AI 实时对战。项目重点是模型决策与游戏执行之间的接口，为后续 RSI 经验更新提供上下文和对局记录。
+## 项目简介
 
-## 运行方式
+基于 Ares 与 python-sc2 的 LLM 人族 Agent，在本地 StarCraft II 中与内置 AI 实时对战。模型通过 planner 和 excutor 两个阶段制定目标、生成动作，系统负责观测、校验、执行和日志记录。
 
-```text
-游戏观测 → 上下文组装 → 异步 LLM → DSL 解析 → 当前状态校验 → Ares 执行
-    ↑                                                        │
-    └──────────────── 执行结果与错误反馈 ──────────────────────┘
-```
-
-- 最多一个模型请求在途；等待回复时，游戏、基础自动化和已接受的持续指令继续运行。
-- 模型只看到当前可用的动作与参数，回复到达后按执行时的状态重新校验。单条动作失败不影响同批合法动作，错误反馈给下一轮决策。
-- 禁用脚本化开局，经济、科技和战斗目标由模型决定。基础自动化负责采矿、瓦斯分配、补给和降补给站；工人生产目标由模型指定。开局 60 秒后且至少有 12 个工人时，自动派一个工人先到敌方出生点，再循环巡视扩张点；每个路点最多停留 10 秒，阵亡后等待 10 秒再补派。
-- 保留 Ares Behavior 自带的生产与科技前置步骤处理。跨局经验提取和 RSI 自动更新尚未实现。
-
-## 目录
+## 文件结构
 
 ```text
 rsi_sc2_agent/
 ├── run.py                  # 对局启动入口
-├── agent/                  # Python 实现
+├── agent/
 │   ├── config.py           # 游戏与模型配置
-│   ├── paths.py            # 项目与资源路径
-│   ├── harness/            # 上下文组装、模型调用与决策调度
-│   ├── game/               # Ares 生命周期、自动化与侦察
-│   │   ├── observation/    # 状态采集、压缩与历史
-│   │   └── actions/        # DSL 解析、动作校验与执行
-│   └── logger/             # 日志记录与快照代码
-├── resources/
-│   ├── knowledge/          # 通用经验、tactics/ 战术与 actions/ 动作定义
-│   └── prompts/            # working/、actions/ 提示词与共用观测说明
+│   ├── paths.py            # 项目路径
+│   ├── harness/            # 上下文、模型请求与决策调度
+│   ├── game/
+│   │   ├── bot.py          # Ares 生命周期接入
+│   │   ├── automation.py   # 基础自动化
+│   │   ├── scouting.py     # 工人侦察
+│   │   ├── observation/    # 观测构建与历史
+│   │   └── actions/        # 动作解析、校验与执行
+│   └── logger/             # 对局日志与数据采集接口
+├── resources/              # 提示词、知识与执行资源
 ├── tools/                  # 日志查看器
-├── logs/                   # 对局记录与录像
 ├── tests/                  # 本项目测试
+├── logs/                   # 生成的对局记录与录像
 ├── ares-sc2/               # 本地 Ares 源码
-├── pyproject.toml          # 当前依赖与 uv 源设置
-└── requirements.txt        # 旧版环境依赖快照
+├── .env.example            # 模型连接配置示例
+├── pyproject.toml          # 依赖与 uv 配置
+└── requirements.txt        # 旧版环境快照
 ```
 
-`resources/` 是后续 RSI 修改 Prompt 与经验的主要边界；`agent/logger/` 独立保留，便于单独管理日志工具权限。实际对局数据位于 `logs/`。
+## 运行流程
+
+```text
+当前观测 → planner 规划 → 新观测 → excutor 生成 DSL → 解析与校验 → Ares 执行
+    ↑                                                                  │
+    └──────────────────── 动作历史与执行反馈 ───────────────────────────┘
+```
+
+1. 游戏帧更新后，采集资源、单位、生产科技、敌方记忆和动作历史。
+2. planner 结合静态知识、战术资料与最近两次决策，给出未来约 10 秒的指导。
+3. planner 回复后采集新观测，excutor 据此选择单位、目标和参数，输出 `# actions` DSL。
+4. 系统解析动作，按执行时的状态校验，交给 Ares Behavior 执行，并管理持续动作与资源等待队列。
+5. 动作状态和错误进入后续观测，供下一轮决策参考；日志保存整个过程。
+
+模型请求串行进行，每次最多一个请求在途。等待回复期间，游戏、基础自动化和持续动作继续运行。
+
+## 模块职责
+
+| 模块 | 职责 |
+| --- | --- |
+| `run.py` | 加载环境、解析启动参数、创建对局并保存控制台输出与录像 |
+| `agent/config.py`、`agent/paths.py` | 游戏与模型配置、项目资源路径 |
+| `agent/harness/` | 组装两个阶段的 messages、请求模型、调度决策与游戏帧之间的交接 |
+| `agent/game/bot.py` | 接入 Ares 生命周期，在每帧调用控制器，在结束时记录结果 |
+| `agent/game/observation/` | 采集和格式化战局，维护单位 ID、敌方记忆与动作历史 |
+| `agent/game/actions/` | DSL 解析、动作过滤与校验、参数解析、Ares 适配和动作生命周期管理 |
+| `agent/game/automation.py`、`scouting.py` | 基础经济操作、工人生产目标与自动侦察 |
+| `agent/logger/` | 记录观测、模型交互、动作事件、配置和对局结果；预留研究数据采集接口 |
+| `resources/` | 提示词、静态知识、战术资料与执行资源 |
+| `tools/`、`tests/` | 日志查看器与本项目测试 |
+| `ares-sc2/` | 本地 Ares 源码与 Behavior 实现 |
+
+`harness/controller.py` 连接观测、模型、自动化和动作执行。`resources/` 提供决策与执行约定，`logger/` 保存各阶段的数据到 `logs/`，供日志查看器复盘。
+
+## 控制粒度与设计
+
+- **规划层**：planner 管理经济、扩张、科技、生产和战斗方向，每条指导描述一个具体目标。
+- **动作层**：excutor 将指导转成宏观、群体或单体动作，指定单位 ID、目标 ID、坐标和必要参数。
+- **执行层**：Ares Behavior 处理选址、生产前置、寻路及动作自带的微操；系统维护持续动作实例和排队状态。
+- **基础自动化**：负责采矿、瓦斯分配、补给、降补给站和工人侦察；工人生产数量由模型设定。
+
+观测中的己方和可见敌方单位逐个展示 ID、位置、状态与关键属性，敌方记忆采用精简格式。动作历史使用 `active`、`queued`、`accepted`、`failed`，保留最近两个决策周期及当前周期。
+
+系统根据当前战局提供可用动作，并在执行前校验实体、参数、资源和控制冲突。持续动作在目标或参数改变时更新。
 
 ## 环境准备
 
-使用 Python 3.11–3.12；依赖与本地 Ares 源设置见 [pyproject.toml](pyproject.toml)，无需 Poetry。需要本机安装 StarCraft II、对局地图、Git 和 uv。以下命令在项目根目录的 PowerShell 中执行。
+使用 Python 3.11–3.12，需要安装 StarCraft II、对局地图、Git 和 uv。依赖与本地 Ares 源设置见 [pyproject.toml](pyproject.toml)。以下命令在项目根目录的 PowerShell 中执行。
 
-首次准备环境，先获取最新 Ares 源码，再安装依赖：
+获取 Ares 3.15.0 源码并安装依赖：
 
 ```powershell
-git clone --depth 1 https://github.com/AresSC2/ares-sc2.git ares-sc2
+git clone --depth 1 --branch v3.15.0 https://github.com/AresSC2/ares-sc2.git ares-sc2
 uv sync --python 3.12
 ```
 
-当前本地源码为 Ares 3.15.0，commit `70a151a66fdd00d6c1ee44718735d0da396b902e`。该版本要求 `cython-extensions-sc2 ^0.18.0`；已有 Conda 环境需要匹配新版依赖。[requirements.txt](requirements.txt) 保留为旧版环境快照，不适用于本次升级后的依赖安装。新环境安装流程仍需在目标机器上验证。
+已有 Conda 环境可按 [pyproject.toml](pyproject.toml) 配置依赖。`requirements.txt` 保存旧版环境快照。
 
-[run.py](run.py) 自动加载本地 `ares-sc2/src` 与 `ares-sc2/`，以包含源码根目录中的 `sc2_helper`。uv 使用本地 editable Ares 包。
+[run.py](run.py) 自动加载本地 Ares 与 `sc2_helper`；uv 使用本地 editable Ares 包。
 
 ## 配置与启动
 
@@ -68,11 +102,7 @@ LLM_API_KEY=your-api-key
 
 模型服务需兼容 Chat Completions 接口。已有 shell 环境变量优先于 `.env`；请求超时、输出长度和动作限制等默认值见 [config.py](agent/config.py)。
 
-```powershell
-uv run python run.py --map_name Simple64 --difficulty VeryHard --enemy_race Terran --tactic Simple64
-```
-添加示例：在 `PylonAIE_v4` 上对抗 VeryHard Terran AI，并使用
-BattleCruiserRush 战术。
+例如，在 `PylonAIE_v4` 上对抗 VeryHard Terran AI，使用 BattleCruiserRush 战术：
 
 ```powershell
 uv run python run.py `
@@ -95,21 +125,24 @@ uv run python run.py `
 
 己方目前仅支持 `Terran`，对局使用实时模式。完整参数及可选值可通过 `python run.py --help` 查看。
 
-## 记忆与日志
+## 决策资源
 
-动作表位于 `resources/knowledge/actions/`，采用 `individual_actions.json`、`group_actions.json` 和 `macro_actions.json`，共 47 个 Ares Behavior。表内使用类名作为动作标识；仅 `source: model` 的参数允许模型提交，`fixed` 参数按表内值逐实例注入，`runtime` 参数根据当前帧计算。单位归属、可用性、参数限制与持续执行由代码管理。可选模型参数也会展示，例如 `UseAbility.target`。
+| 路径 | 内容 |
+| --- | --- |
+| `resources/knowledge/terran.md` | 人族科技树、单位建筑及基础机制 |
+| `resources/knowledge/tactics/` | 启动参数选择的战术资料 |
+| `resources/prompts/planner/`、`excutor/` | 各阶段的角色、规则和输出要求 |
+| `resources/prompts/observation.md` | 共用观测说明 |
+| `resources/prompts/argument_definitions.md` | 动作参数约定与示例 |
 
-动作表沿用 `ares_base_agent/aciton_list/` 的 Ares 3.14.0 定义，已针对本地 Ares 3.15.0 核对构造参数和必填性。固定默认值包含 `SpawnController.over_produce_on_low_tech=true`、`UpgradeController.auto_tech_up_enabled=true`，遵循表内约定。持续 Behavior 复用实例以保留内部状态；混合空地群体需要拆分后提交，网格由 runtime 选择。`PlacePredictiveAoE` 保持关闭，未记录路径时不会推断路径。
+上下文按阶段组装：
 
-提示词在 `resources/prompts/` 中按职责组织：
+- planner：通用规则 → 静态知识 → 战术资料 → 动作能力（名称与简介）→ 最近两次决策 → 当前观测 → 输出要求。
+- excutor：通用规则 → 静态知识 → 动作 DSL 与参数约定 → 本轮指导 → 规划回复后新采集的观测 → 输出要求。
 
-- `working/system.md`：第一轮角色，依据全局规则与经验、战术和观测生成自然语言指导。
-- `actions/system.md`：第二轮角色，以 working 为核心，结合全局规则与经验、观测、动作表和反馈生成 DSL 动作。
-- `observation.md`：观测字段说明，随当前观测一起提供。
-- `working/output.md`：第一轮输出要求，仅生成“当前阶段”和“具体指导”。
-- `actions/output.md`：第二轮输出要求，依据第一轮指导生成 DSL 动作。
+提示词、知识和战术资料在开局加载。
 
-通用记忆保存在 `resources/knowledge/general.md`，包含全局约束、控制范围与通用经验；战术经验保存在 `resources/knowledge/tactics/`。这些文件开局加载，修改后下一局生效。每个决策周期独立调用两轮，共享同一份公共上下文，依次为通用规则、观测和动作表。错误与提示统一放在观测的 action_history 中，分别归入 failed 和 notice，包含事件时间、原始动作及原因，不再单独拼接 execution_feedback。第一轮在公共上下文后追加完整战术、上一轮 working（`previous_decision`）和输出要求；上一轮决策仅作为历史参考，需结合当前观测与反馈修正，不代表动作已执行，首轮显式标记无上一轮决策。回复保留在内存和系统日志中，不单独生成 `working.md`，不额外校验格式或长度。第二轮在公共上下文后追加本轮 working（`current_decision`）和输出要求，仅生成动作，不携带第一轮对话或战术表。周期之间不累积完整对话。动作回复只接受 `# actions` 段，不兼容旧的 `# working` 段。
+## 日志与复盘
 
 每局生成 `logs/<时间戳>/`，主要内容包括：
 
@@ -119,9 +152,9 @@ uv run python run.py `
 - `metadata.json`：对局信息与结果。
 - `console.log`、`replay.SC2Replay`：控制台输出与对局录像。
 
-系统日志采用 schema version 3，每条 JSONL 记录包含 `run_id`。模型两轮请求分别标记 `working` / `actions`，具有独立 `request_id`，重试使用所属请求的 `attempt_id`。观测与执行分别记录迭代编号、可获取的 SC2 game loop 和游戏时间；异步响应只关联原观测，不推测当前游戏帧。
+日志使用 schema version 3，通过 `run_id`、决策与请求标识关联观测、模型回复和动作事件。`model.jsonl` 保留完整 messages 和原始响应，`metadata.json` 记录运行版本与对局结果。
 
-所有日志直接保存在对局目录，不生成 `system/` 或 `context/` 子目录，也不保存资源快照或其 hash；模型日志仍保留实际发送的完整 messages。metadata 保存代码及 Ares commit、工作区修改状态、Python/关键依赖版本和可获取的 SC2 base build；未知版本与未显式配置的随机种子记为 null。未提交代码只记录修改状态，不保存代码补丁，因此不能仅凭 commit 完整还原修改中的工作区。后续 RSI 数据预留在 `data/`，目前只有未接入的接口框架。`tools/日志查看器.html` 读取平铺日志，也兼容旧的 `system/` 目录布局；请选择对局日志目录。
+打开 [日志查看器](tools/日志查看器.html)，选择对局日志目录，即可查看观测、planner 指导、可读思考内容、excutor 动作与执行反馈。`agent/logger/information/` 预留 RSI 数据采集接口，目前处于接口框架阶段。
 
 ## 测试
 
@@ -131,4 +164,12 @@ uv run python run.py `
 python -c "import run, unittest; unittest.main(module=None, argv=['unittest', 'discover', '-s', 'tests', '-v'])"
 ```
 
-先导入 `run`，复用入口的本地 Ares 路径；实现代码使用标准 `agent` 包，使测试不依赖项目文件夹名称。测试使用本地模拟回复，不调用模型服务或启动 SC2。
+测试通过导入 `run` 加载本地 Ares 路径，使用模拟观测和模型回复验证动作、上下文与运行调度。
+
+## 动作表
+
+动作定义位于 `resources/actions/`，分为 `individual_actions.json`、`group_actions.json` 和 `macro_actions.json`，共 47 个动作，按 Ares **3.15.0** 核对接口。模型可用动作由 `enabled` 字段和运行时条件共同决定。
+
+参数分为模型提供的 `model`、固定注入的 `fixed` 和当前帧计算的 `runtime`。planner 接收动作名称与简介，excutor 接收 DSL 与参数说明。
+
+字段约定见[动作表说明](resources/actions/README.md)。`AGENT_KNOWLEDGE_ROOT` 可指定动作表目录，或包含 `actions/` 的父目录。

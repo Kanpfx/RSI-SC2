@@ -2,7 +2,7 @@
 
 动作表用于生成模型动作说明，并作为参数解析到 Ares Behavior 的对照接口。模型决定“哪些单位、做什么、对谁或去哪里”；其余参数使用 Ares 默认值或运行时计算。
 
-动作表来自 Ares **3.14.0**，`group_actions.json` 包含 6 个具体群体动作，`macro_actions.json` 包含 macro 目录下 15 个具体行为，`individual_actions.json` 包含 26 个具体单体动作。RSI 项目已接入解析、校验和执行调度，并针对本地 Ares 3.15.0 核对构造参数和必填性。
+动作表当前标注为 Ares **3.15.0**，已针对本地对应版本核对构造参数和必填性。`group_actions.json` 包含 6 个具体群体动作，`macro_actions.json` 包含 macro 目录下 15 个具体行为，`individual_actions.json` 包含 26 个具体单体动作。原始定义来源于 Ares 3.14.0，RSI 项目已接入解析、校验和执行调度。
 
 ## 字段格式
 
