@@ -6,6 +6,7 @@
       "description": "Attack-move or attack a unit unless already near the target.",
       "import": "ares.behaviors.combat.individual.a_move.AMove",
       "enabled": true,
+      "persistent": false,
       "params": [
         {
           "name": "unit",
@@ -37,7 +38,8 @@
       "name": "AttackTarget",
       "description": "Issue an attack order against a selected unit.",
       "import": "ares.behaviors.combat.individual.attack_target.AttackTarget",
-      "enabled": false,
+      "enabled": true,
+      "persistent": false,
       "params": [
         {
           "name": "unit",
@@ -69,7 +71,8 @@
       "name": "AutoUseAOEAbility",
       "description": "Automatically select an available area ability and cast position.",
       "import": "ares.behaviors.combat.individual.auto_use_aoe_ability.AutoUseAOEAbility",
-      "enabled": true,
+      "enabled": false,
+      "persistent": false,
       "params": [
         {
           "name": "unit",
@@ -118,6 +121,7 @@
       "description": "Unload cargo at the current position; target is unused.",
       "import": "ares.behaviors.combat.individual.drop_cargo.DropCargo",
       "enabled": true,
+      "persistent": false,
       "params": [
         {
           "name": "unit",
@@ -141,7 +145,8 @@
       "name": "GhostSnipe",
       "description": "Automatically select a snipe target against Zerg opponents.",
       "import": "ares.behaviors.combat.individual.ghost_snipe.GhostSnipe",
-      "enabled": true,
+      "enabled": false,
+      "persistent": false,
       "params": [
         {
           "name": "unit",
@@ -166,6 +171,7 @@
       "description": "Move away from danger using an influence grid.",
       "import": "ares.behaviors.combat.individual.keep_unit_safe.KeepUnitSafe",
       "enabled": true,
+      "persistent": true,
       "params": [
         {
           "name": "unit",
@@ -189,7 +195,8 @@
       "name": "MedivacHeal",
       "description": "Heal a selected set of allies while avoiding danger.",
       "import": "ares.behaviors.combat.individual.medivac_heal.MedivacHeal",
-      "enabled": true,
+      "enabled": false,
+      "persistent": true,
       "params": [
         {
           "name": "unit",
@@ -229,7 +236,8 @@
       "name": "MoveToSafeTarget",
       "description": "Move toward a safe position near the destination.",
       "import": "ares.behaviors.combat.individual.move_to_safe_target.MoveToSafeTarget",
-      "enabled": false,
+      "enabled": true,
+      "persistent": true,
       "params": [
         {
           "name": "unit",
@@ -326,6 +334,7 @@
       "description": "Path toward a destination using available Nydus connections.",
       "import": "ares.behaviors.combat.individual.nydus_path_unit_to_target.NydusPathUnitToTarget",
       "enabled": false,
+      "persistent": true,
       "params": [
         {
           "name": "unit",
@@ -398,6 +407,7 @@
       "description": "Move toward a destination using pathfinding.",
       "import": "ares.behaviors.combat.individual.path_unit_to_target.PathUnitToTarget",
       "enabled": true,
+      "persistent": true,
       "params": [
         {
           "name": "unit",
@@ -477,7 +487,8 @@
       "name": "PickUpAndDropCargo",
       "description": "Load selected units, travel to a destination, and unload.",
       "import": "ares.behaviors.combat.individual.pick_up_and_drop_cargo.PickUpAndDropCargo",
-      "enabled": true,
+      "enabled": false,
+      "persistent": true,
       "params": [
         {
           "name": "unit",
@@ -550,6 +561,7 @@
       "description": "Approach and load the nearest selected passenger.",
       "import": "ares.behaviors.combat.individual.pick_up_cargo.PickUpCargo",
       "enabled": true,
+      "persistent": true,
       "params": [
         {
           "name": "unit",
@@ -590,6 +602,7 @@
       "description": "Predict a chasing enemy position from a supplied movement path.",
       "import": "ares.behaviors.combat.individual.place_predictive_aoe.PlacePredictiveAoE",
       "enabled": false,
+      "persistent": false,
       "params": [
         {
           "name": "unit",
@@ -646,6 +659,7 @@
       "description": "Automatically choose creep placements and move or cast.",
       "import": "ares.behaviors.combat.individual.queen_spread_creep.QueenSpreadCreep",
       "enabled": false,
+      "persistent": false,
       "params": [
         {
           "name": "unit",
@@ -677,7 +691,8 @@
       "name": "RavenAutoTurret",
       "description": "Automatically place a turret near selected enemies.",
       "import": "ares.behaviors.combat.individual.raven_auto_turret.RavenAutoTurret",
-      "enabled": true,
+      "enabled": false,
+      "persistent": false,
       "params": [
         {
           "name": "unit",
@@ -701,7 +716,8 @@
       "name": "ReaperGrenade",
       "description": "Automatically place a grenade against selected enemies.",
       "import": "ares.behaviors.combat.individual.reaper_grenade.ReaperGrenade",
-      "enabled": true,
+      "enabled": false,
+      "persistent": false,
       "params": [
         {
           "name": "unit",
@@ -758,6 +774,7 @@
       "description": "Shoot selected enemies in range, otherwise move toward a destination.",
       "import": "ares.behaviors.combat.individual.shoot_and_move_to_target.ShootAndMoveToTarget",
       "enabled": false,
+      "persistent": true,
       "params": [
         {
           "name": "unit",
@@ -813,7 +830,8 @@
       "name": "ShootTargetInRange",
       "description": "Automatically select and attack a target in weapon range.",
       "import": "ares.behaviors.combat.individual.shoot_target_in_range.ShootTargetInRange",
-      "enabled": false,
+      "enabled": true,
+      "persistent": false,
       "params": [
         {
           "name": "unit",
@@ -845,7 +863,8 @@
       "name": "SiegeTankDecision",
       "description": "Automatically decide whether to siege or unsiege.",
       "import": "ares.behaviors.combat.individual.siege_tank_decision.SiegeTankDecision",
-      "enabled": true,
+      "enabled": false,
+      "persistent": true,
       "params": [
         {
           "name": "unit",
@@ -902,6 +921,7 @@
       "description": "Attack the target when ready, otherwise seek safety if in danger.",
       "import": "ares.behaviors.combat.individual.stutter_unit_back.StutterUnitBack",
       "enabled": true,
+      "persistent": true,
       "params": [
         {
           "name": "unit",
@@ -942,6 +962,7 @@
       "description": "Attack the target when ready, otherwise move toward it.",
       "import": "ares.behaviors.combat.individual.stutter_unit_forward.StutterUnitForward",
       "enabled": true,
+      "persistent": true,
       "params": [
         {
           "name": "unit",
@@ -966,6 +987,7 @@
       "description": "Automatically spread creep near an edge or random valid position.",
       "import": "ares.behaviors.combat.individual.tumor_spread_creep.TumorSpreadCreep",
       "enabled": false,
+      "persistent": false,
       "params": [
         {
           "name": "unit",
@@ -990,6 +1012,7 @@
       "description": "Issue a selected ability with an optional target.",
       "import": "ares.behaviors.combat.individual.use_ability.UseAbility",
       "enabled": true,
+      "persistent": false,
       "params": [
         {
           "name": "ability",
@@ -1021,7 +1044,8 @@
       "name": "UseAOEAbility",
       "description": "Choose a cast position for a selected area ability and enemy set.",
       "import": "ares.behaviors.combat.individual.use_aoe_ability.UseAOEAbility",
-      "enabled": false,
+      "enabled": true,
+      "persistent": false,
       "params": [
         {
           "name": "unit",
@@ -1102,6 +1126,7 @@
       "description": "Automatically select a wounded ally for transfusion.",
       "import": "ares.behaviors.combat.individual.use_transfuse.UseTransfuse",
       "enabled": false,
+      "persistent": false,
       "params": [
         {
           "name": "unit",
@@ -1134,6 +1159,7 @@
       "description": "Attack the target when ready, otherwise retreat using mineral walking.",
       "import": "ares.behaviors.combat.individual.worker_kite_back.WorkerKiteBack",
       "enabled": false,
+      "persistent": true,
       "params": [
         {
           "name": "unit",

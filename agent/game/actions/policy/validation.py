@@ -67,7 +67,7 @@ class PolicyValidator:
         context.bot = bot
         context.max_point_nudge_tiles = self.game_config.max_point_nudge_tiles
         valid, issues, notes, notices, arguments = [], [], [], [], []
-        seen = set()
+        seen = {}
         for index, action in enumerate(actions):
             current = action
             try:
@@ -98,11 +98,13 @@ class PolicyValidator:
                 actor_tags = validate_resolved(entry, kwargs, context, ready=not persistent)
                 if surface is not None:
                     surface.validate(entry, normalized['args'])
-                overlap = seen & actor_tags
+                overlap = seen.keys() & actor_tags
                 if overlap:
-                    raise ConflictError.unit_reused(context.observation_id(sorted(overlap)[0]))
+                    tag = sorted(overlap)[0]
+                    previous_index, previous_action = seen[tag]
+                    raise ConflictError.unit_reused(context.observation_id(tag), previous_action, previous_index)
                 self._validate_limits(entry, kwargs)
-                seen.update(actor_tags)
+                seen.update({tag: (index + 1, entry['name']) for tag in actor_tags})
                 valid.append(normalized)
                 arguments.append(kwargs)
                 if normalized != action:

@@ -9,7 +9,8 @@ from agent.paths import PROJECT_ROOT
 
 @dataclass(frozen=True)
 class GameConfig:
-    model_interval_seconds: float = 80 * 2 / 22.4
+    excutor_interval_iterations: int = 90
+    planner_interval_iterations: int = 270
     max_actions_per_decision: int = 6
     max_action_units: int = 12
     max_action_targets: int = 8

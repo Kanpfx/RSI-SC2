@@ -6,42 +6,49 @@ from agent.game.observation.action_history import ActionHistory
 
 
 class ActionHistoryTests(unittest.TestCase):
-    def test_previous_two_cycles_without_record_limit(self):
+    def test_four_cycles_without_record_limit(self):
         history = ActionHistory()
         history.begin_decision()
         for index in range(15):
             history.record(f"Action{index}()", "00:10", "failed", "invalid")
-        for _ in range(2):
+        for _ in range(3):
             history.begin_decision()
-        self.assertEqual(history.render().count("time@00:10"), 15)
+        self.assertEqual(history.render(4).count("time@00:10"), 15)
         history.begin_decision()
-        self.assertEqual(history.render(), "[None]")
+        self.assertEqual(history.render(4), "[None]")
+
+    def test_phase_windows_preserve_each_cycle_and_sort_times(self):
+        history = ActionHistory()
+        for cycle in range(1, 6):
+            history.begin_decision()
+            history.record('Build()', f'00:{cycle * 10:02}', 'failed', str(cycle))
+        self.assertEqual(history.render().count('Build()'), 1)
+        planner = history.render(4)
+        self.assertEqual(planner.count('Build()'), 4)
+        self.assertNotIn('time@00:10', planner)
+        self.assertLess(planner.index('time@00:20'), planner.index('time@00:50'))
 
     def test_live_actions_survive_history_window(self):
         history = ActionHistory()
         active = {"id": "BuildWorkers", "args": {"to_count": 20}}
-        queued = {"id": "Build", "args": {"target": "natural"}}
         history.begin_decision()
         history.sync_active([active], "00:10")
-        history.record(queued, "00:10", "queued")
         for _ in range(4):
             history.begin_decision()
         self.assertIn("active:", history.render())
-        self.assertIn("queued:", history.render())
-        history.record(queued, "00:50", "failed", "wait ended")
-        history.begin_decision()
-        self.assertIn("time@00:50 Build(target=natural): wait ended", history.render())
+        history.sync_active([], "00:50")
+        self.assertEqual(history.render(), "[None]")
 
     def test_failure_uses_event_time_and_original_submission(self):
         history = ActionHistory()
         action = {"id": "BuildWorkers", "args": {"to_count": -1}}
-        history.record(action, "02:50", "accepted")
+        history.record(action, "02:50", "submitted")
         history.record(action, "02:57", "failed", "invalid value; 'to_count' = -1; expected a nonnegative integer",
                        submitted_action="BuildWorkers(to_count=-1)")
         self.assertEqual(history.render(), "failed:\n- time@02:57 BuildWorkers(to_count=-1): "
                          "invalid value; 'to_count' = -1; expected a nonnegative integer")
 
-    def test_annotations_attach_to_active_or_queued_actions(self):
+    def test_annotations_attach_to_active_or_submitted_actions(self):
         history = ActionHistory()
         action = {"id": "BuildWorkers", "args": {"to_count": 20}}
         history.sync_active([action], "02:50")
@@ -49,10 +56,11 @@ class ActionHistoryTests(unittest.TestCase):
         self.assertIn("active:\n- time@02:50 BuildWorkers(to_count=20)", history.render())
         self.assertIn("BuildWorkers(to_count=20): no new work started", history.render())
         self.assertNotIn("notice:", history.render())
-        history.record(action, "03:00", "queued")
-        history.annotate(action, "still waiting")
-        self.assertIn("queued:\n- time@03:00", history.render())
-        self.assertIn("BuildWorkers(to_count=20): still waiting", history.render())
+        history.sync_active([], "03:00")
+        history.record(action, "03:00", "submitted")
+        history.annotate(action, "order issued")
+        self.assertIn("submitted:\n- time@03:00", history.render())
+        self.assertIn("BuildWorkers(to_count=20): order issued", history.render())
 
     def test_unmatched_annotation_does_not_add_history(self):
         history = ActionHistory()
@@ -64,23 +72,28 @@ class ActionHistoryTests(unittest.TestCase):
         workers = {"id": "BuildWorkers", "args": {"to_count": 45}}
         build = {"id": "Build", "args": {"structure": "COMMANDCENTER", "target": "natural"}}
         tech = {"id": "TechUp", "args": {"target": "BATTLECRUISER"}}
-        history.record(workers, "00:10", "accepted")
         history.sync_active([workers], "00:11")
-        history.record(build, "00:12", "queued")
+        history.record(build, "00:12", "submitted")
         history.record(tech, "00:13", "failed", "missing prerequisite")
         self.assertEqual(history.render(), (
             "active:\n- time@00:11 BuildWorkers(to_count=45)\n"
-            "queued:\n- time@00:12 Build(structure=COMMANDCENTER, target=natural)\n"
+            "submitted:\n- time@00:12 Build(structure=COMMANDCENTER, target=natural)\n"
             "failed:\n- time@00:13 TechUp(target=BATTLECRUISER): missing prerequisite"
         ))
 
-    def test_retry_replaces_old_failure_and_preserves_one_time_acceptance(self):
+    def test_retry_replaces_old_failure_and_preserves_submission(self):
         history = ActionHistory()
         self.assertEqual(history.render(), "[None]")
         action = {"id": "Build", "args": {"target": "natural"}}
         history.record(action, "00:10", "failed", "not ready")
-        history.record(action, "00:15", "queued")
-        history.record(action, "00:20", "accepted")
+        history.record(action, "00:20", "submitted")
         history.annotate(action, "submitted\nawaiting construction")
         self.assertEqual(history.render(),
-                         "accepted:\n- time@00:20 Build(target=natural): submitted awaiting construction")
+                         "submitted:\n- time@00:20 Build(target=natural): submitted awaiting construction")
+
+
+    def test_legacy_statuses_are_rejected(self):
+        history = ActionHistory()
+        for status in ("accepted", "queued", "expired"):
+            with self.subTest(status=status), self.assertRaises(ValueError):
+                history.record("Action()", "00:10", status)

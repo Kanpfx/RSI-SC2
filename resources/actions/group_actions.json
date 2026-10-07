@@ -3,9 +3,10 @@
   "actions": [
     {
       "name": "AMoveGroup",
-      "description": "Attack-move to a position or attack a unit.",
+      "description": "Order the group to attack-move to a position or attack a unit.",
       "import": "ares.behaviors.combat.group.a_move_group.AMoveGroup",
       "enabled": true,
+      "persistent": false,
       "params": [
         {
           "name": "group",
@@ -35,9 +36,10 @@
     },
     {
       "name": "GroupUseAbility",
-      "description": "Issue the same ability to the group.",
+      "description": "Use the same ability and target for all units once every unit is ready.",
       "import": "ares.behaviors.combat.group.group_use_ability.GroupUseAbility",
       "enabled": true,
+      "persistent": false,
       "params": [
         {
           "name": "ability",
@@ -58,7 +60,7 @@
         {
           "name": "target",
           "type": "Point2 | Unit | null",
-          "description": "Target position, unit ID, or explicit null.",
+          "description": "Shared target position or unit ID; use null for untargeted abilities.",
           "source": "model",
           "required": true,
           "value": null
@@ -83,9 +85,10 @@
     },
     {
       "name": "KeepGroupSafe",
-      "description": "Move units to safety, optionally attacking enemies in range.",
+      "description": "For each unit, attack a selected enemy in range when ready; otherwise move out of danger.",
       "import": "ares.behaviors.combat.group.keep_group_safe.KeepGroupSafe",
       "enabled": false,
+      "persistent": true,
       "params": [
         {
           "name": "group",
@@ -98,7 +101,7 @@
         {
           "name": "close_enemy",
           "type": "list[Unit]",
-          "description": "Visible enemy IDs eligible for attacks; may be empty.",
+          "description": "Visible enemy IDs to consider for attacks; may be empty.",
           "source": "model",
           "required": true,
           "value": null
@@ -123,9 +126,10 @@
     },
     {
       "name": "PathGroupToTarget",
-      "description": "Move the group along a path toward the target.",
+      "description": "Move the group toward a position using a shared path through the influence grid. Do not mix air and ground units in one group.",
       "import": "ares.behaviors.combat.group.path_group_to_target.PathGroupToTarget",
       "enabled": true,
+      "persistent": true,
       "params": [
         {
           "name": "group",
@@ -235,9 +239,10 @@
     },
     {
       "name": "StutterGroupBack",
-      "description": "Attack toward the target position and retreat from danger during weapon cooldown.",
+      "description": "Attack-move toward the target position; retreat to safety during weapon cooldown if in danger.",
       "import": "ares.behaviors.combat.group.stutter_group_back.StutterGroupBack",
-      "enabled": true,
+      "enabled": false,
+      "persistent": true,
       "params": [
         {
           "name": "group",
@@ -283,9 +288,10 @@
     },
     {
       "name": "StutterGroupForward",
-      "description": "Alternate movement and attacks toward the enemy group center.",
+      "description": "Advance toward the selected enemies during weapon cooldown; otherwise attack-move toward their center.",
       "import": "ares.behaviors.combat.group.stutter_group_forward.StutterGroupForward",
-      "enabled": true,
+      "enabled": false,
+      "persistent": true,
       "params": [
         {
           "name": "group",
@@ -298,7 +304,7 @@
         {
           "name": "enemies",
           "type": "list[Unit]",
-          "description": "Visible enemy IDs to advance toward; empty means no action.",
+          "description": "Non-empty list of visible enemy IDs to advance toward.",
           "source": "model",
           "required": true,
           "value": null

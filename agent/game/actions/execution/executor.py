@@ -11,7 +11,7 @@ from agent.config import GameConfig
 from agent.game.actions.errors import ResourceError, exception_reason
 from agent.logger.recorder import Telemetry
 from agent.game.actions.execution.adapter import AresActionAdapter, TrackedBehavior
-from agent.game.actions.execution.lifecycle import DeferredActionQueue, PersistentActionRegistry
+from agent.game.actions.execution.lifecycle import PersistentActionRegistry
 from agent.game.actions.policy.exposure import ActionExposure
 from agent.game.actions.policy.validation import ActionReview, PolicyValidator
 from agent.game.actions.resolution.loader import ActionCatalog
@@ -20,7 +20,7 @@ from agent.game.observation.builder import ObservationBuilder
 
 
 class ActionExecutor:
-    """Own action queues, persistent controls and execution feedback."""
+    """Own decision-cycle controls and execution feedback."""
 
     def __init__(
         self, catalog: ActionCatalog, config: GameConfig, *,
@@ -38,11 +38,6 @@ class ActionExecutor:
         self.telemetry = telemetry
         self._feedback_sink = on_feedback
         self._request_iteration = request_iteration
-        self.deferred_actions = DeferredActionQueue(
-            catalog, config.deferred_action_ttl_iterations,
-            config.resource_queue_mineral_tolerance,
-            config.resource_queue_vespene_tolerance,
-        )
         self.persistent_actions = PersistentActionRegistry(catalog)
         self._persistent_behaviors = {}
         self._action_origins: dict[str, dict[str, Any]] = {}
@@ -62,16 +57,23 @@ class ActionExecutor:
                            submitted_action=item.get("submitted_action"))
         self._feedback_sink(item)
 
+    def begin_decision(self, bot: Any) -> None:
+        """End the previous cycle before validating a received decision."""
+        self.persistent_actions.clear()
+        self._persistent_behaviors.clear()
+        self.automation.replace_worker_override(None)
+        self._action_origins.clear()
+        self.sync_active(bot)
+
     def dispatch(
         self, bot: Any, iteration: int, review: ActionReview, context: Any,
-        *, from_queue: bool = False, sources: list[dict[str, Any]] | None = None,
+        *, sources: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         states = []
         for action_index, action in enumerate(review.actions):
             key = self.action_key(action)
             retained = (
-                from_queue or action in self.deferred_actions.actions
-                or action in self.persistent_actions.actions
+                action in self.persistent_actions.actions
                 or action == self.automation.worker_action
             )
             if not retained or key not in self._action_origins:
@@ -83,48 +85,27 @@ class ActionExecutor:
                 }
             try:
                 action_id = self.catalog.get(action["id"])["name"]
-                if action_id == "BuildWorkers":
+                persistent = self.persistent_actions.is_persistent(action)
+                if action_id == "BuildWorkers" and persistent:
                     _, changed = self.automation.replace_worker_override(action)
                     states.append({"action": action, "status": "active", "unchanged": not changed})
                     continue
-                persistent = self.persistent_actions.is_persistent(action)
                 # Check construction and parameters before replacing a valid old task.
                 behaviors = [self.adapter.construct(action, review.arguments[action_index])]
-                if not persistent:
-                    if (
-                        action in self.deferred_actions.actions
-                        and self.deferred_actions.construction_pending(bot, action)
-                    ):
-                        self.deferred_actions.discard(action)
-                        reason = "matching construction already in progress; no additional order submitted"
-                        self.observation_builder.action_history.record(
-                            action, bot.time_formatted, "accepted", reason
-                        )
-                        states.append({"action": action, "status": "accepted", "reason": reason})
-                        continue
-                    resource_status = self.deferred_actions.resource_status(bot, action)
-                    if resource_status == "queued":
-                        self._queue_action(bot, iteration, action)
-                        states.append({"action": action, "status": "queued"})
-                        continue
-                    if resource_status == "blocked":
-                        reason = str(ResourceError.insufficient(action_id))
-                        self.record_feedback(bot, {"kind": "action", "action": action, "error": reason})
-                        self.event(
-                            "action_not_submitted", game_time=float(bot.time),
-                            game_loop=getattr(getattr(bot, "state", None), "game_loop", None), iteration=iteration, action=action, reason=reason
-                        )
-                        continue
-                    self.deferred_actions.discard(action)
+                if (
+                    not persistent and action_id == "BuildStructure"
+                    and not bot.can_afford(review.arguments[action_index]["structure_id"])
+                ):
+                    reason = str(ResourceError.for_cost(bot, review.arguments[action_index]["structure_id"]))
+                    self.record_failure(bot, iteration, action, reason)
+                    states.append({"action": action, "status": "failed", "reason": reason})
+                    continue
                 changed = self.persistent_actions.replace(action)
                 if not changed:
                     states.append({"action": action, "status": "active", "unchanged": True})
                     continue
                 if not persistent:
                     self._register_behaviors(bot, iteration, action, behaviors, False)
-                    self.observation_builder.record_registered_actions(
-                        [action], bot.time_formatted
-                    )
                 states.append({
                     "action": action,
                     "status": "active" if persistent else "accepted",
@@ -149,51 +130,6 @@ class ActionExecutor:
             **fields,
         }
         self.telemetry.event(name, **metadata)
-
-    def _queue_action(self, bot: Any, iteration: int, action: dict[str, Any]) -> None:
-        if not self.deferred_actions.enqueue(action, iteration):
-            return
-        self.observation_builder.action_history.record(
-            action, bot.time_formatted, "queued", "waiting for resources"
-        )
-        self.event(
-            "action_queued", game_time=float(bot.time),
-            game_loop=getattr(getattr(bot, "state", None), "game_loop", None), iteration=iteration, action=action,
-            status="queued", reason="waiting for resources",
-        )
-
-    def run_queued(self, bot: Any, iteration: int, context: Any) -> None:
-        ready, expired = self.deferred_actions.pop_ready(bot, iteration)
-        for action in expired:
-            self.observation_builder.action_history.forget_queued(action)
-            reason = str(ResourceError.insufficient(action["id"], "resource wait expired"))
-            self.record_feedback(bot, {"kind": "action", "action": action, "error": reason})
-            self.event(
-                "action_wait_ended", game_time=float(bot.time),
-                game_loop=getattr(getattr(bot, "state", None), "game_loop", None), iteration=iteration, action=action, reason=reason
-            )
-        for action in ready:
-            try:
-                if self.deferred_actions.construction_pending(bot, action):
-                    self.observation_builder.action_history.record(
-                        action, bot.time_formatted, "accepted",
-                        "matching construction already in progress; no additional order submitted",
-                    )
-                    self.event(
-                        "action_wait_ended", game_time=float(bot.time),
-                        game_loop=getattr(getattr(bot, "state", None), "game_loop", None), iteration=iteration, action=action,
-                        reason="matching construction already in progress",
-                    )
-                    continue
-                surface = self.action_exposure.build(bot, context)
-                review = self.policy.review(bot, [action], context, surface)
-                if review.issues:
-                    for issue in review.issues:
-                        self.record_failure(bot, iteration, action, issue.reason)
-                    continue
-                self.dispatch(bot, iteration, review, context, from_queue=True)
-            except (KeyError, TypeError, ValueError) as exc:
-                self.record_failure(bot, iteration, action, exception_reason(exc))
 
     def run_persistent(self, bot: Any, iteration: int, context: Any) -> None:
         active_keys = {self.action_key(a) for a in self.persistent_actions.actions}
@@ -221,6 +157,57 @@ class ActionExecutor:
                 self.record_failure(bot, iteration, action, exception_reason(exc))
         self.sync_active(bot)
 
+    def _no_order_reason(self, bot: Any, action: dict[str, Any], behavior: Any) -> str | None:
+        """Explain only blockers observable without issuing another command."""
+        name = self.catalog.get(action["id"])["name"]
+        if name == "AMoveGroup" and behavior.group:
+            from sc2.ids.ability_id import AbilityId
+
+            unit = max(behavior.group, key=lambda u: u.position.distance_to(behavior.target.position))
+            if behavior.duplicate_or_similar_order(unit, behavior.target, AbilityId.ATTACK):
+                return None
+        if name == "BuildStructure":
+            structure = behavior.structure_id
+            if not bot.can_afford(structure):
+                return str(ResourceError.for_cost(bot, structure))
+            if behavior.tech_progress_check:
+                progress = bot.tech_requirement_progress(structure)
+                if progress < behavior.tech_progress_check:
+                    from sc2.constants import TERRAN_TECH_REQUIREMENT, PROTOSS_TECH_REQUIREMENT, ZERG_TECH_REQUIREMENT
+                    from sc2.data import Race
+                    requirements = {Race.Terran: TERRAN_TECH_REQUIREMENT, Race.Protoss: PROTOSS_TECH_REQUIREMENT,
+                                    Race.Zerg: ZERG_TECH_REQUIREMENT}
+                    prerequisite = requirements[bot.race].get(structure)
+                    return (
+                        f"prerequisite_unmet: {structure.name} requires "
+                        f"{getattr(prerequisite, 'name', 'prerequisite technology')}; "
+                        f"tech progress={progress:.0%}, required={behavior.tech_progress_check:.0%}"
+                    )
+            on_route = bot.not_started_but_in_building_tracker(structure)
+            if on_route >= behavior.max_on_route:
+                return (f"no_order_issued: {structure.name} already has {on_route} worker(s) on route; "
+                        f"max_on_route={behavior.max_on_route}; check construction progress")
+        if name == "AMove":
+            distance = behavior.unit.position.distance_to(behavior.target.position)
+            if behavior.success_at_distance > 0 and distance < behavior.success_at_distance:
+                return (f"no_order_issued: unit={action['args']['unit']} already near target; "
+                        f"distance={distance:.2f}, success_at_distance={behavior.success_at_distance:g}")
+        if name == "DropCargo" and behavior.unit.cargo_used == 0:
+            return f"no_order_issued: unit={action['args']['unit']} has no cargo to unload"
+        if name in {"UseAbility", "UseAOEAbility", "GroupUseAbility"}:
+            ability = behavior.ability_id if name == "UseAOEAbility" else behavior.ability
+            units = behavior.group if name == "GroupUseAbility" else [behavior.unit]
+            unavailable = [u for u in units if ability not in u.abilities]
+            blocked = (len(unavailable) == len(units) or behavior.sync_command) if name == "GroupUseAbility" else True
+            if unavailable and blocked:
+                return (f"ability_unavailable: {ability.name} is not currently available; "
+                        f"unit(s)={action['args'].get('unit', action['args'].get('group'))}; "
+                        f"energy={[u.energy for u in unavailable]}; check ability readiness and unit state; exact cause unavailable")
+            if name == "UseAOEAbility" and len(behavior.targets) < behavior.min_targets:
+                return (f"target_unavailable: {ability.name} has {len(behavior.targets)} candidate targets; "
+                        f"requires at least {behavior.min_targets}")
+        return "no_order_issued: Ares returned False; exact cause unavailable; check current unit, target and action prerequisites"
+
     def _register_behaviors(
         self, bot: Any, iteration: int, action: dict[str, Any],
         behaviors: list[Any], persistent: bool,
@@ -233,27 +220,30 @@ class ActionExecutor:
             self.record_failure(bot, iteration, action, reason, **origin)
             self.sync_active(bot)
 
-        def executed(result: bool) -> None:
+        def executed(behavior: Any, result: bool) -> None:
             if persistent:
                 return
-            reason = (
-                "Ares started work"
-                if result
-                else "Ares started no new work"
-            )
-            if result:
-                self.observation_builder.action_history.annotate(action, reason)
+            if not result:
+                try:
+                    reason = self._no_order_reason(bot, action, behavior)
+                except (AttributeError, KeyError, TypeError, ValueError) as exc:
+                    reason = f"no_order_issued: Ares returned False; cause unavailable; diagnostic {exception_reason(exc)}"
+                if reason is None:
+                    return
+                self.record_failure(bot, iteration, action, reason, **origin)
+                return
+            reason = "Ares started work"
+            self.observation_builder.record_submitted_actions([action], bot.time_formatted)
+            self.observation_builder.action_history.annotate(action, reason)
             self.event(
                 "action_execution", game_time=float(bot.time),
                 game_loop=getattr(getattr(bot, "state", None), "game_loop", None), iteration=iteration, action=action,
-                status="accepted", started=bool(result), reason=reason, **origin,
+                status="submitted", started=bool(result), reason=reason, **origin,
             )
-            if not result:
-                self.record_feedback(bot, {"kind": "action_notice", "action": action, "error": reason, **origin})
 
         for behavior in behaviors:
             bot.register_behavior(TrackedBehavior(
-                behavior, on_failure=failed, on_result=executed,
+                behavior, on_failure=failed, on_result=lambda result, current=behavior: executed(current, result),
             ))
 
     def sync_active(self, bot: Any) -> None:

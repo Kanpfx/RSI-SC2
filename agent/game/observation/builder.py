@@ -59,11 +59,11 @@ class ObservationBuilder:
         self.technology_builder = ProductionTechnologyBuilder()
         self.action_history = ActionHistory()
 
-    def record_registered_actions(
+    def record_submitted_actions(
         self, actions: list[dict[str, Any]], time: str = "--:--"
     ) -> None:
         for action in actions:
-            self.action_history.record(action, time, "accepted")
+            self.action_history.record(action, time, "submitted")
 
     def sync_active_actions(
         self, actions: list[dict[str, Any]], time: str = "--:--"
@@ -76,7 +76,7 @@ class ObservationBuilder:
         for action in actions:
             self.action_history.record(action, time, "failed", reason)
 
-    def build(self, bot: Any, iteration: int) -> Observation:
+    def build(self, bot: Any, iteration: int, *, history_cycles: int = 1) -> Observation:
         own_units = list(bot.units)
         structures = list(bot.structures)
         enemies = [
@@ -128,7 +128,7 @@ class ObservationBuilder:
             "production_and_technology": self.technology_builder.build(
                 bot, structures
             ),
-            "action_history": self.action_history.render(),
+            "action_history": self.action_history.render(history_cycles),
         }
         return Observation(iteration, counts, observation_text(data), context)
 

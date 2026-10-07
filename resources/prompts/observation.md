@@ -1,9 +1,11 @@
-- `overview`: game time, races, map size, resources, and supply. `workers` and `army` are supply values, not unit counts; `income` is collected minerals/gas per minute before spending.
-- `own_state` and `visible_enemy_state`: one entity per line, `TYPE: ID@(x,y) state key_attributes`. TYPE is a UnitTypeId name; ID selects that entity; coordinates are its observed position rounded to one decimal place.
-- Entity attributes: `hp` and `shield` are percentages; omitted `hp` means full health. `energy` and `cargo` are current amounts. Buildings show construction progress, state, and attachments; battlecruisers show Tactical Jump and Yamato availability. Omitted capability fields do not imply zero.
-- Action arguments: use IDs for Unit and ID arrays for Units. For Point2, use `{x,y}` or a supported landmark (`main`, `natural`, `enemy_main`); `ID@(x,y)` and `@region` are display syntax, not argument syntax.
-- `production_and_technology`: `production` lists UnitTypeId orders, including workers; `research` lists UpgradeId orders. Both use `NAME: progress=[20%, 60%×2]`, meaning one order at 20% and two at 60%. Orders at 0% may be queued or just started. `upgrades` lists completed UpgradeIds. Building construction progress appears under structures.
-- `memory_enemy_state`: `TYPE*N@region last_seen=...s_ago` gives a count, last known region, and elapsed game time since sighting. Region coordinates identify landmarks, not exact entity positions. Memory has no selectable IDs; entities may have moved or disappeared.
-- `action_history`: `active` = ongoing control; `queued` = waiting for resources; `accepted` = accepted one-time submission, not proof of completion; `failed` = parse, validation, request, or execution failure. Entries show `time@...`, the action, and any reason. Informational feedback is attached to the action; starting no new work alone is not failure.
-- History retains events from the previous two decision cycles; active and queued intents remain until they end. Delayed feedback is recorded when it occurs.
-- `[None]` means no entries in that section; `[None visible]` means no currently visible enemies, not no enemies. `?` and `[Unknown]` mean unknown, not zero; unavailable overview statistics are omitted.
+- `overview`: time, races, map, resources, supply. `workers`/`army` = supply used; `income` = minerals/gas collected per minute before spending.
+- Entities: `TYPE: ID@(x,y) state attributes`. TYPE = UnitTypeId; ID = selectable entity; coordinates = observed position.
+- Attributes: `hp`/`shield` = percentages; omitted `hp` = full health. `energy`/`cargo` = current amounts. Buildings include progress and attachments; Battlecruisers include Jump/Yamato readiness.
+- Arguments: Unit = ID; Units = ID array; Point2 = `{x,y}` or listed landmark. `ID@(x,y)`/`@region` are display syntax.
+- Production/research: `NAME: progress=[20%,60%×2]` = one order at 20%, two at 60%; 0% may be queued. `upgrades` = completed research; construction progress is under structures.
+- Enemy memory: `TYPE*N@region last_seen=Ns_ago` = count, last known region, age. No selectable IDs; positions may be outdated.
+- `active`: persistent control for this cycle; resubmit each decision to continue. Waiting for resources/cooldown is not failure.
+- `submitted`: one-time order issued; task completion must be checked in observation.
+- `failed`: action rejected or order not issued; use the reported reason to correct it.
+- History: `time@...` = event time; excutor sees the last execution cycle, planner sees the last four. Old active controls disappear when the next action decision arrives.
+- `[None]` = empty; `[None visible]` = no enemies currently visible. `?`/`[Unknown]`/omitted capability fields = unknown, not zero.

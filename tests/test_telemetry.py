@@ -24,7 +24,7 @@ class SystemTelemetryTests(unittest.IsolatedAsyncioTestCase):
             messages = [{"role": "user", "content": "original input"}]
             client = LLMClient(LLMConfig(model="test", base_url="https://example.invalid", api_key="secret"))
 
-            def complete_sync(messages, *, trace, iteration, attempt, request_started):
+            def complete_sync(messages, *, trace, iteration, attempt, request_started, phase):
                 reply = next(replies)
                 if isinstance(reply, Exception):
                     raise reply
@@ -32,13 +32,15 @@ class SystemTelemetryTests(unittest.IsolatedAsyncioTestCase):
                 return reply
 
             with patch.object(client, "_complete_sync", side_effect=complete_sync):
+                working = await client.complete(messages, phase='planner', trace=trace.request_trace(4, 'planner'), iteration=4)
+                trace.working_memory(working, request_iteration=4)
+                trace.observation(iteration=5, game_loop=80, game_time=3.5, observation='OBS')
                 await ModelAgent(client).run(
-                    messages, trace=trace, iteration=4,
-                    build_excutor_messages=lambda working: [
+                    [
                         {"role": "system", "content": "system"},
                         {"role": "user", "content": working + "\nactions input"},
                     ],
-                    on_working=lambda text: trace.working_memory(text, request_iteration=4),
+                    trace=trace, iteration=5, working=working,
                 )
             system = root
             model = [json.loads(line) for line in (system / "model.jsonl").read_text().splitlines()]
@@ -52,7 +54,7 @@ class SystemTelemetryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len({row["attempt_id"] for row in attempts}), 3)
             for row in model + events:
                 self.assertEqual(row["run_id"], trace.run_id)
-                self.assertEqual(row["decision_id"], "d4")
+                self.assertEqual(row["decision_id"], 'd5' if row.get('request_phase') == 'excutor' else 'd4')
                 self.assertEqual(row["observation_game_loop"], 80)
                 self.assertEqual(row["observation_game_time"], 3.5)
             metadata = json.loads((system / "metadata.json").read_text())

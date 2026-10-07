@@ -161,9 +161,23 @@ def validate_resolved(entry: dict[str, Any], args: dict[str, Any], context: Enti
         if u.tag not in own_tags:
             raise ParameterError.invalid_value(actor_param, context.observation_id(u.tag), 'an own actor')
         if allowed and u.type_id.name not in allowed:
-            raise ParameterError.invalid_value(actor_param, u.type_id.name, str(sorted(allowed)))
+            raise ParameterError.invalid_value(actor_param, f"{context.observation_id(u.tag)} ({u.type_id.name})",
+                                               f"an actor of type {sorted(allowed)} for {entry['name']}")
         if not actor_supported(entry, u, ready=ready):
-            raise ActionSurfaceError('actor cannot execute', f"unit {context.observation_id(u.tag)}: {entry['name']}")
+            reason = "actor does not meet this action's capability or readiness requirements"
+            if entry['name'] in CAST_ABILITIES:
+                reason = f"ability {CAST_ABILITIES[entry['name']]} unavailable; energy={getattr(u, 'energy', 'unknown')}"
+            elif entry['name'] == 'NydusPathUnitToTarget' and getattr(u, 'is_flying', False):
+                reason = "Nydus travel requires a ground unit"
+            elif entry['name'] in MOVING_ACTIONS and (
+                (getattr(u, 'is_structure', False) and not getattr(u, 'is_flying', False))
+                or getattr(u, 'movement_speed', 1) == 0
+            ):
+                reason = "action requires a mobile unit; actor cannot move in its current state"
+            elif entry['name'] in ATTACK_ACTIONS and getattr(u, 'can_attack', True) is False:
+                reason = "action requires an attacking unit; actor cannot attack"
+            raise ActionSurfaceError('actor cannot execute',
+                                     f"unit {context.observation_id(u.tag)} ({u.type_id.name}): {entry['name']}; {reason}")
         if str(u.tag) in actor_tags:
             raise ParameterError.invalid_value(actor_param, context.observation_id(u.tag), 'distinct actor IDs')
         actor_tags.add(str(u.tag))
@@ -182,7 +196,11 @@ def validate_resolved(entry: dict[str, Any], args: dict[str, Any], context: Enti
             readiness = [ability_ready(u, ability.name) for u in units]
             synchronized = args.get('sync_command', True)
             if (synchronized and not all(readiness)) or (not synchronized and not any(readiness)):
-                raise ActionSurfaceError('ability currently unavailable', ability.name)
+                unavailable = [f"{context.observation_id(u.tag)} ({u.type_id.name}, energy={getattr(u, 'energy', 'unknown')})"
+                               for u, available in zip(units, readiness) if not available]
+                raise ActionSurfaceError('ability currently unavailable',
+                                         f"ability_unavailable: {ability.name} unavailable for unit(s) {', '.join(unavailable)}; "
+                                         "check ability readiness and unit state; exact cause unavailable")
     target = args.get('target')
     if entry['name'] in ATTACK_ACTIONS and hasattr(target, 'tag'):
         capability = 'can_attack_air' if getattr(target, 'is_flying', False) else 'can_attack_ground'

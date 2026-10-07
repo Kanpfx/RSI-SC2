@@ -62,9 +62,9 @@ class OutputFormatError(ActionError):
     def dsl_section(cls, name: str, count: int) -> "OutputFormatError":
         return cls(
             "invalid DSL output",
-            f"exactly one '# {name}' section is required; found {count}",
+            f"a '# {name}' section is required; found {count}",
             parameter=name,
-            expected="one heading section",
+            expected="a heading section; use the first occurrence",
             actual=count,
         )
 
@@ -107,7 +107,7 @@ class ActionNameError(InstructionError):
     def disabled(cls, value: Any) -> "ActionNameError":
         return cls(
             "unavailable action",
-            f"'{value}' is not currently listed in `<available_actions>`",
+            f"'{value}' is disabled; select an action from `<available_actions>`",
             actual=value,
         )
 
@@ -177,10 +177,13 @@ class ConflictError(InstructionError):
     category = "action_conflict"
 
     @classmethod
-    def unit_reused(cls, unit_id: Any) -> "ConflictError":
+    def unit_reused(cls, unit_id: Any, previous_action: str | None = None,
+                    previous_index: int | None = None) -> "ConflictError":
         return cls(
             "unit assigned more than once",
-            f"unit '{unit_id}' already has a higher-priority action in this decision",
+            f"unit '{unit_id}' already assigned to "
+            + (f"Action {previous_index}: {previous_action}" if previous_action else "another action in this decision")
+            + "; assign each unit to one control action",
             actual=unit_id,
         )
 
@@ -189,11 +192,24 @@ class ResourceError(InstructionError):
     category = "resource_insufficient"
 
     @classmethod
-    def insufficient(cls, action: Any, reason: str = "resource shortfall exceeds queue tolerance") -> "ResourceError":
+    def insufficient(cls, action: Any, reason: str = "insufficient resources; no order submitted") -> "ResourceError":
         return cls(
             "insufficient resources",
             reason,
             actual=action,
+        )
+
+    @classmethod
+    def for_cost(cls, bot: Any, target: Any) -> "ResourceError":
+        cost = bot.calculate_cost(target)
+        required = (int(cost.minerals), int(cost.vespene))
+        available = (int(bot.minerals), int(bot.vespene))
+        missing = tuple(max(0, need - have) for need, have in zip(required, available))
+        return cls.insufficient(
+            getattr(target, "name", str(target)),
+            f"{getattr(target, 'name', str(target))} requires {required[0]} minerals, {required[1]} gas; "
+            f"available {available[0]} minerals, {available[1]} gas; "
+            f"missing {missing[0]} minerals, {missing[1]} gas; resubmit when affordable",
         )
 
 

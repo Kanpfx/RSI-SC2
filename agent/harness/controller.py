@@ -26,7 +26,7 @@ from agent.logger.recorder import Telemetry
 
 
 class LLMGameController:
-    """Keep one request in flight while automation and accepted controls run."""
+    """Schedule planner and excutor independently at game-frame boundaries."""
 
     def __init__(
         self,
@@ -52,7 +52,8 @@ class LLMGameController:
                 "planner_max_tokens": self.llm_config.planner_max_tokens,
                 "excutor_temperature": self.llm_config.excutor_temperature,
                 "excutor_max_tokens": self.llm_config.excutor_max_tokens,
-                "action_interval_seconds": self.game_config.model_interval_seconds,
+                "excutor_interval_iterations": self.game_config.excutor_interval_iterations,
+                "planner_interval_iterations": self.game_config.planner_interval_iterations,
                 "tactic": tactic_name,
                 **(run_metadata or {}),
             },
@@ -67,10 +68,13 @@ class LLMGameController:
             "automation": ["mining", "supply", "depot_lowering", "requested_workers", "worker_scouting"],
         })
         self._pending: asyncio.Task[ModelResult] | None = None
-        self._excutor_context: asyncio.Future[tuple[str, list[dict[str, Any]]]] | None = None
+        self._planner_pending: asyncio.Task[str] | None = None
+        self._planner_iteration = -1
+        self._planner_time = "--:--"
         self._request_iteration = -1
         self._request_time = 0.0
-        self._next_model_time = 0.0
+        self._next_excutor_iteration = 0
+        self._next_planner_iteration = 0
         self._feedback: list[dict[str, Any]] = []
         self._closed = False
         self.executor = ActionExecutor(
@@ -88,16 +92,23 @@ class LLMGameController:
     async def close(self) -> None:
         """Discard unfinished replies when the match ends."""
         self._closed = True
-        task, self._pending = self._pending, None
-        if task is not None:
+        tasks = [task for task in (self._pending, self._planner_pending) if task is not None]
+        self._pending = self._planner_pending = None
+        for task in tasks:
             task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     async def run_iteration(self, bot: Any, iteration: int) -> None:
         if self._closed:
             return
         await self.automation.run(bot, iteration)
         try:
+            if self._planner_pending is not None and self._planner_pending.done():
+                task, self._planner_pending = self._planner_pending, None
+                try:
+                    self._save_working(task.result(), self._planner_iteration, self._planner_time)
+                except Exception as exc:
+                    self.executor.record_failure(bot, iteration, "Planner request", exception_reason(exc), stage="system")
             applied = self._pending is not None and self._pending.done()
             if applied:
                 try:
@@ -109,60 +120,55 @@ class LLMGameController:
                 self.executor.record_failure(bot, iteration, action, "entity_missing: controlled unit no longer exists")
             self.executor.sync_active(bot)
             self.executor.run_persistent(bot, iteration, context)
-            self.executor.run_queued(bot, iteration, context)
-            if self._excutor_context is not None and not self._excutor_context.done():
-                observation = self.observation_builder.build(bot, iteration)
-                surface = self.action_exposure.build(bot, observation.context)
-                self.telemetry.observation(
-                    iteration=iteration, request_iteration=self._request_iteration,
-                    phase="excutor", time=bot.time_formatted, observation=observation.text,
-                    game_time=float(bot.time),
-                    game_loop=getattr(getattr(bot, "state", None), "game_loop", None),
-                )
-                self._excutor_context.set_result((observation.text, surface.entries))
-            if (
-                self.active
-                and not applied
-                and self._pending is None
-                and float(bot.time) >= self._next_model_time
-            ):
-                self._start_request(bot, iteration)
+            if self.active:
+                if iteration >= self._next_planner_iteration:
+                    interval = self.game_config.planner_interval_iterations
+                    self._next_planner_iteration = (iteration // interval + 1) * interval
+                    if self._planner_pending is None:
+                        self._start_planner(bot, iteration)
+                if iteration >= self._next_excutor_iteration:
+                    interval = self.game_config.excutor_interval_iterations
+                    self._next_excutor_iteration = (iteration // interval + 1) * interval
+                    if not applied and self._pending is None and self.context_builder.working:
+                        self._start_request(bot, iteration)
         finally:
             self.automation.register_worker_production(bot)
 
-    def _start_request(self, bot: Any, iteration: int) -> None:
-        self.observation_builder.action_history.begin_decision()
-        observation = self.observation_builder.build(bot, iteration)
+    def _start_planner(self, bot: Any, iteration: int) -> None:
+        observation = self.observation_builder.build(bot, iteration, history_cycles=4)
         surface = self.action_exposure.build(bot, observation.context)
         self.telemetry.observation(
-            iteration=iteration, time=bot.time_formatted, observation=observation.text,
+            iteration=iteration, phase="planner", time=bot.time_formatted, observation=observation.text,
+            game_time=float(bot.time), game_loop=getattr(getattr(bot, "state", None), "game_loop", None)
+        )
+        self._planner_iteration = iteration
+        self._planner_time = bot.time_formatted
+        messages = self.context_builder.build_planner_messages(observation.text, surface.entries)
+        self._planner_pending = asyncio.create_task(self.client.complete(
+            messages, phase="planner", trace=self.telemetry.request_trace(iteration, "planner"), iteration=iteration,
+        ))
+
+    def _start_request(self, bot: Any, iteration: int) -> None:
+        observation = self.observation_builder.build(bot, iteration, history_cycles=1)
+        surface = self.action_exposure.build(bot, observation.context)
+        self.telemetry.observation(
+            iteration=iteration, phase="excutor", time=bot.time_formatted, observation=observation.text,
             game_time=float(bot.time), game_loop=getattr(getattr(bot, "state", None), "game_loop", None)
         )
         self._feedback = []
         self._request_iteration = iteration
         self._request_time = float(bot.time)
-        self._next_model_time = self._request_time + self.game_config.model_interval_seconds
         # Pass detached prompt data only; the task must never access the live bot.
-        messages = self.context_builder.build_planner_messages(observation.text, surface.entries)
-        decision_time = bot.time_formatted
+        working = self.context_builder.working
+        messages = self.context_builder.build_excutor_messages(
+            working, observation=observation.text, action_entries=surface.entries,
+            max_actions=self.game_config.max_actions_per_decision,
+        )
         self._pending = asyncio.create_task(
             self.model_agent.run(
                 messages, trace=self.telemetry, iteration=iteration,
-                build_excutor_messages=self._build_excutor_messages,
-                on_working=lambda working: self._save_working(working, iteration, decision_time),
+                working=working,
             )
-        )
-
-    async def _build_excutor_messages(self, working: str) -> list[dict[str, str]]:
-        # The game loop supplies a fresh, detached snapshot on the next frame.
-        self._excutor_context = asyncio.get_running_loop().create_future()
-        try:
-            observation, action_entries = await self._excutor_context
-        finally:
-            self._excutor_context = None
-        return self.context_builder.build_excutor_messages(
-            working, observation=observation, action_entries=action_entries,
-            max_actions=self.game_config.max_actions_per_decision,
         )
 
     def _save_working(self, working: str, iteration: int, time: str) -> None:
@@ -176,6 +182,9 @@ class LLMGameController:
         except Exception as exc:
             self.executor.record_failure(bot, iteration, "Model request", exception_reason(exc), stage="system")
             return
+
+        self.observation_builder.action_history.begin_decision()
+        self.executor.begin_decision(bot)
 
         # Resolve aliases and availability against this frame, not the request frame.
         context = self.observation_builder.execution_context(bot)
@@ -267,15 +276,14 @@ class LLMGameController:
             active_actions=self.executor.persistent_actions.actions + (
                 [self.automation.worker_action] if self.automation.worker_action else []
             ),
-            queued_actions=self.executor.deferred_actions.actions,
+            queued_actions=[],
             validation_feedback=feedback,
             latency_ms=result.latency_ms,
         )
         header = (
             f"[model iteration={self._request_iteration} applied={iteration}] "
             f"t={bot.time_formatted} model={result.latency_ms / 1000:.2f}s "
-            f"active={len(self.executor.persistent_actions.actions) + int(self.automation.worker_action is not None)} "
-            f"queued={len(self.executor.deferred_actions.actions)}"
+            f"active={len(self.executor.persistent_actions.actions) + int(self.automation.worker_action is not None)}"
         )
         await self._chat_model_decision(bot, header, actions)
         lines = format_indexed_actions(actions) if actions else ["No new action submissions."]

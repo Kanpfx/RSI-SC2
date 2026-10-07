@@ -14,6 +14,7 @@
 | `description` | 简洁英文描述，以实际执行语义为准 |
 | `import` | Ares 类的完整导入路径 |
 | `enabled` | 是否向模型展示并允许模型调用 |
+| `persistent` | `true` 表示从本轮决策收到后持续执行，到下一轮决策收到时撤销；`false` 表示只尝试提交一次。包含自动化接管的 `BuildWorkers` |
 | `params` | 完整构造参数列表，模型必填参数排在前面 |
 
 不设置额外的 `id`、`actors` 或 `choices`。每个参数固定包含以下 6 个字段，不省略；不适用的值填 `null`：

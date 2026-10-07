@@ -27,10 +27,8 @@ class AutomationController:
 
     def replace_worker_override(self, action: dict[str, Any] | None) -> tuple[dict[str, Any] | None, bool]:
         previous = self._worker_override
-        if action is None:
-            return previous, False
         self._worker_override = action
-        self.worker_target = int(action["args"]["to_count"])
+        self.worker_target = int(action["args"]["to_count"]) if action is not None else None
         return previous, previous != action
 
     @property

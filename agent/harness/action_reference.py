@@ -6,7 +6,6 @@ from html import escape
 from textwrap import indent
 from typing import Any
 
-from agent.game.actions.execution.lifecycle import PERSISTENT_ACTION_IDS
 from agent.paths import PROMPTS_ROOT
 
 
@@ -23,8 +22,8 @@ def _section(tag: str, content: str, **attributes: str) -> str:
 def _action_card(entry: dict[str, Any]) -> str:
     params = [p for p in entry['params'] if p['source'] == 'model']
     arguments = [f"{p['name']}: {p['type']}" + ("" if p['required'] else " = null") for p in params]
-    ongoing = entry['name'] in PERSISTENT_ACTION_IDS or entry['name'] == 'BuildWorkers'
-    lifetime = ' [Persistent action]' if ongoing else ''
+    ongoing = entry['persistent']
+    lifetime = ' [Persistent]' if ongoing else ''
     return f"- `{entry['name']}({', '.join(arguments)})`:{lifetime} {entry['description']}"
 
 
@@ -41,7 +40,7 @@ def _actions_reference(entries: list[dict[str, Any]]) -> str:
 def _action_capabilities(entries: list[dict[str, Any]]) -> str:
     cards = []
     for entry in entries:
-        persistent = entry['name'] in PERSISTENT_ACTION_IDS or entry['name'] == 'BuildWorkers'
+        persistent = entry['persistent']
         marker = ' [Persistent]' if persistent else ''
         cards.append(f"- {entry['name']}:{marker} {entry['description']}")
     return _section("action_capabilities", '\n'.join(cards))

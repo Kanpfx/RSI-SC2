@@ -322,7 +322,7 @@
       ].map(rowIteration).filter(Number.isFinite))].sort((a, b) => a - b);
       if (!state.iterations.length) throw new Error("日志中没有可浏览的 iteration。");
       indexes = {
-        observation: byIteration(state.observations),
+        observation: groupByIteration(state.observations),
         decision: byIteration(state.decisions),
         model: groupByIteration(state.model),
         event: groupByIteration(state.events),
@@ -366,10 +366,13 @@
       const metrics = [
         [meta.map_name || "未知地图", "地图"],
         [opponent, "对手"],
-        [meta.model || "未知模型", "模型"],
+        [[meta.model, meta.planner_reasoning_effort].filter(Boolean).join(" · ") || "未知模型", "模型 / Planner 思考"],
         [meta.result || "未完整结束", "结果"],
         [meta.tactic || "未知战术", "战术"],
       ];
+      if (meta.excutor_interval_iterations != null) metrics.push([
+        `E ${meta.excutor_interval_iterations} / P ${meta.planner_interval_iterations}`, "调用间隔 · iteration",
+      ]);
       $("summary").replaceChildren(...metrics.map(([value, label]) => {
         const metric = Object.assign(document.createElement("div"), { className: "metric" });
         metric.append(text(document.createElement("b"), value), text(document.createElement("span"), label));
@@ -381,7 +384,8 @@
       const position = Number($("tick-slider").value);
       const iteration = state.iterations[position];
       const decision = indexes.decision.get(iteration);
-      const observation = indexes.observation.get(iteration);
+      const observations = indexes.observation.get(iteration) || [];
+      const observation = observations.at(-1);
       $("tick-label").textContent = `iteration ${iteration}`;
       $("status").textContent = `${position + 1} / ${state.iterations.length} · ${decision?.time || observation?.time || "--:--"}`;
       $("previous").disabled = position === 0;
@@ -391,7 +395,7 @@
       renderActions(decision, iteration);
       renderEvents(iteration);
       renderRawInputs(iteration);
-      renderObservation(observation);
+      renderObservation(observations);
 
     }
 
@@ -421,7 +425,7 @@
       const planning = rounds.find(round => ["planner", "working"].includes(round.request.request_phase));
       const execution = rounds.find(round => ["excutor", "actions"].includes(round.request.request_phase));
       return {
-        rows, rounds, planning,
+        rows, rounds, planning, execution,
         request: execution?.request || planning?.request || {},
         response: execution?.response || {},
         parsed: last("parsed") || {}, validation: last("validated") || {},
@@ -454,19 +458,26 @@
     }
 
     function renderModel(iteration) {
-      const { planning } = modelRecords(iteration);
+      let { planning, parsed } = modelRecords(iteration);
+      if (!planning) {
+        const response = state.model.filter(row => row.stage === "response"
+          && ["planner", "working"].includes(row.request_phase) && rowIteration(row) <= iteration
+          && (!parsed.working || row.reply === parsed.working)).at(-1);
+        if (response) planning = { response, request: state.model.find(row => row.stage === "request" && row.request_id === response.request_id) || {} };
+      }
       const response = planning?.response || {};
+      const label = planning ? `Planner · iteration ${rowIteration(planning.request)}` : "本轮没有 Planner 请求";
       replacePanel("reasoning-panel", [pre(planning?.response?.stage
-        ? plannerReasoning(response) : "尚未收到 Planner 回复")]);
-      replacePanel("model-panel", [roundStats(response), pre(response.reply ?? "尚未收到第一轮回复")]);
+        ? plannerReasoning(response) : (planning ? "尚未收到 Planner 回复" : label))]);
+      replacePanel("model-panel", [line("规划记录", label), roundStats(response), pre(response.reply ?? (planning ? "尚未收到 Planner 回复" : label))]);
     }
 
     function renderValidation(iteration) {
-      const { response, parsed, validation } = modelRecords(iteration);
+      const { execution, response, parsed, validation } = modelRecords(iteration);
       const errors = parsed.parse_report?.errors || parsed.validation_feedback || [];
       const checks = validation.validation_report || [];
       const rejected = checks.filter(row => row.status === "rejected");
-      const nodes = [roundStats(response), pre(response.reply ?? "尚未收到 Excutor 回复")];
+      const nodes = [roundStats(response), pre(response.reply ?? (execution ? "尚未收到 Excutor 回复" : "本轮没有 Excutor 请求"))];
       if (parsed.stage) nodes.push(line("解析 / 校验", `${parsed.actions?.length ?? 0} 条动作 · ${errors.length} 条解析错误 · ${rejected.length} 条校验拒绝`));
       const details = [...errors.map(item => ({ action: item.submitted_action ?? item.submitted_output, reason: item.error })),
         ...rejected.map(item => ({ action: item.submitted_action ?? item.parsed_index, reason: item.reason })),
@@ -480,8 +491,9 @@
       row.event?.startsWith("action_") && !["parse", "validation", "system"].includes(row.stage));
 
     function decisionOutcome(iteration, decision) {
-      const { response, parsed, validation, failure } = modelRecords(iteration);
+      const { planning, execution, response, parsed, validation, failure } = modelRecords(iteration);
       if (failure) return "\u8bf7\u6c42\u5931\u8d25";
+      if (planning && !execution && !decision) return planning.response?.stage ? "本轮仅更新规划" : "等待 Planner 回复";
       if (response.reply === "") return "\u6a21\u578b\u8f93\u51fa\u4e3a\u7a7a";
       if (!parsed.stage && !parsed.actions) return "\u7b49\u5f85\u54cd\u5e94\u6216\u89e3\u6790";
       if (!parsed.actions?.length) return parsed.parse_report?.errors?.length
@@ -497,7 +509,7 @@
 
     function actionItem(action, status, reason, unchanged = false) {
       const row = Object.assign(document.createElement("div"), { className: "action-item" });
-      const labels = { active: "持续控制", accepted: "已接受", queued: "等待资源", failed: "失败", notice: "提示" };
+      const labels = { active: "持续控制", submitted: "已下达", accepted: "已接受待执行", queued: "等待资源", failed: "失败", notice: "提示" };
       const badge = Object.assign(document.createElement("span"), { className: `action-status ${status || ""}` });
       text(badge, unchanged ? "未变更" : (labels[status] || status || "记录"));
       const content = document.createElement("div");
@@ -526,23 +538,23 @@
       else nodes.push(noData("本轮没有新的动作处理记录。"));
       if (events.length) {
         const followup = document.createElement("details");
-        followup.append(text(document.createElement("summary"), `后续执行与队列（${events.length}）`));
+        followup.append(text(document.createElement("summary"), `后续执行（${events.length}）`));
         const content = document.createElement("div");
         content.append(...events.map(row => actionItem(row.action, row.status || (row.event === "action_failed" ? "failed" : "notice"),
           [row.game_time == null ? null : `游戏时间 ${row.game_time}s`, row.reason || row.error || row.event].filter(Boolean).join(" · "))));
         followup.append(content);
         nodes.push(followup);
       }
-      if (decision?.active_actions?.length || decision?.queued_actions?.length) nodes.push(fold("应用时的持续控制与等待队列",
-        formatFields({ active: decision.active_actions || [], queued: decision.queued_actions || [] })));
+      if (decision?.active_actions?.length || decision?.queued_actions?.length) nodes.push(fold("应用时的持续控制",
+        formatFields({ active: decision.active_actions || [], ...(decision.queued_actions?.length ? { queued: decision.queued_actions } : {}) })));
       if (decision || events.length) nodes.push(fold("原始动作记录", JSON.stringify({ decision, events }, null, 2)));
       replacePanel("action-panel", nodes);
     }
 
-    function renderObservation(observation) {
-      replacePanel("observation-panel", [observation
-        ? pre(observation.observation || "[None]")
-        : noData("本轮没有观测记录。")]);
+    function renderObservation(observations) {
+      replacePanel("observation-panel", observations.length ? observations.map(observation =>
+        fold(`${observation.phase === "planner" ? "Planner" : observation.phase === "excutor" ? "Excutor" : "观测"} · ${observation.time || "--:--"}`, observation.observation || "[None]"))
+        : [noData("本轮没有观测记录。")]);
     }
 
     function renderEvents(iteration) {
@@ -582,8 +594,8 @@
 
     function renderRawInputs(iteration) {
       const { rounds } = modelRecords(iteration);
-      const nodes = rounds.map(({ request }, index) => fold(
-        `第 ${index + 1} 轮 · ${["planner", "working"].includes(request.request_phase) ? "Planner" : "Excutor"}`,
+      const nodes = rounds.map(({ request }) => fold(
+        `${["planner", "working"].includes(request.request_phase) ? "Planner" : "Excutor"} · iteration ${iteration}`,
         formatRequest(request.request_body?.messages || request.request || "没有请求消息。")
       ));
       replacePanel("raw-model-panel", nodes.length ? nodes : [noData("没有请求记录。")]);

@@ -116,17 +116,19 @@ class EntityContext:
         except ResolveError:
             return False
 
-    def resolve_entity(self, alias: Any, *, own_only: bool = False) -> Any:
+    def resolve_entity(self, alias: Any, *, own_only: bool = False, parameter: str = "unit") -> Any:
         source = self.own_entities if own_only else self.entities
         canonical = self.canonical_entity_alias(alias)
         try:
             return source[canonical]
         except KeyError as exc:
-            reason = "unit disappeared" if canonical in self.known_own_aliases else (
+            reason = "unit disappeared" if canonical in self.known_own_aliases and canonical not in self.entities else (
                 "unit ownership mismatch" if canonical in self.entities else "unknown or unavailable unit ID"
             )
             category = "action_unavailable" if canonical in self.entities else "entity_missing"
-            raise ResolveError(reason, f"unit {canonical}: {reason}", parameter="unit", actual=canonical, category=category) from exc
+            hint = "select a current own unit" if own_only or canonical in self.known_own_aliases else "select a current own or visible enemy unit"
+            raise ResolveError(reason, f"unit {canonical}: {reason}; parameter '{parameter}'; {hint}",
+                               parameter=parameter, actual=canonical, category=category) from exc
 
     def resolve_point(self, value: Any) -> Any:
         if isinstance(value, (list, tuple)) and len(value) == 2:

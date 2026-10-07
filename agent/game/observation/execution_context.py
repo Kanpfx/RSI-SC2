@@ -55,6 +55,8 @@ class ExecutionContextBuilder:
             "main": getattr(bot, "start_location", None),
             "natural": safe_mediator(bot, "get_own_nat"),
             "enemy_main": (getattr(bot, "enemy_start_locations", []) or [None])[0],
+            "enemy_natural": safe_mediator(bot, "get_enemy_nat"),
+            "enemy_natural": safe_mediator(bot, "get_enemy_nat"),
         }
         context.positions.update(
             {name: point for name, point in candidates.items() if point is not None}

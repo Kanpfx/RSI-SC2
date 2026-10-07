@@ -49,6 +49,8 @@ class ActionCatalog:
     def _validate_entry(self, entry):
         if type(entry.get("enabled")) is not bool:
             raise ValueError(f"{entry['name']}: enabled must be boolean")
+        if type(entry.get("persistent")) is not bool:
+            raise ValueError(f"{entry['name']}: persistent must be boolean")
         if not entry["import"].startswith("ares.behaviors."):
             raise ValueError(f"{entry['name']}: invalid behavior import")
         names = set()

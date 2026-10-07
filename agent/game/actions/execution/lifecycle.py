@@ -9,34 +9,8 @@ from typing import Any
 
 from agent.game.actions.resolution.loader import ActionCatalog
 
-PERSISTENT_ACTION_IDS = {
-    "KeepUnitSafe",
-    "MedivacHeal",
-    "MoveToSafeTarget",
-    "PathUnitToTarget",
-    "PickUpAndDropCargo",
-    "PickUpCargo",
-    "ReaperGrenade",
-    "ShootAndMoveToTarget",
-    "SiegeTankDecision",
-    "StutterUnitBack",
-    "StutterUnitForward",
-    "WorkerKiteBack",
-    "KeepGroupSafe",
-    "PathGroupToTarget",
-    "StutterGroupBack",
-    "StutterGroupForward",
-    "ExpansionController",
-    "GasBuildingController",
-    "ProductionController",
-    "SpawnController",
-    "UpgradeCCs",
-    "UpgradeController",
-}
-
-
 class PersistentActionRegistry:
-    """Store global macro targets and per-unit tasks without a renewal deadline."""
+    """Store controls until the next model decision is received."""
 
     def __init__(self, catalog: ActionCatalog):
         self.catalog = catalog
@@ -62,7 +36,10 @@ class PersistentActionRegistry:
         return set(args.get("group", []))
 
     def is_persistent(self, action: dict[str, Any]) -> bool:
-        return self.catalog.get(action["id"])["name"] in PERSISTENT_ACTION_IDS
+        return self.catalog.get(action["id"])["persistent"]
+
+    def clear(self) -> None:
+        self._items.clear()
 
     @property
     def actions(self) -> list[dict[str, Any]]:

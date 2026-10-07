@@ -17,10 +17,9 @@ def _heading_content(text: str, heading: str) -> tuple[str, int]:
         rf"^[ \t]*#[ \t]+{heading}[ \t]*$",
         re.IGNORECASE | re.MULTILINE,
     )
-    matches = list(pattern.finditer(text))
-    if len(matches) != 1:
-        raise OutputFormatError.dsl_section(heading, len(matches))
-    match = matches[0]
+    match = pattern.search(text)
+    if match is None:
+        raise OutputFormatError.dsl_section(heading, 0)
     content = text[match.end() :]
     next_heading = re.search(r"^[ \t]*#+[ \t]+", content, re.MULTILINE)
     if next_heading:

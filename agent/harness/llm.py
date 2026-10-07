@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable
+from typing import Any
 from time import perf_counter
 from urllib import request
 from urllib.error import HTTPError
@@ -156,13 +156,8 @@ class ModelAgent:
         self.client = client
 
     async def run(self, messages: list[dict[str, str]], *, trace: Telemetry,
-                  iteration: int, build_excutor_messages: Callable[[str], Awaitable[list[dict[str, str]]]],
-                  on_working: Callable[[str], None]) -> ModelResult:
+                  iteration: int, working: str) -> ModelResult:
         started = perf_counter()
-        planner_trace = trace.request_trace(iteration, "planner")
-        working = await self.client.complete(messages, phase="planner", trace=planner_trace, iteration=iteration)
-        on_working(working)
-        messages = await build_excutor_messages(working)
         excutor_trace = trace.request_trace(iteration, "excutor")
         reply = await self.client.complete(messages, phase="excutor", trace=excutor_trace, iteration=iteration)
         received = perf_counter()

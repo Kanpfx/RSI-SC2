@@ -3,9 +3,10 @@
   "actions": [
     {
       "name": "AddonSwap",
-      "description": "Move a structure to a matching addon, relocating its current owner if needed.",
+      "description": "Move the selected structure onto an existing matching addon, relocating its owner if needed.",
       "import": "ares.behaviors.macro.addon_swap.AddonSwap",
       "enabled": false,
+      "persistent": false,
       "params": [
         {
           "name": "structure_needing_addon",
@@ -35,9 +36,10 @@
     },
     {
       "name": "AutoSupply",
-      "description": "Automatically add supply when needed.",
+      "description": "Automatically build supply near the reference base when needed.",
       "import": "ares.behaviors.macro.auto_supply.AutoSupply",
       "enabled": false,
+      "persistent": true,
       "params": [
         {
           "name": "base_location",
@@ -67,9 +69,10 @@
     },
     {
       "name": "BuildStructure",
-      "description": "Build a structure using automatic worker and placement selection.",
+      "description": "Build one structure near the reference base, automatically selecting a worker and placement.",
       "import": "ares.behaviors.macro.build_structure.BuildStructure",
       "enabled": true,
+      "persistent": false,
       "params": [
         {
           "name": "base_location",
@@ -219,9 +222,10 @@
     },
     {
       "name": "BuildWorkers",
-      "description": "Train workers toward a target count.",
+      "description": "Train workers until the target total count is reached.",
       "import": "ares.behaviors.macro.build_workers.BuildWorkers",
       "enabled": true,
+      "persistent": true,
       "params": [
         {
           "name": "to_count",
@@ -235,9 +239,10 @@
     },
     {
       "name": "ExpansionController",
-      "description": "Expand toward a target base count using automatic site selection.",
+      "description": "Build bases until the target total count is reached, automatically selecting safe expansion sites.",
       "import": "ares.behaviors.macro.expansion_controller.ExpansionController",
       "enabled": true,
+      "persistent": true,
       "params": [
         {
           "name": "to_count",
@@ -283,9 +288,10 @@
     },
     {
       "name": "GasBuildingController",
-      "description": "Build gas structures toward a target count.",
+      "description": "Build gas structures until the target total count is reached, automatically selecting geysers near bases.",
       "import": "ares.behaviors.macro.gas_building_controller.GasBuildingController",
       "enabled": true,
+      "persistent": true,
       "params": [
         {
           "name": "to_count",
@@ -315,9 +321,10 @@
     },
     {
       "name": "Mining",
-      "description": "Automatically assign and control mining workers.",
+      "description": "Automatically assign workers to minerals and gas, manage mining, and handle danger and self-defence.",
       "import": "ares.behaviors.macro.mining.Mining",
       "enabled": false,
+      "persistent": true,
       "params": [
         {
           "name": "flee_at_health_perc",
@@ -403,9 +410,10 @@
     },
     {
       "name": "ProductionController",
-      "description": "Add production facilities for a desired army composition.",
+      "description": "Automatically add tech and production facilities based on army composition, income, and resource reserves.",
       "import": "ares.behaviors.macro.production_controller.ProductionController",
-      "enabled": true,
+      "enabled": false,
+      "persistent": true,
       "params": [
         {
           "name": "army_composition_dict",
@@ -478,9 +486,10 @@
     },
     {
       "name": "ProtossStaticDefence",
-      "description": "Maintain Protoss static defence at bases.",
+      "description": "Automatically build pylons, cannons, and batteries at Protoss bases, adding required tech.",
       "import": "ares.behaviors.macro.protoss_static_defence.ProtossStaticDefence",
       "enabled": false,
+      "persistent": true,
       "params": [
         {
           "name": "pylons_per_base",
@@ -542,9 +551,10 @@
     },
     {
       "name": "RestorePower",
-      "description": "Build pylons to restore power to Protoss structures.",
+      "description": "Automatically place pylons to power unpowered Protoss structures.",
       "import": "ares.behaviors.macro.restore_power.RestorePower",
       "enabled": false,
+      "persistent": true,
       "params": [
         {
           "name": "_placements_disabled_warned",
@@ -558,9 +568,10 @@
     },
     {
       "name": "SpawnController",
-      "description": "Train available units toward a desired army composition.",
+      "description": "Train units by composition and priority using existing production; skip units with missing tech.",
       "import": "ares.behaviors.macro.spawn_controller.SpawnController",
       "enabled": true,
+      "persistent": true,
       "params": [
         {
           "name": "army_composition_dict",
@@ -646,9 +657,10 @@
     },
     {
       "name": "SpeedMining",
-      "description": "Speed-mine with a selected worker and resource.",
+      "description": "Control the selected worker's movement and mining orders to speed up resource collection and delivery.",
       "import": "ares.behaviors.macro.speed_mining.SpeedMining",
       "enabled": false,
+      "persistent": true,
       "params": [
         {
           "name": "worker",
@@ -702,9 +714,10 @@
     },
     {
       "name": "TechUp",
-      "description": "Automatically build prerequisites for a unit or upgrade.",
+      "description": "Automatically build tech structures and tech labs required for the selected unit, structure, or upgrade.",
       "import": "ares.behaviors.macro.tech_up.TechUp",
-      "enabled": true,
+      "enabled": false,
+      "persistent": true,
       "params": [
         {
           "name": "desired_tech",
@@ -734,9 +747,10 @@
     },
     {
       "name": "UpgradeCCs",
-      "description": "Upgrade an automatically selected idle command center.",
+      "description": "Upgrade an automatically selected ready, idle command center to the requested type.",
       "import": "ares.behaviors.macro.upgrade_ccs.UpgradeCCs",
       "enabled": true,
+      "persistent": true,
       "params": [
         {
           "name": "to",
@@ -758,9 +772,10 @@
     },
     {
       "name": "UpgradeController",
-      "description": "Research selected upgrades and optionally build prerequisites.",
+      "description": "Research listed upgrades, automatically adding missing tech structures and tech labs.",
       "import": "ares.behaviors.macro.upgrade_controller.UpgradeController",
-      "enabled": true,
+      "enabled": false,
+      "persistent": true,
       "params": [
         {
           "name": "upgrade_list",

@@ -176,7 +176,7 @@ class TypeResolver:
             return value, value
         if kind == "Unit":
             alias = context.canonical_entity_alias(value)
-            return alias, context.resolve_entity(alias)
+            return alias, context.resolve_entity(alias, parameter=path)
         if kind == "Point2":
             point = context.resolve_point(value)
             return {"x": point.x, "y": point.y}, point
