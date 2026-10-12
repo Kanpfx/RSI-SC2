@@ -167,7 +167,7 @@ class ActionExposure:
         }
         actor_param = actor_parameter(entry)
         spec = next((p for p in entry['params'] if p['name'] == actor_param), None)
-        if spec and 'UnitTypeId' in spec['type'] and entry['name'] != 'AddonSwap':
+        if spec and 'UnitTypeId' in spec['type']:
             domains[actor_param] |= frozenset(context.own_entities[a].type_id.name for a in actors)
         if not self._add_target_domains(entry, context, domains):
             return None

@@ -87,7 +87,7 @@
       "name": "KeepGroupSafe",
       "description": "For each unit, attack a selected enemy in range when ready; otherwise move out of danger.",
       "import": "ares.behaviors.combat.group.keep_group_safe.KeepGroupSafe",
-      "enabled": false,
+      "enabled": true,
       "persistent": true,
       "params": [
         {
@@ -100,7 +100,7 @@
         },
         {
           "name": "close_enemy",
-          "type": "list[Unit]",
+          "type": "list[Unit] | Units",
           "description": "Visible enemy IDs to consider for attacks; may be empty.",
           "source": "model",
           "required": true,
@@ -241,7 +241,7 @@
       "name": "StutterGroupBack",
       "description": "Attack-move toward the target position; retreat to safety during weapon cooldown if in danger.",
       "import": "ares.behaviors.combat.group.stutter_group_back.StutterGroupBack",
-      "enabled": false,
+      "enabled": true,
       "persistent": true,
       "params": [
         {
@@ -290,7 +290,7 @@
       "name": "StutterGroupForward",
       "description": "Advance toward the selected enemies during weapon cooldown; otherwise attack-move toward their center.",
       "import": "ares.behaviors.combat.group.stutter_group_forward.StutterGroupForward",
-      "enabled": false,
+      "enabled": true,
       "persistent": true,
       "params": [
         {
@@ -303,7 +303,7 @@
         },
         {
           "name": "enemies",
-          "type": "list[Unit]",
+          "type": "list[Unit] | Units",
           "description": "Non-empty list of visible enemy IDs to advance toward.",
           "source": "model",
           "required": true,

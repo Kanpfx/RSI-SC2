@@ -71,7 +71,7 @@
       "name": "AutoUseAOEAbility",
       "description": "Automatically select an available area ability and cast position.",
       "import": "ares.behaviors.combat.individual.auto_use_aoe_ability.AutoUseAOEAbility",
-      "enabled": false,
+      "enabled": true,
       "persistent": false,
       "params": [
         {
@@ -145,7 +145,7 @@
       "name": "GhostSnipe",
       "description": "Automatically select a snipe target against Zerg opponents.",
       "import": "ares.behaviors.combat.individual.ghost_snipe.GhostSnipe",
-      "enabled": false,
+      "enabled": true,
       "persistent": false,
       "params": [
         {
@@ -195,7 +195,7 @@
       "name": "MedivacHeal",
       "description": "Heal a selected set of allies while avoiding danger.",
       "import": "ares.behaviors.combat.individual.medivac_heal.MedivacHeal",
-      "enabled": false,
+      "enabled": true,
       "persistent": true,
       "params": [
         {
@@ -487,7 +487,7 @@
       "name": "PickUpAndDropCargo",
       "description": "Load selected units, travel to a destination, and unload.",
       "import": "ares.behaviors.combat.individual.pick_up_and_drop_cargo.PickUpAndDropCargo",
-      "enabled": false,
+      "enabled": true,
       "persistent": true,
       "params": [
         {
@@ -601,7 +601,7 @@
       "name": "PlacePredictiveAoE",
       "description": "Predict a chasing enemy position from a supplied movement path.",
       "import": "ares.behaviors.combat.individual.place_predictive_aoe.PlacePredictiveAoE",
-      "enabled": false,
+      "enabled": true,
       "persistent": false,
       "params": [
         {
@@ -691,7 +691,7 @@
       "name": "RavenAutoTurret",
       "description": "Automatically place a turret near selected enemies.",
       "import": "ares.behaviors.combat.individual.raven_auto_turret.RavenAutoTurret",
-      "enabled": false,
+      "enabled": true,
       "persistent": false,
       "params": [
         {
@@ -716,7 +716,7 @@
       "name": "ReaperGrenade",
       "description": "Automatically place a grenade against selected enemies.",
       "import": "ares.behaviors.combat.individual.reaper_grenade.ReaperGrenade",
-      "enabled": false,
+      "enabled": true,
       "persistent": false,
       "params": [
         {
@@ -773,7 +773,7 @@
       "name": "ShootAndMoveToTarget",
       "description": "Shoot selected enemies in range, otherwise move toward a destination.",
       "import": "ares.behaviors.combat.individual.shoot_and_move_to_target.ShootAndMoveToTarget",
-      "enabled": false,
+      "enabled": true,
       "persistent": true,
       "params": [
         {
@@ -863,7 +863,7 @@
       "name": "SiegeTankDecision",
       "description": "Automatically decide whether to siege or unsiege.",
       "import": "ares.behaviors.combat.individual.siege_tank_decision.SiegeTankDecision",
-      "enabled": false,
+      "enabled": true,
       "persistent": true,
       "params": [
         {
@@ -1158,7 +1158,7 @@
       "name": "WorkerKiteBack",
       "description": "Attack the target when ready, otherwise retreat using mineral walking.",
       "import": "ares.behaviors.combat.individual.worker_kite_back.WorkerKiteBack",
-      "enabled": false,
+      "enabled": true,
       "persistent": true,
       "params": [
         {

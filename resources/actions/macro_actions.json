@@ -11,7 +11,7 @@
         {
           "name": "structure_needing_addon",
           "type": "Unit | UnitTypeId",
-          "description": "Own structure ID; the native API also accepts a structure type.",
+          "description": "Own structure ID or structure type.",
           "source": "model",
           "required": true,
           "value": null
@@ -673,7 +673,7 @@
         {
           "name": "target",
           "type": "Point2 | Unit",
-          "description": "Mineral-field or own gas-building ID; coordinates are not supported by execution.",
+          "description": "Resource ID or resource coordinates; coordinates are resolved to the matching resource before execution.",
           "source": "model",
           "required": true,
           "value": null

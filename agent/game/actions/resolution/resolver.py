@@ -28,6 +28,25 @@ class EntityContext:
     max_point_nudge_tiles: float = 2.0
     runtime_values: dict[str, Any] = field(default_factory=dict)
 
+    def resolve_mining_target(self, target: Any) -> Any:
+        from sc2.position import Point2
+
+        if isinstance(target, Point2):
+            resources = list(getattr(self.bot, 'mineral_field', []))
+            resources.extend(getattr(self.bot, 'vespene_geyser', []))
+            resources.extend(u for u in self.own_entities.values()
+                             if getattr(u, 'is_gas_building', False))
+            target = next((u for u in resources if u.position == target), None)
+        own_tags = {u.tag for u in self.own_entities.values()}
+        if target is not None and (
+            getattr(target, 'is_mineral_field', False)
+            or getattr(target, 'is_vespene_geyser', False)
+            or (getattr(target, 'is_gas_building', False) and target.tag in own_tags)
+        ):
+            return target
+        raise ResolveError.invalid_value('target', target,
+                                         'a mineral field, geyser or own gas building, or its exact coordinates')
+
     def runtime_value(self, source: str, args: dict[str, Any]) -> Any:
         from sc2.position import Point2
         context = self
@@ -57,11 +76,11 @@ class EntityContext:
             return args["unit" if rule == "unit_position" else "worker"].position
         if rule == "resource_target_pos":
             target = args["target"]
-            if getattr(target, "is_mineral_field", False):
+            if getattr(target, "is_mineral_field", False) or getattr(target, "is_vespene_geyser", False):
                 point = bot.mediator.get_mineral_target_dict.get(target.position)
                 if point is not None:
                     return point
-            elif (getattr(target, "is_vespene_geyser", False) or getattr(target, "is_gas_building", False)) and target.tag in {u.tag for u in context.own_entities.values()}:
+            elif getattr(target, "is_gas_building", False) and target.tag in {u.tag for u in context.own_entities.values()}:
                 return target.position.towards(args["worker"].position, 2.75 * 1.21)
             raise ResolveError.invalid_value("runtime", rule, "resource approach point unavailable")
         if rule == "aoe_min_targets":
@@ -70,9 +89,15 @@ class EntityContext:
                 return 1
             return 2 if name == "EMP_EMP" and bot.enemy_race.name != "Protoss" else 4
         if rule == "unit_planned_path":
-            path = context.runtime_values.get("unit_planned_paths", {}).get(args["unit"].tag)
+            grid = self.runtime_value("unit_grid", args)
+            path = bot.mediator.find_raw_path(
+                start=args["unit"].position,
+                target=args["enemy_center_unit"].position,
+                grid=grid,
+                sensitivity=1,
+            )
             if path:
-                return list(path)
+                return list(path[:30])
         if rule == "aoe_ability_delay" and args["aoe_ability"].name == "KD8CHARGE_KD8CHARGE":
             return 34
         raise ResolveError.invalid_value("runtime", rule, "runtime dependency unavailable")

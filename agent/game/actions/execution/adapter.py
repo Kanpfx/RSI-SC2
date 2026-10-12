@@ -83,6 +83,8 @@ class AresActionAdapter:
                 supplied[name], param['type'], context, name)
             if 'choices' in param and wire[name] is not None and wire[name] not in param['choices']:
                 raise ParameterError.invalid_value(name, wire[name], str(param['choices']))
+        if entry['name'] == 'SpeedMining':
+            kwargs['target'] = context.resolve_mining_target(kwargs['target'])
         for param in entry['params']:
             if param['source'] == 'fixed':
                 _, kwargs[param['name']] = self.catalog.type_resolver.resolve(
@@ -95,10 +97,6 @@ class AresActionAdapter:
 
     def _validate_behavior(self, entry: dict[str, Any], args: dict[str, Any]) -> None:
         name = entry['name']
-        if name == 'AddonSwap' and not hasattr(args['structure_needing_addon'], 'tag'):
-            raise ParameterError.format('structure_needing_addon', 'an own structure ID')
-        if name == 'SpeedMining' and not hasattr(args['target'], 'tag'):
-            raise ParameterError.format('target', 'a mineral or own gas building ID')
         if name == 'TechUp':
             self._resolve_tech_up_target(args['desired_tech'])
         if name == 'BuildStructure':
