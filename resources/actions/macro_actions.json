@@ -3,9 +3,9 @@
   "actions": [
     {
       "name": "AddonSwap",
-      "description": "Move the selected structure onto an existing matching addon, relocating its owner if needed.",
+      "description": "Attach a matching existing addon, moving its current owner if needed.",
       "import": "ares.behaviors.macro.addon_swap.AddonSwap",
-      "enabled": false,
+      "enabled": true,
       "persistent": false,
       "params": [
         {
@@ -36,7 +36,8 @@
     },
     {
       "name": "AutoSupply",
-      "description": "Automatically build supply near the reference base when needed.",
+      "override_keys": [],
+      "description": "Build supply near the base as needed.",
       "import": "ares.behaviors.macro.auto_supply.AutoSupply",
       "enabled": false,
       "persistent": true,
@@ -69,7 +70,7 @@
     },
     {
       "name": "BuildStructure",
-      "description": "Build one structure near the reference base, automatically selecting a worker and placement.",
+      "description": "Build one structure near the base; choose the worker and placement automatically.",
       "import": "ares.behaviors.macro.build_structure.BuildStructure",
       "enabled": true,
       "persistent": false,
@@ -222,7 +223,8 @@
     },
     {
       "name": "BuildWorkers",
-      "description": "Train workers until the target total count is reached.",
+      "override_keys": [],
+      "description": "Train workers up to the specified total.",
       "import": "ares.behaviors.macro.build_workers.BuildWorkers",
       "enabled": true,
       "persistent": true,
@@ -239,7 +241,8 @@
     },
     {
       "name": "ExpansionController",
-      "description": "Build bases until the target total count is reached, automatically selecting safe expansion sites.",
+      "override_keys": [],
+      "description": "Expand to the specified base count, choosing safe sites automatically.",
       "import": "ares.behaviors.macro.expansion_controller.ExpansionController",
       "enabled": true,
       "persistent": true,
@@ -288,7 +291,8 @@
     },
     {
       "name": "GasBuildingController",
-      "description": "Build gas structures until the target total count is reached, automatically selecting geysers near bases.",
+      "override_keys": [],
+      "description": "Build up to the specified gas structure count at geysers near bases.",
       "import": "ares.behaviors.macro.gas_building_controller.GasBuildingController",
       "enabled": true,
       "persistent": true,
@@ -321,7 +325,8 @@
     },
     {
       "name": "Mining",
-      "description": "Automatically assign workers to minerals and gas, manage mining, and handle danger and self-defence.",
+      "override_keys": [],
+      "description": "Manage mineral and gas mining, worker safety, and self-defence.",
       "import": "ares.behaviors.macro.mining.Mining",
       "enabled": false,
       "persistent": true,
@@ -410,7 +415,8 @@
     },
     {
       "name": "ProductionController",
-      "description": "Automatically add tech and production facilities based on army composition, income, and resource reserves.",
+      "override_keys": [],
+      "description": "Add tech and production facilities based on army composition, income, and saved resources.",
       "import": "ares.behaviors.macro.production_controller.ProductionController",
       "enabled": false,
       "persistent": true,
@@ -486,7 +492,8 @@
     },
     {
       "name": "ProtossStaticDefence",
-      "description": "Automatically build pylons, cannons, and batteries at Protoss bases, adding required tech.",
+      "override_keys": [],
+      "description": "Build pylons, cannons, and batteries at Protoss bases, including required tech.",
       "import": "ares.behaviors.macro.protoss_static_defence.ProtossStaticDefence",
       "enabled": false,
       "persistent": true,
@@ -551,7 +558,8 @@
     },
     {
       "name": "RestorePower",
-      "description": "Automatically place pylons to power unpowered Protoss structures.",
+      "override_keys": [],
+      "description": "Build pylons to restore power to unpowered structures.",
       "import": "ares.behaviors.macro.restore_power.RestorePower",
       "enabled": false,
       "persistent": true,
@@ -568,7 +576,8 @@
     },
     {
       "name": "SpawnController",
-      "description": "Train units by composition and priority using existing production; skip units with missing tech.",
+      "override_keys": [],
+      "description": "Train the requested army composition by priority using existing production and tech.",
       "import": "ares.behaviors.macro.spawn_controller.SpawnController",
       "enabled": true,
       "persistent": true,
@@ -657,7 +666,7 @@
     },
     {
       "name": "SpeedMining",
-      "description": "Control the selected worker's movement and mining orders to speed up resource collection and delivery.",
+      "description": "Optimize the selected worker's movement for faster resource collection and delivery.",
       "import": "ares.behaviors.macro.speed_mining.SpeedMining",
       "enabled": false,
       "persistent": true,
@@ -714,9 +723,10 @@
     },
     {
       "name": "TechUp",
-      "description": "Automatically build tech structures and tech labs required for the selected unit, structure, or upgrade.",
+      "override_keys": ["desired_tech"],
+      "description": "Build the tech structures and tech labs needed for the selected unit, structure, or upgrade. Different desired_tech targets coexist.",
       "import": "ares.behaviors.macro.tech_up.TechUp",
-      "enabled": false,
+      "enabled": true,
       "persistent": true,
       "params": [
         {
@@ -747,7 +757,8 @@
     },
     {
       "name": "UpgradeCCs",
-      "description": "Upgrade an automatically selected ready, idle command center to the requested type.",
+      "override_keys": [],
+      "description": "Upgrade ready, idle command centers to the selected type.",
       "import": "ares.behaviors.macro.upgrade_ccs.UpgradeCCs",
       "enabled": true,
       "persistent": true,
@@ -772,9 +783,10 @@
     },
     {
       "name": "UpgradeController",
-      "description": "Research listed upgrades, automatically adding missing tech structures and tech labs.",
+      "override_keys": [],
+      "description": "Research listed upgrades, building missing tech structures and tech labs as needed.",
       "import": "ares.behaviors.macro.upgrade_controller.UpgradeController",
-      "enabled": false,
+      "enabled": true,
       "persistent": true,
       "params": [
         {

@@ -61,7 +61,7 @@ class ActionExposure:
         for entry in self.catalog.prompt_entries(set(self.catalog.entries)):
             if entry['name'] == 'GhostSnipe' and getattr(getattr(bot, 'enemy_race', None), 'name', None) != 'Zerg':
                 continue
-            availability = self._availability(entry, bot, context)
+            availability = self._availability(entry, context)
             if availability is None:
                 continue
             param_names = {param["name"] for param in entry["params"]}
@@ -80,16 +80,10 @@ class ActionExposure:
                 allowed = availability.domains.get(param["name"])
                 if allowed is None:
                     continue
-                key = (
-                    "allowed_keys"
-                    if param["name"] == "army_composition_dict"
-                    else "allowed_values"
-                )
-                param[key] = sorted(allowed)
-                if key == "allowed_values":
-                    groups = self._entity_value_groups(allowed, context)
-                    if groups:
-                        param["allowed_value_groups"] = groups
+                param["allowed_values"] = sorted(allowed)
+                groups = self._entity_value_groups(allowed, context)
+                if groups:
+                    param["allowed_value_groups"] = groups
             prompt_entries.append(prompt_entry)
             domains[entry["name"]] = availability.domains
         return ActionSurface(
@@ -105,8 +99,9 @@ class ActionExposure:
     ) -> dict[str, list[str]]:
         """Group prompt-only observation IDs without changing validation domains."""
         groups: dict[str, list[str]] = {}
+        entities = context.entities
         for alias in sorted(values):
-            entity = context.entities.get(alias)
+            entity = entities.get(alias)
             if entity is None:
                 continue
             type_id = getattr(entity, "type_id", None)
@@ -117,11 +112,9 @@ class ActionExposure:
         return groups
 
     def _availability(
-        self, entry: dict[str, Any], bot: Any, context: EntityContext
+        self, entry: dict[str, Any], context: EntityContext
     ) -> _Availability | None:
         actor_param = actor_parameter(entry)
-        if actor_param == "group":
-            return self._group(entry, context)
         if actor_param is not None:
             return self._actor(entry, context)
 
@@ -139,14 +132,10 @@ class ActionExposure:
     def _actor(
         self, entry: dict[str, Any], context: EntityContext
     ) -> _Availability | None:
-        actor_types = availability_types(entry)
-        actors = self._aliases(
-            context.own_entities,
-            actor_types,
-            units_only=False,
-        )
+        actor_param = actor_parameter(entry)
+        actors = self._aliases(context.own_entities, availability_types(entry))
         actors = {a for a in actors if actor_supported(entry, context.own_entities[a])}
-        ability = self._fixed_ability(entry)
+        ability = self._fixed_ability(entry) if actor_param != "group" else None
         if ability:
             actors = {
                 alias
@@ -162,10 +151,7 @@ class ActionExposure:
         if not actors:
             return None
 
-        domains: dict[str, frozenset[str]] = {
-            actor_parameter(entry): frozenset(actors)
-        }
-        actor_param = actor_parameter(entry)
+        domains: dict[str, frozenset[str]] = {actor_param: frozenset(actors)}
         spec = next((p for p in entry['params'] if p['name'] == actor_param), None)
         if spec and 'UnitTypeId' in spec['type']:
             domains[actor_param] |= frozenset(context.own_entities[a].type_id.name for a in actors)
@@ -173,41 +159,15 @@ class ActionExposure:
             return None
         return _Availability(
             "available_now",
-            f"Current actors: [{','.join(sorted(actors))}].",
-            domains,
-        )
-
-    def _group(
-        self, entry: dict[str, Any], context: EntityContext
-    ) -> _Availability | None:
-        actor_types = availability_types(entry)
-        actors = self._aliases(
-            context.own_entities,
-            actor_types,
-            units_only=False,
-        )
-        actors = {a for a in actors if actor_supported(entry, context.own_entities[a])}
-        if not actors:
-            return None
-        domains: dict[str, frozenset[str]] = {"group": frozenset(actors)}
-        if not self._add_target_domains(entry, context, domains):
-            return None
-        return _Availability(
-            "available_now",
-            f"Current group candidates: [{','.join(sorted(actors))}].",
+            f"Current {'group candidates' if actor_param == 'group' else 'actors'}: [{','.join(sorted(actors))}].",
             domains,
         )
 
     @staticmethod
     def _general_macro_ready(action_id: str, context: EntityContext) -> bool:
-        own_types = {
-            getattr(getattr(entity, "type_id", None), "name", "UNKNOWN")
-            for entity in context.own_entities.values()
-        }
-        # Macro behaviors can acquire prerequisites themselves. Do not require both
-        # workers and townhalls when an existing research/production structure suffices.
+        # These macro behaviors can build their own prerequisites.
         if action_id in {"TechUp", "UpgradeController", "SpawnController"}:
-            return bool(own_types)
+            return bool(context.own_entities)
         return True
 
     @staticmethod
@@ -243,15 +203,11 @@ class ActionExposure:
     def _aliases(
         entities: dict[str, Any],
         unit_types: set[str],
-        *,
-        units_only: bool = False,
     ) -> set[str]:
         aliases: set[str] = set()
         for alias, entity in entities.items():
             name = getattr(getattr(entity, "type_id", None), "name", "UNKNOWN")
             if unit_types and name not in unit_types:
-                continue
-            if units_only and bool(getattr(entity, "is_structure", False)):
                 continue
             aliases.add(alias)
         return aliases

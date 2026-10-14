@@ -3,7 +3,7 @@
   "actions": [
     {
       "name": "AMoveGroup",
-      "description": "Order the group to attack-move to a position or attack a unit.",
+      "description": "Attack-move the group to a position or attack a unit.",
       "import": "ares.behaviors.combat.group.a_move_group.AMoveGroup",
       "enabled": true,
       "persistent": false,
@@ -36,7 +36,7 @@
     },
     {
       "name": "GroupUseAbility",
-      "description": "Use the same ability and target for all units once every unit is ready.",
+      "description": "Use the same ability and target for ready members of the group.",
       "import": "ares.behaviors.combat.group.group_use_ability.GroupUseAbility",
       "enabled": true,
       "persistent": false,
@@ -85,7 +85,7 @@
     },
     {
       "name": "KeepGroupSafe",
-      "description": "For each unit, attack a selected enemy in range when ready; otherwise move out of danger.",
+      "description": "Each unit attacks selected enemies in range when ready; otherwise avoids danger.",
       "import": "ares.behaviors.combat.group.keep_group_safe.KeepGroupSafe",
       "enabled": true,
       "persistent": true,
@@ -126,7 +126,7 @@
     },
     {
       "name": "PathGroupToTarget",
-      "description": "Move the group toward a position using a shared path through the influence grid. Do not mix air and ground units in one group.",
+      "description": "Move the group along shared paths, separately for air and ground units.",
       "import": "ares.behaviors.combat.group.path_group_to_target.PathGroupToTarget",
       "enabled": true,
       "persistent": true,
@@ -239,7 +239,7 @@
     },
     {
       "name": "StutterGroupBack",
-      "description": "Attack-move toward the target position; retreat to safety during weapon cooldown if in danger.",
+      "description": "Attack-move toward the target; retreat during weapon cooldown if in danger.",
       "import": "ares.behaviors.combat.group.stutter_group_back.StutterGroupBack",
       "enabled": true,
       "persistent": true,
@@ -288,7 +288,7 @@
     },
     {
       "name": "StutterGroupForward",
-      "description": "Advance toward the selected enemies during weapon cooldown; otherwise attack-move toward their center.",
+      "description": "Advance toward selected enemies during weapon cooldown; otherwise attack-move toward their center.",
       "import": "ares.behaviors.combat.group.stutter_group_forward.StutterGroupForward",
       "enabled": true,
       "persistent": true,

@@ -139,6 +139,37 @@ def actor_supported(entry: dict[str, Any], unit: Any, *, ready: bool = True) -> 
     return True
 
 
+def filter_group(entry, values, context, claimed):
+    """Retain distinct own members; discard invalid references and conflicts."""
+    if not isinstance(values, list):
+        raise ParameterError.format('group', 'an array of own unit IDs')
+    allowed = availability_types(entry)
+    members, notices = [], []
+    overridden = False
+    tags = set()
+    for value in values:
+        try:
+            alias = context.canonical_entity_alias(value)
+            unit = context.resolve_entity(alias, own_only=True, parameter='group')
+            if allowed and unit.type_id.name not in allowed:
+                raise ParameterError.invalid_value('group', alias, f'an actor of type {sorted(allowed)}')
+            tag = str(unit.tag)
+            if tag in tags:
+                raise ParameterError.invalid_value('group', alias, 'distinct actor IDs')
+            if tag in claimed:
+                index, name = claimed[tag]
+                overridden = True
+                notices.append(f'unit {alias}: overridden by Action {index}: {name}')
+                continue
+            tags.add(tag)
+            members.append(alias)
+        except (TypeError, ValueError) as exc:
+            notices.append(f'{value!r}: {exc}; removed from group')
+    if not members and not overridden:
+        raise ParameterError.format('group', 'at least one valid own member')
+    return members, notices
+
+
 def validate_resolved(entry: dict[str, Any], args: dict[str, Any], context: EntityContext,
                       *, ready: bool = True) -> set[str]:
     """Validate actor ownership/capabilities and target sides using resolved objects."""

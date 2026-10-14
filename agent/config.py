@@ -9,15 +9,11 @@ from agent.paths import PROJECT_ROOT
 
 @dataclass(frozen=True)
 class GameConfig:
-    excutor_interval_iterations: int = 90
-    planner_interval_iterations: int = 270
+    decision_interval_game_seconds: float = 2.0
     max_actions_per_decision: int = 6
-    max_action_units: int = 12
+    max_action_units: int = 21
     max_action_targets: int = 8
     max_point_nudge_tiles: float = 2.0
-    deferred_action_ttl_iterations: int = 180
-    resource_queue_mineral_tolerance: int = 120
-    resource_queue_vespene_tolerance: int = 60
 
 
 @dataclass(frozen=True)
@@ -25,12 +21,11 @@ class LLMConfig:
     model: str = ""
     base_url: str = ""
     api_key: str = ""
-    planner_reasoning_effort: str = "low"
-    planner_max_tokens: int = 768
-    excutor_temperature: float = 0.0
-    excutor_max_tokens: int = 256
-    timeout_s: float = 20.0
-    transport_retries: int = 2
+    reasoning_effort: str = "low"
+    planner_max_tokens: int = 1024
+    excutor_max_tokens: int = 1024
+    planner_timeout_seconds: float = 10.0
+    excutor_timeout_seconds: float = 10.0
 
     @classmethod
     def from_env(cls) -> "LLMConfig":

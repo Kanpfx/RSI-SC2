@@ -1,112 +1,49 @@
 # BattleCruiserRush
 
 **Core idea:**
-Rush Battlecruiser tech with a compact opening, start the first Battlecruiser before normal economic expansion, then transition into sustained Battlecruiser-led pressure while scaling economy and production.
+Rush the first Battlecruiser before expanding, then sustain Battlecruiser-led pressure while growing economy and production.
 
-**General guidance:**
+**Core rules:**
 
-- Keep Battlecruisers as the core army and Marines as support, developing toward roughly 80% Battlecruisers and 20% Marines.
-- Prioritize Battlecruiser tech and sustained Battlecruiser production over nonessential spending.
-- Preserve Battlecruisers and avoid unnecessary losses or unfavorable trades.
-- When observations indicate a large-scale attack on our bases or economy, redirect part of the army to defend the threatened area, prioritizing nearby available units and using group actions where possible.
-- Once the threat is cleared, counterattack with the defending force when favorable while continuing essential production and development.
-- After the first Battlecruiser enters production, expand one base at a time; do not exceed four total bases, 90 workers, or four Starports with Tech Labs.
+- Prioritize Battlecruiser tech and production; use Marines as support, aiming for roughly 80% Battlecruisers and 20% Marines.
+- Begin expansion once a Battlecruiser is in production. Add supply, gas, and production capacity to sustain the army; grow toward 20 SCVs on one base and up to 60 across multiple bases.
+- Upgrade Command Centers to Orbital Commands. Avoid unrelated units, tech, and upgrades.
+- Respond to attacks threatening our economy with nearby forces, then resume pressure.
 
-## opening_tech
+## opening
 
 **When to choose:**
 
-- The Fusion Core and Starport Tech Lab are not both ready.
-- Typically within 0-4 minutes; timing is only a rough guide.
-
-**Phase goal:**
-
-- Complete the tech path required for the first Battlecruiser as quickly as possible.
+- The first Battlecruiser has not finished production.
 
 **Guidance:**
 
-- Prioritize the fixed Battlecruiser opening over expansion, extra production, unrelated tech, or nonessential units.
-- At 12 supply, build one Supply Depot, one Refinery, and one Barracks, then train three SCVs.
-- At 15 supply, start one Factory, train one Marine, upgrade the Command Center to an Orbital Command, build the second Refinery, then train one Marine and two SCVs.
-- At 17 supply, start one Starport, then train one Marine, two SCVs, and one more Marine.
-- At 19 supply, build one Supply Depot, one Fusion Core, and a Tech Lab on the Starport.
-- Keep early Marines near the main base for defense.
-- Avoid spending that significantly delays the Starport, Fusion Core, or Starport Tech Lab.
-- Keep the opening close to the planned scale: roughly 4 Marines, 2 Refineries, and one each of Barracks, Factory, Starport, Fusion Core, and Starport Tech Lab.
-- Finish this phase when both the Fusion Core and Starport Tech Lab are ready.
-
-## first_bc_preparation
-
-**When to choose:**
-
-- The Fusion Core and Starport Tech Lab are ready, but no Battlecruiser is ready or in production.
-
-**Phase goal:**
-
-- Start the first Battlecruiser as soon as possible.
-
-**Guidance:**
-
-- Reserve 400 minerals, 300 vespene, and 6 supply for the first Battlecruiser.
-- Avoid expansion, extra production, upgrades, or nonessential units if they would delay the first Battlecruiser.
-- Keep Marines near the main base for defense.
-- Start the first Battlecruiser as soon as resources and supply are available.
-- Finish this phase once a Battlecruiser enters production.
-
-## first_bc_transition
-
-**When to choose:**
-
-- The first Battlecruiser is in production, but no Battlecruiser is ready yet.
-- Typically around 4-6 minutes; timing is only a rough guide.
-
-**Phase goal:**
-
-- Use the first Battlecruiser's production window to begin economic and production growth without disrupting Battlecruiser production.
-
-**Guidance:**
-
-- Keep the first Battlecruiser in production and prioritize continued Battlecruiser production.
-- Begin normal macro growth: add SCVs, supply, Refineries, production capacity, and take the natural as the second base as resources allow.
-- Expansion is now allowed one base at a time, but should not significantly delay continued Battlecruiser production.
-- Develop toward roughly 80% Battlecruisers and 20% Marines.
-- Keep Marines near the main base for defense until the first Battlecruiser is ready.
-- Finish this phase as soon as the first Battlecruiser is ready.
+- Open with a Supply Depot, Refinery, and Barracks. Follow with a Factory, Orbital Command, and second Refinery, then a Starport, another Supply Depot, Fusion Core, and Starport Tech Lab.
+- Train a small Marine defense, aiming for four Marines, and keep them near the main ramp. Add SCVs without delaying the tech path.
+- Start the first Battlecruiser as soon as its prerequisites and resources are ready; defer expansion and extra production until it is in production.
+- While it builds, begin expansion and economic growth, keeping resources available for continued Battlecruiser production.
 
 ## bc_pressure
 
 **When to choose:**
 
-- At least one Battlecruiser is ready and the cleanup conditions are not yet met.
-- Typically after about 5-6 minutes; timing is only a rough guide.
-
-**Phase goal:**
-
-- Apply continuous Battlecruiser-led pressure while scaling economy, production, and army strength.
+- Battlecruisers have begun operating, and the enemy still has established bases or substantial resistance.
 
 **Guidance:**
 
-- Start pressure as soon as the first Battlecruiser is ready rather than waiting for a large army.
-- Keep Battlecruisers as the main force and Marines as offensive support, developing toward roughly 80% Battlecruisers and 20% Marines.
-- Prioritize continuous Battlecruiser production and limited Marine support when spending accumulated resources.
-- Add SCVs, Refineries, supply, production capacity, and expansions only as needed to sustain the army.
-- Do not exceed 90 workers, four total bases, or four Starports with Tech Labs; stop requesting additional growth after reaching each cap.
-- Avoid unrelated technology, upgrades, or static defense unless needed against a visible threat.
-- Prioritize significant enemy army concentrations when favorable; otherwise pressure known structures, the enemy starting area, and then likely expansions.
-- Avoid concentrated anti-air and unsafe routes; use Tactical Jump (`EFFECT_TACTICALJUMP`) for long-distance engagement or safe repositioning near the target.
-- Retreat badly damaged Battlecruisers, especially below roughly 225 health, rather than losing them unnecessarily.
+- Attack with the first Battlecruiser as soon as it is ready; send Marines forward as support and reinforce with new units.
+- Prioritize significant enemy army concentrations when favorable; otherwise attack known enemy structures and the enemy main, then search expansion locations.
+- Use Tactical Jump (`EFFECT_TACTICALJUMP`) for long-distance movement to a safe position near the attack target. Avoid concentrated anti-air and choose safe approach routes.
+- Withdraw Battlecruisers below roughly 225 health toward the main base.
+- Continue Battlecruiser production, expand while Battlecruisers are in production, and add Starports with Tech Labs as resources support them.
 
 ## cleanup
 
 **When to choose:**
 
-- The enemy main base has been destroyed and at least 7 Battlecruisers are ready; preferably the enemy natural has also been destroyed.
-
-**Phase goal:**
-
-- Finish the game by searching the map and destroying remaining enemy forces and structures.
+- The enemy's established bases have been cleared and remaining targets must be located.
 
 **Guidance:**
 
-- Clear known enemy structures, then split available forces into small groups to search different expansions and unexplored areas, attacking remaining enemies as they are found.
-- Move on after clearing each area; regroup if strong resistance appears and withdraw only badly damaged units.
+- Destroy known remaining structures, then search expansion locations and unexplored areas. Move on after each area is cleared.
+- Use separate groups to cover more ground; concentrate forces again if substantial resistance is found.

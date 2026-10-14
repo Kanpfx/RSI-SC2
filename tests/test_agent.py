@@ -59,10 +59,10 @@ class ContextAndParserTests(unittest.TestCase):
         self.assertEqual(behaviors[1].desired_tech, UnitTypeId.BATTLECRUISER)
 
     def test_actions_only(self):
-        result = parse_model_payload("# actions\nBuildWorkers(to_count=22)")
+        result = parse_model_payload("## actions\n\nBuildWorkers(to_count=22)")
         self.assertEqual(result["actions"], [{"id": "BuildWorkers", "args": {"to_count": 22}}])
         self.assertNotIn("working", result)
-        self.assertEqual(parse_model_payload("# actions")["actions"], [])
+        self.assertEqual(parse_model_payload("## actions")["actions"], [])
 
     def test_invalid_action_keeps_valid_sibling(self):
         result = parse_model_payload("# actions\nBad(unit=lookup(1))\nBuildWorkers(to_count=22)")
@@ -92,13 +92,15 @@ class ContextAndParserTests(unittest.TestCase):
     def test_planner_capabilities_and_two_timestamped_decisions(self):
         context = ContextBuilder()
         for time, phase in (("00:10", "old"), ("00:20", "opening"), ("00:30", "growth")):
-            context.update_working(f"## Current phase\n{phase}\n## Guidance\n1. Build army.\n2. Expand.", time)
-        entries = [{"name": "BuildWorkers", "description": "Set worker target.", "persistent": True}]
+            context.update_working(f"## assessment\nNo immediate threat.\n## stage\n{phase}\n## objective\nGrow economy and army.\n## guidence\n1. Build army.\n2. Expand.", time)
+        entries = [{"name": "BuildWorkers", "description": "Set worker target.", "persistent": True,
+                    "import": "ares.behaviors.macro.BuildWorkers"}]
         content = context.build_planner_messages("LATEST", entries)[1]["content"]
-        self.assertNotIn("time=00:10", content)
-        self.assertIn("time=00:20 phase=opening guidance=1. Build army. | 2. Expand.", content)
-        self.assertIn("time=00:30 phase=growth", content)
-        self.assertLess(content.index("time=00:20"), content.index("time=00:30"))
+        self.assertNotIn("planner决定@00:10", content)
+        self.assertIn(_section("previous_decision", context._previous_decisions()), content)
+        self.assertIn("# planner决定@00:20\n" + context.previous_decisions[0][1], context._previous_decisions())
+        self.assertIn("# planner决定@00:30\n" + context.previous_decisions[1][1], context._previous_decisions())
+        self.assertLess(content.index("planner决定@00:20"), content.index("planner决定@00:30"))
         self.assertIn("BuildWorkers: [Persistent] Set worker target.", content)
         self.assertNotIn("argument_definitions", content)
         self.assertNotIn("BuildWorkers(", content)
@@ -110,7 +112,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.directory = Path(self.temp.name)
         self.controller = LLMGameController(
-            GameConfig(excutor_interval_iterations=2, planner_interval_iterations=4),
+            GameConfig(),
             LLMConfig(model="test", base_url="https://example.invalid", api_key="test-secret"),
             log_directory=self.directory,
         )
@@ -118,6 +120,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.bot = SimpleNamespace(
             time=0.0, time_formatted="00:00", supply_workers=12,
             minerals=100, vespene=0, start_location=object(),
+            mediator=SimpleNamespace(get_own_structures_dict={}),
             calculate_cost=Mock(return_value=SimpleNamespace(minerals=50, vespene=0)),
             tech_requirement_progress=Mock(return_value=1.0),
             register_behavior=Mock(), chat_send=AsyncMock(), can_afford=Mock(return_value=True),
@@ -125,11 +128,11 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         builder = self.controller.observation_builder
         builder.collect_frame = Mock()
         builder.execution_context = Mock(side_effect=lambda _bot: self.context)
-        builder.build = Mock(side_effect=lambda _bot, iteration, history_cycles=1: Observation(iteration, {}, f"OBS frame={iteration}\n" + builder.action_history.render(history_cycles), self.context))
+        builder.build = Mock(side_effect=lambda _bot, iteration, history_cycles=2: Observation(iteration, f"OBS frame={iteration}\n" + builder.action_history.render(history_cycles), self.context))
         self.controller.action_exposure.build = Mock(return_value=SimpleNamespace(entries=[], validate=Mock()))
         self.gate = asyncio.Event()
-        self.working = "## Current phase\nopening\n## Guidance\nPrepare expansion."
-        self.reply = "# actions\nBuildWorkers(to_count=22)"
+        self.working = "## assessment\nNo immediate threat.\n## stage\nopening\n## objective\nGrow economy.\n## guidence\nPrepare expansion."
+        self.reply = "## actions\n\nBuildWorkers(to_count=22)"
 
         async def complete(messages, *, phase, trace, iteration):
             trace.model_conversation(stage="request", iteration=iteration, request=messages)
@@ -151,8 +154,8 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def deliver(self):
         self.gate.set()
         await asyncio.sleep(0)
-        if self.controller._pending is not None:
-            await self.controller._pending
+        if self.controller._planner_pending is not None:
+            await self.controller._planner_pending
         await self.frame(2, 1)
         if self.controller._pending is not None:
             await self.controller._pending
@@ -216,8 +219,8 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("actions_reference", messages[1]["content"])
         await self.frame(4, 5)
         messages = self.controller.client.complete.call_args_list[2].args[0]
-        self.assertIn("time=00:00 phase=opening guidance=Prepare expansion.", messages[1]["content"])
-        self.assertEqual(self.controller.client.complete.await_count, 4)
+        self.assertIn(_section("previous_decision", "# planner决定@00:00\n" + self.working), messages[1]["content"])
+        self.assertEqual(self.controller.client.complete.await_count, 3)
         settings = (self.directory / "settings.json").read_text()
         self.assertNotIn("test-secret", settings)
         self.assertFalse((self.directory / "context").exists())
@@ -292,8 +295,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
                 self.controller.executor._persistent_behaviors["old"] = object()
                 self.controller.executor.run_persistent = Mock()
                 self.gate.clear()
-                self.controller._next_excutor_iteration = 0
-                self.controller._next_planner_iteration = 0
+                self.controller._next_planner_game_time = 0
                 await self.frame(1, 10)
                 self.assertEqual(self.controller.automation.worker_target, 23)
                 self.assertTrue(self.controller.executor.persistent_actions.actions)
@@ -324,23 +326,22 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.controller.automation.worker_target)
         self.assertEqual(self.controller.context_builder.working, "")
 
-    async def test_fixed_iteration_schedule_uses_latest_plan(self):
-        self.controller.game_config = GameConfig()
+    async def test_serial_cycle_waits_two_game_seconds_after_application(self):
         self.bot.mediator = SimpleNamespace(get_own_structures_dict={})
         self.gate.set()
-        for iteration in (0, 1, 90, 91, 180, 181, 270, 271, 360, 361):
-            await self.frame(iteration, iteration / 22.4)
+        for iteration, game_time in ((0, 0), (1, 0.1), (2, 0.2), (1000, 2.19), (1001, 2.2), (1002, 2.3), (1003, 2.4)):
+            await self.frame(iteration, game_time)
         calls = self.controller.client.complete.call_args_list
-        self.assertEqual([c.kwargs['iteration'] for c in calls if c.kwargs['phase'] == 'planner'], [0, 270])
-        self.assertEqual([c.kwargs['iteration'] for c in calls if c.kwargs['phase'] == 'excutor'], [90, 180, 270, 360])
+        self.assertEqual([c.kwargs['phase'] for c in calls], ['planner', 'excutor', 'planner', 'excutor'])
+        self.assertEqual([c.kwargs['iteration'] for c in calls], [0, 1, 1001, 1002])
         for call in calls:
             if call.kwargs['phase'] == 'excutor':
                 self.assertIn(_section('current_decision', self.working), call.args[0][1]['content'])
         windows = [c.kwargs['history_cycles'] for c in self.controller.observation_builder.build.call_args_list]
-        self.assertEqual(windows, [4, 1, 1, 4, 1, 1])
+        self.assertEqual(windows, [2, 2, 2, 2])
+        self.assertEqual(self.controller._next_planner_game_time, 4.4)
 
-    async def test_slow_planner_does_not_block_excutor_or_duplicate_requests(self):
-        self.controller.game_config = GameConfig()
+    async def test_slow_planner_blocks_excutor_and_does_not_duplicate_requests(self):
         self.bot.mediator = SimpleNamespace(get_own_structures_dict={})
         self.controller.context_builder.update_working(self.working)
         planner_gate = asyncio.Event()
@@ -353,16 +354,50 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.controller.client.complete = AsyncMock(side_effect=complete)
         for iteration in (0, 90, 180):
             await self.frame(iteration, iteration / 22.4)
-        self.assertEqual(self.controller.client.complete.await_count, 2)
-        excutor_gate.set()
+        self.assertEqual(self.controller.client.complete.await_count, 1)
+        self.assertIsNone(self.controller._pending)
+        planner_gate.set()
         await asyncio.sleep(0)
         await self.frame(181, 8)
-        self.assertEqual(self.controller.context_builder.working, self.working)
-        self.assertEqual(self.controller.automation.worker_target, 22)
+        self.assertEqual(self.controller.context_builder.working, 'new plan')
+        self.assertIsNone(self.controller.automation.worker_target)
         await self.frame(270, 12)
-        self.assertEqual(self.controller.client.complete.await_count, 3)
+        self.assertEqual(self.controller.client.complete.await_count, 2)
         await self.frame(360, 16)
         self.assertEqual(sum(c.kwargs['phase'] == 'planner' for c in self.controller.client.complete.call_args_list), 1)
+        excutor_gate.set()
+        await self.controller._pending
+        await self.frame(361, 17)
+        self.assertEqual(self.controller.automation.worker_target, 22)
+        await self.frame(362, 18.99)
+        self.assertEqual(self.controller.client.complete.await_count, 2)
+        await self.frame(363, 19)
+        self.assertEqual(self.controller.client.complete.await_count, 3)
+
+    async def test_planner_timeout_skips_excutor_and_preserves_controls(self):
+        self.controller.context_builder.update_working('old plan')
+        self.controller.automation.replace_worker_override({'id': 'BuildWorkers', 'args': {'to_count': 23}})
+        self.controller.client.complete = AsyncMock(side_effect=TimeoutError('planner deadline'))
+        await self.frame(0, 0)
+        await self.frame(1, 1)
+        await self.frame(1000, 2.99)
+        self.assertEqual(self.controller.client.complete.await_count, 1)
+        self.assertEqual(self.controller.context_builder.working, 'old plan')
+        self.assertEqual(self.controller.automation.worker_target, 23)
+        await self.frame(1001, 3)
+        self.assertEqual([c.kwargs['phase'] for c in self.controller.client.complete.call_args_list], ['planner', 'planner'])
+
+    async def test_excutor_timeout_keeps_controls_and_waits_before_new_planner(self):
+        self.controller.automation.replace_worker_override({'id': 'BuildWorkers', 'args': {'to_count': 23}})
+        self.controller.client.complete = AsyncMock(side_effect=[self.working, TimeoutError('excutor deadline'), self.working])
+        await self.frame(0, 0)
+        await self.frame(1, 0.1)
+        await self.frame(2, 0.2)
+        self.assertEqual(self.controller.automation.worker_target, 23)
+        await self.frame(1000, 2.19)
+        self.assertEqual(self.controller.client.complete.await_count, 2)
+        await self.frame(1001, 2.2)
+        self.assertEqual([c.kwargs['phase'] for c in self.controller.client.complete.call_args_list], ['planner', 'excutor', 'planner'])
 
     async def test_minimal_automation_lowers_depot_without_strategic_callbacks(self):
         from sc2.ids.unit_typeid import UnitTypeId

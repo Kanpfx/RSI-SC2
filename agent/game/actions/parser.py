@@ -10,11 +10,12 @@ import tokenize
 from typing import Any
 
 from agent.game.actions.errors import OutputFormatError
+from agent.game.actions.resolution.types import symbol
 
 
 def _heading_content(text: str, heading: str) -> tuple[str, int]:
     pattern = re.compile(
-        rf"^[ \t]*#[ \t]+{heading}[ \t]*$",
+        rf"^[ \t]*#{{1,2}}[ \t]+{heading}[ \t]*$",
         re.IGNORECASE | re.MULTILINE,
     )
     match = pattern.search(text)
@@ -100,7 +101,7 @@ def _parse_dsl_action(source: str) -> dict[str, Any]:
                 normalized,
             )
             expression = ast.parse(normalized, mode="eval").body
-    except (SyntaxError, tokenize.TokenError, IndentationError) as exc:
+    except (SyntaxError, tokenize.TokenError) as exc:
         raise OutputFormatError.dsl_action(source, "invalid function syntax") from exc
 
     if not isinstance(expression, ast.Call) or not isinstance(
@@ -121,9 +122,7 @@ def _parse_dsl_action(source: str) -> dict[str, Any]:
             raise OutputFormatError.dsl_action(
                 source, "argument unpacking is not allowed"
             )
-        normalized = "".join(
-            character for character in keyword.arg.casefold() if character.isalnum()
-        )
+        normalized = symbol(keyword.arg)
         if normalized in normalized_names:
             raise OutputFormatError.dsl_action(
                 source, f"duplicate argument {keyword.arg!r}"

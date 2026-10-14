@@ -10,13 +10,15 @@ from agent.game.actions.execution.adapter import AresActionAdapter
 from agent.game.actions.errors import (
     ActionNameError,
     exception_reason,
-    ConflictError,
     InstructionError,
     ParameterError,
 )
 from agent.game.actions.policy.exposure import ActionSurface
-from agent.game.actions.policy.rules import validate_resolved, actor_parameter
-from agent.game.actions.resolution.types import symbol, type_names
+from agent.game.actions.policy.rules import (
+    validate_resolved, actor_parameter, filter_group, actor_supported, ability_ready,
+    ActionSurfaceError,
+)
+from agent.game.actions.resolution.types import normalize_fields, symbol, type_names
 from agent.game.actions.resolution.resolver import EntityContext
 from agent.game.actions.resolution.loader import ActionCatalog
 
@@ -41,7 +43,9 @@ class ActionReview:
     issues: list[ValidationIssue]
     normalizations: list[str]
     notices: list[ValidationIssue] = field(default_factory=list)
-    arguments: list[dict[str, Any]] = field(default_factory=list)
+    # Group actions have one argument set per execution cohort; [] means waiting.
+    arguments: list[dict[str, Any] | list[dict[str, Any]]] = field(default_factory=list)
+    indices: list[int] = field(default_factory=list)
 
     @property
     def accepted(self) -> bool:
@@ -67,33 +71,74 @@ class PolicyValidator:
         context.bot = bot
         context.max_point_nudge_tiles = self.game_config.max_point_nudge_tiles
         valid, issues, notes, notices, arguments = [], [], [], [], []
-        seen = {}
-        for index, action in enumerate(actions):
+        seen, scopes, indices = {}, {}, []
+        # Validate later instructions first; only legal actions claim control.
+        for index in reversed(range(len(actions))):
+            action = actions[index]
             current = action
             try:
                 if index >= self.game_config.max_actions_per_decision:
                     raise InstructionError('action limit exceeded', f'at most {self.game_config.max_actions_per_decision} actions')
                 if not isinstance(action, dict):
                     raise InstructionError('format error', 'each action must be an object')
-                current = self._normalize_fields(action, {'id': 'id', 'args': 'args'})
+                current = normalize_fields(action, {'id': 'id', 'args': 'args'})
                 entry = self.catalog.get(current.get('id'))
                 if not entry['enabled']:
                     raise ActionNameError.disabled(entry['name'])
                 if isinstance(current.get('args'), dict):
                     names = {symbol(p['name']): p['name'] for p in entry['params']}
-                    current['args'] = self._normalize_fields(current['args'], names)
-                # Remove known dead group members before resolving the current group.
+                    current['args'] = normalize_fields(current['args'], names)
                 actor_param = actor_parameter(entry)
-                group = current.get('args', {}).get(actor_param) if isinstance(current.get('args'), dict) else None
-                if actor_param == 'group' and isinstance(group, list):
-                    surviving = []
-                    for value in group:
-                        alias = context.canonical_entity_alias(value)
-                        if alias in context.known_own_aliases and alias not in context.own_entities:
-                            notices.append(ValidationIssue(index, f'unit {alias}', 'unit disappeared; removed from group'))
-                        else:
-                            surviving.append(alias)
-                    current['args']['group'] = surviving
+                if actor_param == 'group' and isinstance(current.get('args'), dict) and 'group' in current['args']:
+                    members, removed = filter_group(entry, current['args']['group'], context, seen)
+                    current['args']['group'] = members
+                    notices.extend(ValidationIssue(index, current, reason) for reason in removed)
+                    if not members:
+                        continue
+                    normalized, kwargs = self.adapter.prepare(current, context, resolve_runtime=False)
+                    self._validate_limits(entry, kwargs)
+                    # Check shared targets separately from individual actors.
+                    validate_resolved(entry, {**kwargs, 'group': []}, context)
+                    if surface is not None:
+                        surface.validate(entry, {k: v for k, v in normalized['args'].items() if k != 'group'})
+                    eligible = []
+                    ongoing = entry['persistent']
+                    for alias, unit in zip(members, kwargs['group']):
+                        try:
+                            if not actor_supported(entry, unit):
+                                raise ActionSurfaceError('actor cannot execute', f'unit {alias} cannot execute {entry["name"]} in its current state')
+                            ability = kwargs.get('ability', kwargs.get('ability_id'))
+                            if ability is not None and not ability_ready(unit, ability.name):
+                                raise ActionSurfaceError('ability unavailable', f'unit {alias}: {ability.name} unavailable')
+                            if surface is not None:
+                                surface.validate(entry, {'group': [alias]})
+                            eligible.append((alias, unit))
+                        except (TypeError, ValueError) as exc:
+                            if not persistent:
+                                notices.append(ValidationIssue(index, current,
+                                    f'unit {alias}: {exception_reason(exc)}; ' +
+                                    ('waiting' if ongoing else 'removed from group')))
+                    if not ongoing:
+                        normalized['args']['group'] = [alias for alias, unit in eligible]
+                        if not eligible:
+                            raise ParameterError.format('group', 'at least one executable member')
+                    cohorts = {}
+                    shared_grid = any(p['source'] == 'runtime' and p['value'] == 'group_grid' for p in entry['params'])
+                    for alias, unit in eligible:
+                        cohorts.setdefault(unit.is_flying if shared_grid else None, []).append(unit)
+                    prepared = []
+                    for group in cohorts.values():
+                        group_args = {**kwargs, 'group': group}
+                        self.adapter.resolve_runtime(entry, group_args, context)
+                        prepared.append(group_args)
+                    actor_tags = {str(context.own_entities[a].tag) for a in normalized['args']['group']}
+                    seen.update({tag: (index + 1, entry['name']) for tag in actor_tags})
+                    valid.append(normalized)
+                    arguments.append(prepared)
+                    indices.append(index)
+                    if normalized != action:
+                        notes.append(f'Action {index + 1}: filtered group members or normalized arguments')
+                    continue
                 normalized, kwargs = self.adapter.prepare(current, context)
                 actor_tags = validate_resolved(entry, kwargs, context, ready=not persistent)
                 if surface is not None:
@@ -102,28 +147,26 @@ class PolicyValidator:
                 if overlap:
                     tag = sorted(overlap)[0]
                     previous_index, previous_action = seen[tag]
-                    raise ConflictError.unit_reused(context.observation_id(tag), previous_action, previous_index)
+                    notices.append(ValidationIssue(index, normalized,
+                        f'unit {context.observation_id(tag)}: overridden by Action {previous_index}: {previous_action}'))
+                    continue
                 self._validate_limits(entry, kwargs)
+                scope = self.catalog.override_key(normalized)
+                if scope is not None and scope in scopes:
+                    notices.append(ValidationIssue(index, normalized, f'configuration overridden by Action {scopes[scope]}'))
+                    continue
+                if scope is not None:
+                    scopes[scope] = index + 1
                 seen.update({tag: (index + 1, entry['name']) for tag in actor_tags})
                 valid.append(normalized)
                 arguments.append(kwargs)
+                indices.append(index)
                 if normalized != action:
                     notes.append(f'Action {index + 1}: normalized names, references or coordinates')
             except (KeyError, TypeError, ValueError) as exc:
                 issues.append(ValidationIssue(index, current, exception_reason(exc)))
-        return ActionReview(valid, issues, notes, notices, arguments)
-
-    @staticmethod
-    def _normalize_fields(value: dict, aliases: dict[str, str]) -> dict:
-        result = {}
-        for key, item in value.items():
-            if not isinstance(key, str):
-                raise ParameterError.format('object', 'string field names')
-            name = aliases.get(symbol(key), key)
-            if name in result:
-                raise ParameterError.duplicate(name)
-            result[name] = item
-        return result
+        return ActionReview(valid[::-1], sorted(issues, key=lambda item: item.index), notes,
+                            sorted(notices, key=lambda item: item.index), arguments[::-1], indices[::-1])
 
     def _validate_limits(self, entry: dict[str, Any], kwargs: dict[str, Any]) -> None:
         for param in entry['params']:

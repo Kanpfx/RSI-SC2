@@ -62,7 +62,7 @@ class OutputFormatError(ActionError):
     def dsl_section(cls, name: str, count: int) -> "OutputFormatError":
         return cls(
             "invalid DSL output",
-            f"a '# {name}' section is required; found {count}",
+            f"a '## {name}' section is required; found {count}",
             parameter=name,
             expected="a heading section; use the first occurrence",
             actual=count,

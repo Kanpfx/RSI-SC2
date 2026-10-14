@@ -15,7 +15,7 @@ from sc2.protocol import ProtocolError
 from agent.game.actions.errors import InstructionError, ParameterError, ResolveError, exception_reason
 from agent.game.actions.resolution.loader import ActionCatalog
 from agent.game.actions.resolution.resolver import EntityContext
-from agent.game.actions.resolution.types import symbol
+from agent.game.actions.resolution.types import normalize_fields, symbol
 
 
 @lru_cache(maxsize=128)
@@ -55,7 +55,7 @@ class AresActionAdapter:
         return [self.construct(action, kwargs) for action, kwargs in
                 (self.prepare(action, context) for action in actions)]
 
-    def prepare(self, action: Any, context: EntityContext) -> tuple[dict[str, Any], dict[str, Any]]:
+    def prepare(self, action: Any, context: EntityContext, *, resolve_runtime: bool = True) -> tuple[dict[str, Any], dict[str, Any]]:
         if not isinstance(action, dict) or set(action) != {"id", "args"}:
             raise InstructionError("format error", "action must contain exactly id and args")
         if not isinstance(action['id'], str) or not isinstance(action['args'], dict):
@@ -63,16 +63,10 @@ class AresActionAdapter:
         entry = self.catalog.get(action['id'])
         params = self.catalog.model_params(entry)
         aliases = {symbol(name): name for name in params}
-        supplied = {}
-        for raw_name, value in action['args'].items():
-            if not isinstance(raw_name, str):
-                raise ParameterError.format('args', 'string parameter names')
-            name = aliases.get(symbol(raw_name), raw_name)
+        supplied = normalize_fields(action['args'], aliases, parameter='args')
+        for name in supplied:
             if name not in params:
                 raise ParameterError.unexpected([name])
-            if name in supplied:
-                raise ParameterError.duplicate(name)
-            supplied[name] = value
         wire, kwargs = {}, {}
         for name, param in params.items():
             if name not in supplied:
@@ -89,11 +83,16 @@ class AresActionAdapter:
             if param['source'] == 'fixed':
                 _, kwargs[param['name']] = self.catalog.type_resolver.resolve(
                     param['value'], param['type'], context, param['name'])
+        if resolve_runtime:
+            self.resolve_runtime(entry, kwargs, context)
+        self._validate_behavior(entry, kwargs)
+        return {"id": entry['name'], "args": wire}, kwargs
+
+    @staticmethod
+    def resolve_runtime(entry: dict[str, Any], kwargs: dict[str, Any], context: EntityContext) -> None:
         for param in entry['params']:
             if param['source'] == 'runtime':
                 kwargs[param['name']] = context.runtime_value(param['value'], kwargs)
-        self._validate_behavior(entry, kwargs)
-        return {"id": entry['name'], "args": wire}, kwargs
 
     def _validate_behavior(self, entry: dict[str, Any], args: dict[str, Any]) -> None:
         name = entry['name']
@@ -104,6 +103,9 @@ class AresActionAdapter:
             if args['structure_id'] not in STRUCTURE_TO_BUILDING_SIZE:
                 raise ParameterError.invalid_value('structure_id', args['structure_id'].name,
                                                    'a structure supported by BuildStructure; use dedicated gas/add-on behaviors otherwise')
+        if name == 'UpgradeCCs' and args['to'].name not in {'ORBITALCOMMAND', 'PLANETARYFORTRESS'}:
+            raise ParameterError.invalid_value('to', args['to'].name,
+                                               'ORBITALCOMMAND or PLANETARYFORTRESS')
         if name == 'UpgradeController':
             from sc2.dicts.upgrade_researched_from import UPGRADE_RESEARCHED_FROM
             if not args['upgrade_list'] or any(u not in UPGRADE_RESEARCHED_FROM for u in args['upgrade_list']):
@@ -135,13 +137,7 @@ class AresActionAdapter:
 
     @staticmethod
     def _resolve_tech_up_target(value: Any) -> Any:
-        """Resolve only targets that Ares' ``TechUp`` can safely inspect.
-
-        Ares indexes ``UNIT_TECH_REQUIREMENT`` during behavior execution.  A
-        generic enum such as ``TECHLAB`` therefore used to pass our adapter and
-        crash the game loop with a KeyError. Validate the same prerequisite
-        lookup here so malformed targets become recoverable policy issues.
-        """
+        """Check the prerequisite lookups used by Ares TechUp."""
         from ares.behaviors.macro.tech_up import BUILD_TECHLAB_FROM
         from ares.consts import ALL_STRUCTURES, GATEWAY_UNITS, TECHLAB_TYPES
         from ares.dicts.unit_tech_requirement import UNIT_TECH_REQUIREMENT
@@ -174,8 +170,6 @@ class AresActionAdapter:
                 "a concrete technology target supported by Ares TechUp",
             ) from exc
         return desired_tech
-
-
 
 class TrackedBehavior:
     """Report exceptions and execution outcomes; Ares owns readiness checks."""

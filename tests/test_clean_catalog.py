@@ -86,6 +86,27 @@ class CleanCatalogTests(unittest.TestCase):
         surface.validate(entry, action['args'])
         self.assertIn('FACTORY', surface.parameter_domains['AddonSwap']['structure_needing_addon'])
 
+    def test_command_center_upgrade_rejects_unrelated_unit_types(self):
+        for target in ('ORBITALCOMMAND', 'PLANETARYFORTRESS'):
+            action = {'id': 'UpgradeCCs', 'args': {'to': target}}
+            _, kwargs = self.adapter.prepare(action, EntityContext())
+            self.assertEqual(self.adapter.construct(action, kwargs).to, UnitTypeId[target])
+        with self.assertRaisesRegex(ValueError, 'ORBITALCOMMAND or PLANETARYFORTRESS'):
+            self.adapter.prepare({'id': 'UpgradeCCs', 'args': {'to': 'MARINE'}}, EntityContext())
+
+    def test_exposure_preserves_group_candidates_and_fixed_ability_readiness(self):
+        raven = SimpleNamespace(tag=1, type_id=UnitTypeId.RAVEN, abilities=[])
+        marine = SimpleNamespace(tag=2, type_id=UnitTypeId.MARINE)
+        context = EntityContext(own_entities={'1': raven, '2': marine})
+        exposure = ActionExposure(self.catalog)
+        bot = SimpleNamespace()
+        surface = exposure.build(bot, context)
+        self.assertEqual(surface.parameter_domains['GroupUseAbility']['group'], {'1', '2'})
+        self.assertNotIn('RavenAutoTurret', surface.action_ids)
+        raven.abilities = [AbilityId.BUILDAUTOTURRET_AUTOTURRET]
+        surface = exposure.build(bot, context)
+        self.assertEqual(surface.parameter_domains['RavenAutoTurret']['unit'], {'1'})
+
     def test_group_enemy_lists_accept_native_units_branch(self):
         enemy = SimpleNamespace(tag=2, position=Point2((4, 6)))
         context = EntityContext(enemy_entities={'2': enemy}, bot=SimpleNamespace())

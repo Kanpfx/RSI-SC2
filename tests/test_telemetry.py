@@ -13,23 +13,20 @@ from agent.harness.llm import LLMClient, ModelAgent
 
 
 class SystemTelemetryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_two_round_requests_retries_and_flat_logs(self):
+    async def test_serial_requests_and_flat_logs(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             with patch("agent.logger.recorder.runtime_manifest", return_value={}):
                 trace = Telemetry(directory=root)
             trace.save_settings({"model": "test"})
             trace.observation(iteration=4, game_loop=80, game_time=3.5, observation="OBS")
-            replies = iter([OSError("temporary"), "working", "# actions\nBuildWorkers(to_count=22)"])
+            replies = iter(["working", "# actions\nBuildWorkers(to_count=22)"])
             messages = [{"role": "user", "content": "original input"}]
             client = LLMClient(LLMConfig(model="test", base_url="https://example.invalid", api_key="secret"))
 
-            def complete_sync(messages, *, trace, iteration, attempt, request_started, phase):
+            def complete_sync(messages, *, phase, timeout):
                 reply = next(replies)
-                if isinstance(reply, Exception):
-                    raise reply
-                trace.model_conversation(stage="response", iteration=iteration, attempt=attempt, reply=reply)
-                return reply
+                return json.dumps({'choices': [{'message': {'content': reply}, 'finish_reason': 'stop'}]}), 200
 
             with patch.object(client, "_complete_sync", side_effect=complete_sync):
                 working = await client.complete(messages, phase='planner', trace=trace.request_trace(4, 'planner'), iteration=4)
@@ -50,8 +47,12 @@ class SystemTelemetryTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotEqual(requests[0]["request_id"], requests[1]["request_id"])
             self.assertEqual(requests[0]["request_body"]["messages"], messages)
             attempts = [row for row in events if row["event"] == "transport_attempt_started"]
-            self.assertEqual([row["attempt"] for row in attempts], [1, 2, 1])
-            self.assertEqual(len({row["attempt_id"] for row in attempts}), 3)
+            self.assertEqual([row["attempt"] for row in attempts], [1, 1])
+            self.assertEqual(len({row["attempt_id"] for row in attempts}), 2)
+            self.assertEqual([row['timeout_seconds'] for row in requests], [10.0, 5.0])
+            self.assertTrue(all(row['max_retries'] == 0 for row in requests))
+            responses = [row for row in model if row['stage'] == 'response']
+            self.assertTrue(all(row['request_elapsed_seconds'] >= 0 for row in responses))
             for row in model + events:
                 self.assertEqual(row["run_id"], trace.run_id)
                 self.assertEqual(row["decision_id"], 'd5' if row.get('request_phase') == 'excutor' else 'd4')

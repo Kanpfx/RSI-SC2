@@ -1,11 +1,6 @@
-- `overview`: time, races, map, resources, supply. `workers`/`army` = supply used; `income` = minerals/gas collected per minute before spending.
-- Entities: `TYPE: ID@(x,y) state attributes`. TYPE = UnitTypeId; ID = selectable entity; coordinates = observed position.
-- Attributes: `hp`/`shield` = percentages; omitted `hp` = full health. `energy`/`cargo` = current amounts. Buildings include progress and attachments; Battlecruisers include Jump/Yamato readiness.
-- Arguments: Unit = ID; Units = ID array; Point2 = `{x,y}` or listed landmark. `ID@(x,y)`/`@region` are display syntax.
-- Production/research: `NAME: progress=[20%,60%×2]` = one order at 20%, two at 60%; 0% may be queued. `upgrades` = completed research; construction progress is under structures.
-- Enemy memory: `TYPE*N@region last_seen=Ns_ago` = count, last known region, age. No selectable IDs; positions may be outdated.
-- `active`: persistent control for this cycle; resubmit each decision to continue. Waiting for resources/cooldown is not failure.
-- `submitted`: one-time order issued; task completion must be checked in observation.
-- `failed`: action rejected or order not issued; use the reported reason to correct it.
-- History: `time@...` = event time; excutor sees the last execution cycle, planner sees the last four. Old active controls disappear when the next action decision arrives.
-- `[None]` = empty; `[None visible]` = no enemies currently visible. `?`/`[Unknown]`/omitted capability fields = unknown, not zero.
+- Entity format: `TYPE[ID]@(x,y) | state=... | attributes | available abilities`.
+- Supply: `workers`/`army` are supply used, not unit counts; `used`/`cap` are total supply used/capacity.
+- Own entities show current state and whitelisted available abilities; visible enemies omit orders and abilities; enemy memory shows last-known data with `state=Ns ago` (time since last seen).
+- Workers, larvae, supply buildings, gas buildings and Terran addons are grouped as `TYPE[ID,ID,...] | state=...`, omitting position, attributes and abilities.
+- Production & Upgrades: `producting` = unit production; `researching` = ongoing upgrade research; `upgraded` = completed upgrades. Each percentage in `NAME=[20%,60%]` represents one order.
+- Action History covers the latest two execution cycles: `time@TIME ACTION [reason]`, grouped by `active` (persistent control this cycle), `submitted` (one-time order issued), or `failed` (action rejected or order submission failed).

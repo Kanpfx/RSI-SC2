@@ -26,9 +26,9 @@ class ActionHistory:
         self._cycle = 0
 
     def begin_decision(self) -> None:
-        """Retain the latest four execution cycles."""
+        """Retain the latest two execution cycles."""
         self._cycle += 1
-        oldest = self._cycle - 3
+        oldest = self._cycle - 1
         self._recent = [record for record in self._recent if record.cycle >= oldest]
 
     @staticmethod
@@ -64,7 +64,6 @@ class ActionHistory:
                     record.reason = reason
                     record.time = time
                     record.description = description
-                    record.cycle = self._cycle
                     return
         self._recent.append(ActionRecord(time, key, description, status, reason, self._cycle))
 
@@ -79,7 +78,7 @@ class ActionHistory:
                 record.reason = reason
                 break
 
-    def render(self, cycles: int = 1) -> str:
+    def render(self, cycles: int = 2) -> str:
         records = {(record.cycle, record.key): record for record in self._recent
                    if record.cycle >= self._cycle - cycles + 1}
         failures = [record for record in records.values() if record.status == "failed"]

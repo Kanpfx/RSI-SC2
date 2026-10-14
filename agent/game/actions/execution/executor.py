@@ -69,7 +69,7 @@ class ActionExecutor:
         self, bot: Any, iteration: int, review: ActionReview, context: Any,
         *, sources: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
-        states = []
+        states, origins = [], []
         for action_index, action in enumerate(review.actions):
             key = self.action_key(action)
             retained = (
@@ -83,6 +83,7 @@ class ActionExecutor:
                     "action_id": uuid4().hex,
                     **(sources[action_index] if sources is not None else {}),
                 }
+            origins.append(dict(self._action_origins[key]))
             try:
                 action_id = self.catalog.get(action["id"])["name"]
                 persistent = self.persistent_actions.is_persistent(action)
@@ -91,7 +92,7 @@ class ActionExecutor:
                     states.append({"action": action, "status": "active", "unchanged": not changed})
                     continue
                 # Check construction and parameters before replacing a valid old task.
-                behaviors = [self.adapter.construct(action, review.arguments[action_index])]
+                behaviors = self._construct_behaviors(action, review.arguments[action_index])
                 if (
                     not persistent and action_id == "BuildStructure"
                     and not bot.can_afford(review.arguments[action_index]["structure_id"])
@@ -113,8 +114,8 @@ class ActionExecutor:
             except (KeyError, TypeError, ValueError) as exc:
                 self.record_failure(bot, iteration, action, exception_reason(exc))
                 states.append({"action": action, "status": "failed", "reason": exception_reason(exc)})
-        for item in states:
-            item.update(self._action_origins.get(self.action_key(item["action"]), {}))
+        for item, origin in zip(states, origins):
+            item.update(origin)
         return states
 
     @staticmethod
@@ -135,6 +136,7 @@ class ActionExecutor:
         active_keys = {self.action_key(a) for a in self.persistent_actions.actions}
         self._persistent_behaviors = {k: v for k, v in self._persistent_behaviors.items() if k in active_keys}
         for action in self.persistent_actions.actions:
+            current = action
             try:
                 # Re-resolve current entities and runtime inputs. Temporary cooldowns
                 # do not invalidate a persistent intent; Ares handles readiness.
@@ -145,17 +147,32 @@ class ActionExecutor:
                     self.record_failure(bot, iteration, action, review.issues[0].reason)
                     continue
                 current = review.actions[0]
-                self.persistent_actions.replace(current)
+                old_key = self.action_key(action)
                 key = self.action_key(current)
-                behavior = self.adapter.construct(current, review.arguments[0], self._persistent_behaviors.get(key))
-                self._persistent_behaviors[key] = behavior
-                behaviors = [behavior]
+                previous = self._persistent_behaviors.get(old_key)
+                if key != old_key:
+                    self.persistent_actions.discard(action)
+                    self.persistent_actions.replace(current)
+                    self._persistent_behaviors.pop(old_key, None)
+                    if old_key in self._action_origins:
+                        self._action_origins[key] = self._action_origins.pop(old_key)
+                for notice in review.notices:
+                    self.record_feedback(bot, {'kind': 'action_notice', 'action': current, 'error': notice.reason})
+                behaviors = self._construct_behaviors(current, review.arguments[0], previous)
+                self._persistent_behaviors[key] = behaviors if isinstance(review.arguments[0], list) else behaviors[0]
                 self._register_behaviors(bot, iteration, current, behaviors, True)
             except (KeyError, TypeError, ValueError) as exc:
-                self.persistent_actions.discard(action)
-                self._persistent_behaviors.pop(self.action_key(action), None)
-                self.record_failure(bot, iteration, action, exception_reason(exc))
+                self.persistent_actions.discard(current)
+                self._persistent_behaviors.pop(self.action_key(current), None)
+                self.record_failure(bot, iteration, current, exception_reason(exc))
         self.sync_active(bot)
+
+    def _construct_behaviors(self, action, arguments, previous=None) -> list[Any]:
+        if not isinstance(arguments, list):
+            return [self.adapter.construct(action, arguments, previous)]
+        cached = previous if isinstance(previous, list) else []
+        return [self.adapter.construct(action, kwargs, cached[index] if index < len(cached) else None)
+                for index, kwargs in enumerate(arguments)]
 
     def _no_order_reason(self, bot: Any, action: dict[str, Any], behavior: Any) -> str | None:
         """Explain only blockers observable without issuing another command."""

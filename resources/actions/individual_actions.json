@@ -3,7 +3,7 @@
   "actions": [
     {
       "name": "AMove",
-      "description": "Attack-move or attack a unit unless already near the target.",
+      "description": "Attack-move or attack a unit; stop issuing orders near the target.",
       "import": "ares.behaviors.combat.individual.a_move.AMove",
       "enabled": true,
       "persistent": false,
@@ -36,7 +36,7 @@
     },
     {
       "name": "AttackTarget",
-      "description": "Issue an attack order against a selected unit.",
+      "description": "Attack the selected unit.",
       "import": "ares.behaviors.combat.individual.attack_target.AttackTarget",
       "enabled": true,
       "persistent": false,
@@ -69,7 +69,7 @@
     },
     {
       "name": "AutoUseAOEAbility",
-      "description": "Automatically select an available area ability and cast position.",
+      "description": "Choose an available area ability and where to cast it.",
       "import": "ares.behaviors.combat.individual.auto_use_aoe_ability.AutoUseAOEAbility",
       "enabled": true,
       "persistent": false,
@@ -118,7 +118,7 @@
     },
     {
       "name": "DropCargo",
-      "description": "Unload cargo at the current position; target is unused.",
+      "description": "Unload cargo here; target is unused.",
       "import": "ares.behaviors.combat.individual.drop_cargo.DropCargo",
       "enabled": true,
       "persistent": false,
@@ -143,7 +143,7 @@
     },
     {
       "name": "GhostSnipe",
-      "description": "Automatically select a snipe target against Zerg opponents.",
+      "description": "Choose an enemy to snipe; only works against Zerg.",
       "import": "ares.behaviors.combat.individual.ghost_snipe.GhostSnipe",
       "enabled": true,
       "persistent": false,
@@ -168,7 +168,7 @@
     },
     {
       "name": "KeepUnitSafe",
-      "description": "Move away from danger using an influence grid.",
+      "description": "Move out of danger.",
       "import": "ares.behaviors.combat.individual.keep_unit_safe.KeepUnitSafe",
       "enabled": true,
       "persistent": true,
@@ -193,7 +193,7 @@
     },
     {
       "name": "MedivacHeal",
-      "description": "Heal a selected set of allies while avoiding danger.",
+      "description": "Heal injured biological allies from the selected group while avoiding danger.",
       "import": "ares.behaviors.combat.individual.medivac_heal.MedivacHeal",
       "enabled": true,
       "persistent": true,
@@ -234,7 +234,7 @@
     },
     {
       "name": "MoveToSafeTarget",
-      "description": "Move toward a safe position near the destination.",
+      "description": "Move to a safe spot near the destination.",
       "import": "ares.behaviors.combat.individual.move_to_safe_target.MoveToSafeTarget",
       "enabled": true,
       "persistent": true,
@@ -331,7 +331,7 @@
     },
     {
       "name": "NydusPathUnitToTarget",
-      "description": "Path toward a destination using available Nydus connections.",
+      "description": "Move to the destination through available Nydus connections.",
       "import": "ares.behaviors.combat.individual.nydus_path_unit_to_target.NydusPathUnitToTarget",
       "enabled": false,
       "persistent": true,
@@ -404,7 +404,7 @@
     },
     {
       "name": "PathUnitToTarget",
-      "description": "Move toward a destination using pathfinding.",
+      "description": "Follow a path to the destination.",
       "import": "ares.behaviors.combat.individual.path_unit_to_target.PathUnitToTarget",
       "enabled": true,
       "persistent": true,
@@ -485,7 +485,7 @@
     },
     {
       "name": "PickUpAndDropCargo",
-      "description": "Load selected units, travel to a destination, and unload.",
+      "description": "Load selected units, move to the destination, and unload.",
       "import": "ares.behaviors.combat.individual.pick_up_and_drop_cargo.PickUpAndDropCargo",
       "enabled": true,
       "persistent": true,
@@ -558,7 +558,7 @@
     },
     {
       "name": "PickUpCargo",
-      "description": "Approach and load the nearest selected passenger.",
+      "description": "Move to and load the nearest selected unit.",
       "import": "ares.behaviors.combat.individual.pick_up_cargo.PickUpCargo",
       "enabled": true,
       "persistent": true,
@@ -599,7 +599,7 @@
     },
     {
       "name": "PlacePredictiveAoE",
-      "description": "Predict a chasing enemy position from a supplied movement path.",
+      "description": "Cast an area ability at a predicted position of a chasing enemy.",
       "import": "ares.behaviors.combat.individual.place_predictive_aoe.PlacePredictiveAoE",
       "enabled": true,
       "persistent": false,
@@ -656,7 +656,7 @@
     },
     {
       "name": "QueenSpreadCreep",
-      "description": "Automatically choose creep placements and move or cast.",
+      "description": "Choose where to spread creep, moving the queen if needed.",
       "import": "ares.behaviors.combat.individual.queen_spread_creep.QueenSpreadCreep",
       "enabled": false,
       "persistent": false,
@@ -689,7 +689,7 @@
     },
     {
       "name": "RavenAutoTurret",
-      "description": "Automatically place a turret near selected enemies.",
+      "description": "Place an auto-turret near selected enemies.",
       "import": "ares.behaviors.combat.individual.raven_auto_turret.RavenAutoTurret",
       "enabled": true,
       "persistent": false,
@@ -714,7 +714,7 @@
     },
     {
       "name": "ReaperGrenade",
-      "description": "Automatically place a grenade against selected enemies.",
+      "description": "Throw a grenade at selected enemies.",
       "import": "ares.behaviors.combat.individual.reaper_grenade.ReaperGrenade",
       "enabled": true,
       "persistent": false,
@@ -771,7 +771,7 @@
     },
     {
       "name": "ShootAndMoveToTarget",
-      "description": "Shoot selected enemies in range, otherwise move toward a destination.",
+      "description": "Shoot selected enemies in range; otherwise move to the destination.",
       "import": "ares.behaviors.combat.individual.shoot_and_move_to_target.ShootAndMoveToTarget",
       "enabled": true,
       "persistent": true,
@@ -828,7 +828,7 @@
     },
     {
       "name": "ShootTargetInRange",
-      "description": "Automatically select and attack a target in weapon range.",
+      "description": "Choose and attack an enemy in weapon range.",
       "import": "ares.behaviors.combat.individual.shoot_target_in_range.ShootTargetInRange",
       "enabled": true,
       "persistent": false,
@@ -861,7 +861,7 @@
     },
     {
       "name": "SiegeTankDecision",
-      "description": "Automatically decide whether to siege or unsiege.",
+      "description": "Choose whether to siege or unsiege.",
       "import": "ares.behaviors.combat.individual.siege_tank_decision.SiegeTankDecision",
       "enabled": true,
       "persistent": true,
@@ -918,7 +918,7 @@
     },
     {
       "name": "StutterUnitBack",
-      "description": "Attack the target when ready, otherwise seek safety if in danger.",
+      "description": "Attack when the weapon is ready; otherwise retreat if in danger.",
       "import": "ares.behaviors.combat.individual.stutter_unit_back.StutterUnitBack",
       "enabled": true,
       "persistent": true,
@@ -959,7 +959,7 @@
     },
     {
       "name": "StutterUnitForward",
-      "description": "Attack the target when ready, otherwise move toward it.",
+      "description": "Attack when the weapon is ready; otherwise move toward the target.",
       "import": "ares.behaviors.combat.individual.stutter_unit_forward.StutterUnitForward",
       "enabled": true,
       "persistent": true,
@@ -984,7 +984,7 @@
     },
     {
       "name": "TumorSpreadCreep",
-      "description": "Automatically spread creep near an edge or random valid position.",
+      "description": "Spread creep near its edge or at a random valid spot.",
       "import": "ares.behaviors.combat.individual.tumor_spread_creep.TumorSpreadCreep",
       "enabled": false,
       "persistent": false,
@@ -1009,7 +1009,7 @@
     },
     {
       "name": "UseAbility",
-      "description": "Issue a selected ability with an optional target.",
+      "description": "Use the selected ability, with an optional target.",
       "import": "ares.behaviors.combat.individual.use_ability.UseAbility",
       "enabled": true,
       "persistent": false,
@@ -1042,7 +1042,7 @@
     },
     {
       "name": "UseAOEAbility",
-      "description": "Choose a cast position for a selected area ability and enemy set.",
+      "description": "Choose where to cast the selected area ability against selected enemies.",
       "import": "ares.behaviors.combat.individual.use_aoe_ability.UseAOEAbility",
       "enabled": true,
       "persistent": false,
@@ -1123,7 +1123,7 @@
     },
     {
       "name": "UseTransfuse",
-      "description": "Automatically select a wounded ally for transfusion.",
+      "description": "Choose an injured ally to transfuse.",
       "import": "ares.behaviors.combat.individual.use_transfuse.UseTransfuse",
       "enabled": false,
       "persistent": false,
@@ -1156,7 +1156,7 @@
     },
     {
       "name": "WorkerKiteBack",
-      "description": "Attack the target when ready, otherwise retreat using mineral walking.",
+      "description": "Attack when the weapon is ready; otherwise retreat with mineral walking.",
       "import": "ares.behaviors.combat.individual.worker_kite_back.WorkerKiteBack",
       "enabled": true,
       "persistent": true,

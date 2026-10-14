@@ -8,12 +8,24 @@ import re
 from functools import lru_cache
 from typing import Any
 
-from agent.game.actions.errors import ResolveError
+from agent.game.actions.errors import ParameterError, ResolveError
 from agent.game.actions.resolution.resolver import EntityContext
 
 
 def symbol(value: str) -> str:
     return "".join(c for c in value.casefold() if c.isalnum())
+
+
+def normalize_fields(value: dict, aliases: dict[str, str], *, parameter: str = "object") -> dict:
+    result = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise ParameterError.format(parameter, "string field names")
+        name = aliases.get(symbol(key), key)
+        if name in result:
+            raise ParameterError.duplicate(name)
+        result[name] = item
+    return result
 
 
 @lru_cache(maxsize=128)
@@ -41,6 +53,11 @@ def _type_label(tree: tuple) -> str:
     return kind + ("[" + ", ".join(_type_label(arg) for arg in args) + "]" if args else "")
 
 
+@lru_cache(maxsize=16)
+def _enum_members(enum_type: Any) -> dict[str, Any]:
+    return {symbol(key): member for key, member in enum_type.__members__.items()}
+
+
 def resolve_enum(enum_type: Any, value: Any, name: str) -> Any:
     if not isinstance(value, str):
         raise ResolveError.format(name, f"a {enum_type.__name__} member name")
@@ -49,9 +66,9 @@ def resolve_enum(enum_type: Any, value: Any, name: str) -> Any:
         normalized = {"combatshield": "shieldwall", "combatshields": "shieldwall",
                       "concussiveshell": "punishergrenades",
                       "concussiveshells": "punishergrenades"}.get(normalized, normalized)
-    for key, member in enum_type.__members__.items():
-        if symbol(key) == normalized:
-            return member
+    member = _enum_members(enum_type).get(normalized)
+    if member is not None:
+        return member
     raise ResolveError.invalid_value(name, value, f"a valid {enum_type.__name__} member")
 
 
@@ -61,10 +78,7 @@ class TypeResolver:
     ATOMS = {"bool", "int", "float", "str", "null", "Unit", "Units", "Point2",
              "UnitTypeId", "AbilityId", "UpgradeId", "UnitRole", "ndarray"}
 
-    def __init__(self):
-        self.definitions = {name: {} for name in self.ATOMS}
-
-    def validate(self, expression: str, trail: frozenset[str] = frozenset()) -> None:
+    def validate(self, expression: str) -> None:
         def check(tree):
             name, args = tree
             if name == "union":
@@ -75,7 +89,7 @@ class TypeResolver:
                     raise ValueError(f"Invalid type arity: {expression}")
                 for arg in args:
                     check(arg)
-            elif args or name not in self.definitions:
+            elif args or name not in self.ATOMS:
                 raise ValueError(f"Unknown type: {name}")
         check(parse_type(expression))
 

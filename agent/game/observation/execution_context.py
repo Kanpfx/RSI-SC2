@@ -1,7 +1,8 @@
-"""Build current-frame entity, landmark and grid mappings."""
+"""Build current-frame entity and landmark mappings."""
 
 from __future__ import annotations
 
+from itertools import chain
 from typing import Any
 
 from agent.game.actions.resolution.resolver import EntityContext
@@ -28,7 +29,6 @@ def safe_mediator(bot: Any, attribute: str) -> Any:
         return None
 
 
-
 class ExecutionContextBuilder:
     def __init__(self, ids: TagIdMapper):
         self.ids = ids
@@ -38,9 +38,9 @@ class ExecutionContextBuilder:
         """Build a lightweight current-frame context without rendering a prompt."""
         context = EntityContext(bot=bot)
         self._add_execution_context(bot, context)
-        for entity in list(bot.units) + list(bot.structures):
+        for entity in chain(bot.units, bot.structures):
             context.own_entities[self.ids.alias(entity.tag)] = entity
-        for entity in list(bot.enemy_units) + list(bot.enemy_structures):
+        for entity in chain(bot.enemy_units, bot.enemy_structures):
             if getattr(entity, "is_visible", True) and not getattr(
                 entity, "is_memory", False
             ):
@@ -49,26 +49,14 @@ class ExecutionContextBuilder:
         context.known_own_aliases = set(self._known_own_aliases)
         return context
 
-
     def _add_execution_context(self, bot: Any, context: EntityContext) -> None:
         candidates = {
             "main": getattr(bot, "start_location", None),
             "natural": safe_mediator(bot, "get_own_nat"),
             "enemy_main": (getattr(bot, "enemy_start_locations", []) or [None])[0],
             "enemy_natural": safe_mediator(bot, "get_enemy_nat"),
-            "enemy_natural": safe_mediator(bot, "get_enemy_nat"),
         }
         context.positions.update(
             {name: point for name, point in candidates.items() if point is not None}
         )
-        for alias, attr in {
-            "ground": "get_ground_grid",
-            "air": "get_air_grid",
-            "ground_avoidance": "get_ground_avoidance_grid",
-            "air_avoidance": "get_air_avoidance_grid",
-            "tactical_ground": "get_tactical_ground_grid",
-        }.items():
-            value = safe_mediator(bot, attr)
-            if value is not None:
-                context.grids[alias] = value
 

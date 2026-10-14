@@ -145,6 +145,9 @@
     .action-summary { display:flex; flex-wrap:wrap; gap:6px 24px; padding-bottom:8px; color:var(--muted); font-size:12px; }
     .grid.body > section > h2 { margin-bottom:10px; }
     .grid.body > section > .body { padding:0; }
+    select { border:1px solid var(--line-strong); border-radius:8px; padding:8px; background:white; color:var(--ink); }
+    .metric[data-filter] { cursor:pointer; }
+    .issue { color:#b42318!important; margin:8px 0; overflow-wrap:anywhere; }
   </style>
 </head>
 <body>
@@ -163,8 +166,14 @@
         <button class="primary" id="directory-picker">选择日志目录</button>
         <label class="file-label" for="directory-input">兼容方式：选择文件夹</label>
         <input id="directory-input" type="file" webkitdirectory multiple>
-        <button id="previous" disabled>上一决策</button>
-        <button id="next" disabled>下一决策</button>
+        <button id="previous" disabled>上一轮</button>
+        <button id="next" disabled>下一轮</button>
+        <select id="cycle-filter" aria-label="筛选决策轮次">
+          <option value="all">全部轮次</option>
+          <option value="issues">有异常</option>
+          <option value="failed">请求未成功</option>
+          <option value="rejected">动作被拒绝</option>
+        </select>
       </div>
       <div class="tick-row">
         <span class="tick" id="tick-label">iteration —</span>
@@ -177,11 +186,12 @@
 
     <section class="grid hidden" id="viewer">
       <article class="card wide">
-        <header class="head"><span class="tag model">MODEL</span><h2>决策结果</h2></header>
+        <header class="head"><span class="tag model">MODEL</span><h2>本轮 Planner / Executor</h2></header>
         <div class="grid body">
-          <section><h2>Planner · 思考内容</h2><div class="body" id="reasoning-panel"></div></section>
-          <section><h2>Planner · 阶段与指导</h2><div class="body" id="model-panel"></div></section>
-          <section><h2>Excutor · 动作生成</h2><div class="body" id="validation-panel"></div></section>
+          <section><h2>Planner · 思考</h2><div class="body" id="planner-reasoning-panel"></div></section>
+          <section><h2>Planner · 回复</h2><div class="body" id="model-panel"></div></section>
+          <section><h2>Executor · 思考</h2><div class="body" id="executor-reasoning-panel"></div></section>
+          <section><h2>Executor · 回复</h2><div class="body" id="validation-panel"></div></section>
         </div>
       </article>
       <article class="card wide">
@@ -221,12 +231,11 @@
       "metadata.json", "obs.jsonl", "model.jsonl",
       "accepted_actions.jsonl", "events.jsonl", "console.log", "settings.json",
     ]);
-    const state = { metadata: {}, observations: [], model: [], decisions: [], events: [], console: "", iterations: [], settings: {} };
+    const state = { metadata: {}, observations: [], model: [], decisions: [], events: [], console: "", iterations: [], cycles: [], settings: {} };
     const rowIteration = row => {
       const decision = /^d(\d+)$/.exec(row.decision_id || "");
       return decision ? Number(decision[1]) : (row.request_iteration ?? row.iteration ?? NaN);
     };
-    const byIteration = rows => new Map(rows.map(row => [rowIteration(row), row]));
     let indexes = {};
 
     const $ = id => document.getElementById(id);
@@ -316,17 +325,30 @@
       state.console = consoleText;
       state.settings = settings ? JSON.parse(settings) : {};
 
-      state.iterations = [...new Set([
-        ...state.observations, ...state.model,
-        ...state.decisions, ...state.events,
-      ].map(rowIteration).filter(Number.isFinite))].sort((a, b) => a - b);
-      if (!state.iterations.length) throw new Error("日志中没有可浏览的 iteration。");
+      const cycleKeys = new Map();
+      state.cycles = [];
+      let current = null;
+      // Requests are serial: each planner owns the executor started before the next planner.
+      for (const row of state.model.filter(row => row.stage === "request")
+        .sort((a, b) => rowIteration(a) - rowIteration(b))) {
+        const key = rowIteration(row);
+        if (!Number.isFinite(key)) continue;
+        if (["planner", "working"].includes(row.request_phase) || !current || current.execution != null) {
+          current = { key, execution: null };
+          state.cycles.push(current);
+        }
+        if (["excutor", "actions"].includes(row.request_phase)) current.execution = key;
+        cycleKeys.set(key, current.key);
+      }
+      if (!state.cycles.length) throw new Error("日志中没有可浏览的模型请求。");
+      const cycleKey = row => cycleKeys.get(rowIteration(row)) ?? rowIteration(row);
       indexes = {
-        observation: groupByIteration(state.observations),
-        decision: byIteration(state.decisions),
-        model: groupByIteration(state.model),
-        event: groupByIteration(state.events),
+        observation: groupByIteration(state.observations, cycleKey),
+        decision: new Map(state.decisions.map(row => [cycleKey(row), row])),
+        model: groupByIteration(state.model, cycleKey),
+        event: groupByIteration(state.events, cycleKey),
       };
+      state.iterations = state.cycles.map(cycle => cycle.key);
       $("tick-slider").min = "0";
       $("tick-slider").max = String(state.iterations.length - 1);
       $("tick-slider").value = "0";
@@ -345,7 +367,8 @@
         fold("运行设置", formatFields(state.settings)),
       ]);
       renderSummary();
-      renderCurrent();
+      $("cycle-filter").value = "all";
+      applyFilter();
     }
 
     function groupByIteration(rows, key = rowIteration) {
@@ -363,21 +386,75 @@
       const meta = state.metadata;
       const opponent = [meta.enemy_race, meta.difficulty, meta.build_mode]
         .filter(Boolean).join(" · ") || "未知对手";
+      const responses = state.model.filter(row => row.stage === "response");
+      const usages = responses.map(response => responseData(response).usage);
+      const total = field => usages.reduce((sum, usage) => sum + Number(usage[field] || 0), 0);
+      const input = usages.reduce((sum, u) => sum + Number(u.prompt_tokens ?? u.input_tokens ?? 0), 0);
+      const output = usages.reduce((sum, u) => sum + Number(u.completion_tokens ?? u.output_tokens ?? 0), 0);
+      const thinking = usages.reduce((sum, u) => sum + Number(u.completion_tokens_details?.reasoning_tokens || 0), 0);
+      const duration = Math.max(0, ...state.observations.map(row => row.game_time || 0));
       const metrics = [
-        [meta.map_name || "未知地图", "地图"],
-        [opponent, "对手"],
-        [[meta.model, meta.planner_reasoning_effort].filter(Boolean).join(" · ") || "未知模型", "模型 / Planner 思考"],
-        [meta.result || "未完整结束", "结果"],
-        [meta.tactic || "未知战术", "战术"],
+        [meta.model || "未知模型", "模型"],
+        [meta.result || "未完整结束", `结果 · 观测至 ${gameTime(duration)}`],
+        [`${meta.map_name || "未知地图"} · ${opponent}`, "地图 / 对手"],
+        [`${input.toLocaleString()} / ${output.toLocaleString()}`, "已记录 tokens · 输入 / 输出"],
+        [thinking.toLocaleString(), "已记录思考 tokens · 包含在输出中"],
       ];
-      if (meta.excutor_interval_iterations != null) metrics.push([
-        `E ${meta.excutor_interval_iterations} / P ${meta.planner_interval_iterations}`, "调用间隔 · iteration",
-      ]);
-      $("summary").replaceChildren(...metrics.map(([value, label]) => {
+      if (usages.some(u => u.cost != null)) metrics.push([`$${total("cost").toFixed(5)}`, "已记录费用 · 超时用量可能缺失"]);
+      for (const [phase, label] of [["planner", "Planner"], ["excutor", "Executor"]]) {
+        const rounds = state.cycles.map(cycle => modelRecords(cycle.key)[phase === "planner" ? "planning" : "execution"]).filter(Boolean);
+        const ok = rounds.filter(round => round.response.stage && !round.failure && !round.response.error).length;
+        const timeout = rounds.filter(round => /timed out|timeout/i.test(round.failure?.error || "")).length;
+        const truncated = rounds.filter(round => responseData(round.response).finish === "length").length;
+        metrics.push([`${ok} / ${rounds.length}`, `${label} 成功 / 请求 · 超时 ${timeout} · 截断 ${truncated}`, "failed"]);
+      }
+      const reports = state.model.filter(row => row.stage === "validated").flatMap(row => row.validation_report || []);
+      const rejected = reports.filter(row => row.status === "rejected").length;
+      metrics.push([`${reports.filter(row => row.status === "passed").length} / ${rejected}`, "动作校验 · 通过 / 拒绝", "rejected"]);
+      metrics.push([state.cycles.filter(cycle => cycleFlags(cycle.key).issues).length, "有异常的轮次", "issues"]);
+      $("summary").replaceChildren(...metrics.map(([value, label, filter]) => {
         const metric = Object.assign(document.createElement("div"), { className: "metric" });
         metric.append(text(document.createElement("b"), value), text(document.createElement("span"), label));
+        metric.title = `${value} · ${label}`;
+        if (filter) {
+          metric.dataset.filter = filter;
+          metric.tabIndex = 0;
+          metric.setAttribute("role", "button");
+          const activate = () => { $("cycle-filter").value = filter; applyFilter(); };
+          metric.addEventListener("click", activate);
+          metric.addEventListener("keydown", event => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); activate(); } });
+        }
         return metric;
       }));
+    }
+
+    function gameTime(seconds) {
+      return `${Math.floor(seconds / 60).toString().padStart(2, "0")}:${Math.floor(seconds % 60).toString().padStart(2, "0")}`;
+    }
+
+    function cycleFlags(iteration) {
+      const { rounds, validation, parsed } = modelRecords(iteration);
+      const failed = rounds.some(round => round.failure || round.response.error || !round.response.stage);
+      const rejected = (validation.validation_report || []).some(row => row.status === "rejected")
+        || Boolean(parsed.parse_report?.errors?.length);
+      const issues = failed || rejected || Boolean(validation.notices?.length)
+        || (indexes.event.get(iteration) || []).some(row => row.status === "failed" || row.error);
+      return { failed, rejected, issues };
+    }
+
+    function applyFilter() {
+      const filter = $("cycle-filter").value;
+      state.iterations = state.cycles.map(cycle => cycle.key).filter(key => filter === "all" || cycleFlags(key)[filter]);
+      $("tick-slider").max = String(Math.max(0, state.iterations.length - 1));
+      $("tick-slider").value = "0";
+      $("tick-slider").disabled = !state.iterations.length;
+      $("viewer").classList.toggle("hidden", !state.iterations.length);
+      if (state.iterations.length) renderCurrent();
+      else {
+        $("status").textContent = "没有匹配的轮次";
+        $("tick-label").textContent = "轮次 —";
+        $("previous").disabled = $("next").disabled = true;
+      }
     }
 
     function renderCurrent() {
@@ -386,8 +463,8 @@
       const decision = indexes.decision.get(iteration);
       const observations = indexes.observation.get(iteration) || [];
       const observation = observations.at(-1);
-      $("tick-label").textContent = `iteration ${iteration}`;
-      $("status").textContent = `${position + 1} / ${state.iterations.length} · ${decision?.time || observation?.time || "--:--"}`;
+      $("tick-label").textContent = observations[0]?.time || "--:--";
+      $("status").textContent = `第 ${state.cycles.findIndex(cycle => cycle.key === iteration) + 1} 轮 · ${position + 1} / ${state.iterations.length} · ${decisionOutcome(iteration, decision)}`;
       $("previous").disabled = position === 0;
       $("next").disabled = position === state.iterations.length - 1;
       renderModel(iteration);
@@ -422,6 +499,10 @@
         else if (row.stage === "response" && requests.has(row.request_id)) requests.get(row.request_id).response = row;
       }
       const rounds = [...requests.values()];
+      for (const round of rounds) {
+        round.failure = (indexes.event.get(iteration) || []).filter(row => row.event === "transport_error"
+          && row.request_id === round.request.request_id).at(-1);
+      }
       const planning = rounds.find(round => ["planner", "working"].includes(round.request.request_phase));
       const execution = rounds.find(round => ["excutor", "actions"].includes(round.request.request_phase));
       return {
@@ -429,47 +510,51 @@
         request: execution?.request || planning?.request || {},
         response: execution?.response || {},
         parsed: last("parsed") || {}, validation: last("validated") || {},
-        failure: last("request_failed"),
+        failure: rounds.find(round => round.failure)?.failure || last("request_failed"),
       };
     }
 
-    function roundStats(response) {
-      const usage = response.usage || {};
-      const node = line("用量 / 耗时", `输入 ${usage.prompt_tokens ?? usage.input_tokens ?? "—"} · 输出 ${usage.completion_tokens ?? usage.output_tokens ?? "—"} tokens · ${response.total_latency_ms ?? response.latency_ms ?? "—"} ms`);
+    function responseData(response = {}) {
+      let raw = {};
+      try { raw = JSON.parse(response.raw_response || "{}"); } catch (_) {}
+      return { message: raw.choices?.[0]?.message || {}, usage: response.usage || raw.usage || {}, finish: raw.choices?.[0]?.finish_reason };
+    }
+
+    function roundStats(response, failure) {
+      const { usage } = responseData(response);
+      const thinking = usage.completion_tokens_details?.reasoning_tokens;
+      const node = line("用量 / 耗时", `输入 ${usage.prompt_tokens ?? usage.input_tokens ?? "—"} · 输出 ${usage.completion_tokens ?? usage.output_tokens ?? "—"}${thinking == null ? "" : `（思考 ${thinking}）`} tokens · ${response.request_elapsed_seconds ?? failure?.request_elapsed_seconds ?? "—"}s${usage.cost == null ? "" : ` · $${Number(usage.cost).toFixed(5)}`}`);
       node.className = "round-stats";
       return node;
     }
 
-    function plannerReasoning(response) {
-      let message = {};
-      if (response.raw_response) {
-        try { message = JSON.parse(response.raw_response).choices?.[0]?.message || {}; }
-        catch (_) { /* Older or incomplete logs may not contain a JSON response. */ }
-      }
+    function modelReasoning(response) {
+      const { message } = responseData(response);
       const readable = message.reasoning || message.reasoning_content;
       if (typeof readable === "string" && readable.trim()) return readable;
       const details = Array.isArray(message.reasoning_details) ? message.reasoning_details : [];
       const parts = details.filter(item => ["reasoning.text", "reasoning.summary"].includes(item.type))
         .map(item => item.text || item.summary).filter(value => typeof value === "string" && value.trim());
-      if (parts.length) return parts.join("\n\n");
+      if (parts.length) return [...new Set(parts)].join("\n\n");
       return details.some(item => item.type === "reasoning.encrypted")
         ? "仅返回加密推理记录，未返回可读思考文本。"
         : "未返回可读思考文本。";
     }
 
     function renderModel(iteration) {
-      let { planning, parsed } = modelRecords(iteration);
-      if (!planning) {
-        const response = state.model.filter(row => row.stage === "response"
-          && ["planner", "working"].includes(row.request_phase) && rowIteration(row) <= iteration
-          && (!parsed.working || row.reply === parsed.working)).at(-1);
-        if (response) planning = { response, request: state.model.find(row => row.stage === "request" && row.request_id === response.request_id) || {} };
-      }
+      const { planning } = modelRecords(iteration);
       const response = planning?.response || {};
-      const label = planning ? `Planner · iteration ${rowIteration(planning.request)}` : "本轮没有 Planner 请求";
-      replacePanel("reasoning-panel", [pre(planning?.response?.stage
-        ? plannerReasoning(response) : (planning ? "尚未收到 Planner 回复" : label))]);
-      replacePanel("model-panel", [line("规划记录", label), roundStats(response), pre(response.reply ?? (planning ? "尚未收到 Planner 回复" : label))]);
+      const nodes = [roundStats(response, planning?.failure)];
+      if (planning?.failure) nodes.push(issue(planning.failure.error));
+      const reply = response.reply ?? responseData(response).message.content;
+      nodes.push(reply ? pre(reply) : noData(planning ? "未收到 Planner 返回" : "本轮没有 Planner 请求"));
+      replacePanel("planner-reasoning-panel", [response.stage ? pre(modelReasoning(response)) : noData("未收到思考内容")]);
+      nodes.push(fold("请求与原始返回", JSON.stringify(planning || {}, null, 2)));
+      replacePanel("model-panel", nodes);
+    }
+
+    function issue(message) {
+      return Object.assign(document.createElement("p"), { className: "issue", textContent: message || "请求失败" });
     }
 
     function renderValidation(iteration) {
@@ -477,13 +562,20 @@
       const errors = parsed.parse_report?.errors || parsed.validation_feedback || [];
       const checks = validation.validation_report || [];
       const rejected = checks.filter(row => row.status === "rejected");
-      const nodes = [roundStats(response), pre(response.reply ?? (execution ? "尚未收到 Excutor 回复" : "本轮没有 Excutor 请求"))];
+      const nodes = [roundStats(response, execution?.failure)];
+      if (execution?.failure) nodes.push(issue(execution.failure.error));
+      if (responseData(response).finish === "length") nodes.push(issue("返回达到 token 上限；下方内容可能不完整，未应用为动作。"));
+      replacePanel("executor-reasoning-panel", [response.stage ? pre(modelReasoning(response)) : noData("未收到思考内容")]);
+      nodes.push(pre(response.reply ?? responseData(response).message.content
+        ?? (execution ? "未收到动作正文" : "Executor 未调用")));
       if (parsed.stage) nodes.push(line("解析 / 校验", `${parsed.actions?.length ?? 0} 条动作 · ${errors.length} 条解析错误 · ${rejected.length} 条校验拒绝`));
       const details = [...errors.map(item => ({ action: item.submitted_action ?? item.submitted_output, reason: item.error })),
-        ...rejected.map(item => ({ action: item.submitted_action ?? item.parsed_index, reason: item.reason })),
-        ...(validation.notices || []).map(item => ({ action: item.action, reason: item.error }))];
-      if (details.length) nodes.push(fold("错误与调整", formatFields(details)));
+        ...rejected.map(item => ({ action: item.submitted_action ?? parsed.actions?.[item.parsed_index - 1] ?? item.parsed_index, reason: item.reason }))];
+      if (details.length || validation.notices?.length) nodes.push(fold("错误与调整", formatFields([
+        ...details, ...(validation.notices || []).map(item => ({ action: item.action, reason: item.error })),
+      ])));
       if (validation.normalizations?.length) nodes.push(fold("归一化说明", formatFields(validation.normalizations)));
+      nodes.push(fold("请求与原始返回", JSON.stringify(execution || {}, null, 2)));
       replacePanel("validation-panel", nodes);
     }
 
@@ -493,7 +585,7 @@
     function decisionOutcome(iteration, decision) {
       const { planning, execution, response, parsed, validation, failure } = modelRecords(iteration);
       if (failure) return "\u8bf7\u6c42\u5931\u8d25";
-      if (planning && !execution && !decision) return planning.response?.stage ? "本轮仅更新规划" : "等待 Planner 回复";
+      if (planning && !execution && !decision) return planning.response?.stage ? "Executor 未调用" : "未收到 Planner 返回";
       if (response.reply === "") return "\u6a21\u578b\u8f93\u51fa\u4e3a\u7a7a";
       if (!parsed.stage && !parsed.actions) return "\u7b49\u5f85\u54cd\u5e94\u6216\u89e3\u6790";
       if (!parsed.actions?.length) return parsed.parse_report?.errors?.length
@@ -529,9 +621,9 @@
       const nodes = [];
       const summary = Object.assign(document.createElement("div"), { className: "action-summary" });
       summary.append(line("结果", decisionOutcome(iteration, decision)));
-      if (decision) summary.append(line("应用", `${decision.time || "--:--"} · iteration ${decision.applied_iteration ?? "—"}`));
-      const age = modelRecords(iteration).validation.observation_age_seconds;
-      if (age != null) summary.append(line("观测年龄", `${age} s`));
+      if (decision) summary.append(line("应用时间", decision.time || "--:--"));
+      const age = modelRecords(iteration).validation.observation_age_game_seconds;
+      if (age != null) summary.append(line("观测年龄", `${age} 游戏秒`));
       nodes.push(summary);
       if (states.length) nodes.push(...states.map(item => actionItem(item.action, item.status, item.reason, item.unchanged)));
       else if (decision?.actions?.length) nodes.push(...decision.actions.map(action => actionItem(action, "accepted")));
@@ -602,6 +694,7 @@
     }
 
     $("tick-slider").addEventListener("input", renderCurrent);
+    $("cycle-filter").addEventListener("change", applyFilter);
     $("previous").addEventListener("click", () => { $("tick-slider").stepDown(); renderCurrent(); });
     $("next").addEventListener("click", () => { $("tick-slider").stepUp(); renderCurrent(); });
     $("directory-input").addEventListener("change", async event => {

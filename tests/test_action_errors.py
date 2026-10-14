@@ -89,7 +89,7 @@ class ActionErrorTests(unittest.TestCase):
         self.assertIn("unit '12'", reason)
         self.assertIn('Action 2: PathGroupToTarget', reason)
 
-    def test_validation_conflict_reports_the_first_control(self):
+    def test_validation_conflict_retains_the_later_control(self):
         from agent.config import GameConfig
         from agent.game.actions.policy.validation import PolicyValidator
         from agent.game.actions.resolution.loader import ActionCatalog
@@ -101,7 +101,10 @@ class ActionErrorTests(unittest.TestCase):
         actions = [{'id': 'KeepUnitSafe', 'args': {'unit': '12'}}, {'id': 'AMove', 'args': {'unit': '12'}}]
         review = validator.review(SimpleNamespace(), actions, context)
         self.assertEqual(len(review.actions), 1)
-        self.assertIn('Action 1: KeepUnitSafe', review.issues[0].reason)
+        self.assertEqual(review.actions, [actions[1]])
+        self.assertFalse(review.issues)
+        self.assertEqual(review.indices, [1])
+        self.assertIn('Action 2: AMove', review.notices[0].reason)
 
     def test_ability_feedback_includes_actor_and_observed_energy(self):
         from agent.game.actions.policy.rules import validate_resolved

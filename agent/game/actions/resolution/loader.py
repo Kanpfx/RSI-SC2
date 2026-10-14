@@ -1,4 +1,4 @@
-"""Load the clean Ares action tables without expanding their schema."""
+"""Load and validate native Ares action tables."""
 
 from __future__ import annotations
 
@@ -38,8 +38,9 @@ class ActionCatalog:
     @classmethod
     def load(cls) -> "ActionCatalog":
         entries = {}
+        root = resolved_catalog_root()
         for name in ("individual_actions.json", "group_actions.json", "macro_actions.json"):
-            payload = json.loads((resolved_catalog_root() / name).read_text(encoding="utf-8"))
+            payload = json.loads((root / name).read_text(encoding="utf-8"))
             for entry in payload["actions"]:
                 if entry["name"] in entries:
                     raise ValueError(f"Duplicate action name: {entry['name']}")
@@ -66,6 +67,20 @@ class ActionCatalog:
                 raise ValueError(f"{entry['name']}.{param['name']}: missing value")
             if param["source"] == "runtime" and param["value"] not in RUNTIME_SOURCES:
                 raise ValueError(f"{entry['name']}.{param['name']}: unknown runtime source")
+        if 'override_keys' in entry:
+            keys = entry['override_keys']
+            if (not entry['persistent'] or not isinstance(keys, list)
+                    or any(not isinstance(key, str) or key not in self.model_params(entry) for key in keys)
+                    or len(set(keys)) != len(keys)):
+                raise ValueError(f"{entry['name']}: invalid override_keys")
+
+    def override_key(self, action):
+        """A declared persistent configuration scope; one-time work has no scope."""
+        entry = self.get(action['id'])
+        if not entry['persistent'] or 'override_keys' not in entry:
+            return None
+        values = [action['args'].get(key) for key in entry['override_keys']]
+        return entry['name'], json.dumps(values, sort_keys=True, separators=(',', ':'))
 
     def get(self, action_id):
         if isinstance(action_id, str):

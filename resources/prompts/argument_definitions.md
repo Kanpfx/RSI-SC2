@@ -1,4 +1,4 @@
-- Unit / Units: current observation ID / ID array, e.g. `unit=12`, `group=[12,13]`.
+- Unit / Units: current observation ID / ID array, e.g. `unit=12`, `group=[12,13]`; at most 21 units per group.
 - Point2: `{x,y}` or `main`, `natural`, `enemy_main`, `enemy_natural`, e.g. `target={x:40,y:60}`.
 - UnitTypeId / UpgradeId / AbilityId: enum names, e.g. `MARINE`, `STIMPACK`, `EFFECT_STIM`.
 - Containers: arrays `[...]` or objects `{...}`.

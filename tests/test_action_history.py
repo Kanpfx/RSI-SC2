@@ -6,27 +6,25 @@ from agent.game.observation.action_history import ActionHistory
 
 
 class ActionHistoryTests(unittest.TestCase):
-    def test_four_cycles_without_record_limit(self):
+    def test_two_cycles_without_record_limit(self):
         history = ActionHistory()
         history.begin_decision()
         for index in range(15):
             history.record(f"Action{index}()", "00:10", "failed", "invalid")
-        for _ in range(3):
-            history.begin_decision()
-        self.assertEqual(history.render(4).count("time@00:10"), 15)
         history.begin_decision()
-        self.assertEqual(history.render(4), "[None]")
+        self.assertEqual(history.render().count("time@00:10"), 15)
+        history.begin_decision()
+        self.assertEqual(history.render(), "[None]")
 
-    def test_phase_windows_preserve_each_cycle_and_sort_times(self):
+    def test_two_cycle_window_preserves_each_cycle_and_sorts_times(self):
         history = ActionHistory()
         for cycle in range(1, 6):
             history.begin_decision()
             history.record('Build()', f'00:{cycle * 10:02}', 'failed', str(cycle))
-        self.assertEqual(history.render().count('Build()'), 1)
-        planner = history.render(4)
-        self.assertEqual(planner.count('Build()'), 4)
-        self.assertNotIn('time@00:10', planner)
-        self.assertLess(planner.index('time@00:20'), planner.index('time@00:50'))
+        rendered = history.render()
+        self.assertEqual(rendered.count('Build()'), 2)
+        self.assertNotIn('time@00:30', rendered)
+        self.assertLess(rendered.index('time@00:40'), rendered.index('time@00:50'))
 
     def test_live_actions_survive_history_window(self):
         history = ActionHistory()

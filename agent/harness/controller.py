@@ -26,7 +26,7 @@ from agent.logger.recorder import Telemetry
 
 
 class LLMGameController:
-    """Schedule planner and excutor independently at game-frame boundaries."""
+    """Run planner then excutor, with a game-time delay between cycles."""
 
     def __init__(
         self,
@@ -48,12 +48,13 @@ class LLMGameController:
         self.telemetry = Telemetry(
             {
                 "model": self.llm_config.model,
-                "planner_reasoning_effort": self.llm_config.planner_reasoning_effort,
+                "reasoning_effort": self.llm_config.reasoning_effort,
                 "planner_max_tokens": self.llm_config.planner_max_tokens,
-                "excutor_temperature": self.llm_config.excutor_temperature,
                 "excutor_max_tokens": self.llm_config.excutor_max_tokens,
-                "excutor_interval_iterations": self.game_config.excutor_interval_iterations,
-                "planner_interval_iterations": self.game_config.planner_interval_iterations,
+                "decision_interval_game_seconds": self.game_config.decision_interval_game_seconds,
+                "planner_timeout_seconds": self.llm_config.planner_timeout_seconds,
+                "excutor_timeout_seconds": self.llm_config.excutor_timeout_seconds,
+                "scheduling": "planner_then_excutor",
                 "tactic": tactic_name,
                 **(run_metadata or {}),
             },
@@ -72,9 +73,8 @@ class LLMGameController:
         self._planner_iteration = -1
         self._planner_time = "--:--"
         self._request_iteration = -1
-        self._request_time = 0.0
-        self._next_excutor_iteration = 0
-        self._next_planner_iteration = 0
+        self._request_game_time = 0.0
+        self._next_planner_game_time = 0.0
         self._feedback: list[dict[str, Any]] = []
         self._closed = False
         self.executor = ActionExecutor(
@@ -103,44 +103,61 @@ class LLMGameController:
             return
         await self.automation.run(bot, iteration)
         try:
-            if self._planner_pending is not None and self._planner_pending.done():
-                task, self._planner_pending = self._planner_pending, None
-                try:
-                    self._save_working(task.result(), self._planner_iteration, self._planner_time)
-                except Exception as exc:
-                    self.executor.record_failure(bot, iteration, "Planner request", exception_reason(exc), stage="system")
-            applied = self._pending is not None and self._pending.done()
-            if applied:
-                try:
-                    await self._apply_pending(bot, iteration)
-                except (KeyError, TypeError, ValueError) as exc:
-                    self.executor.record_failure(bot, iteration, "Model application", exception_reason(exc))
+            await self._receive_replies(bot, iteration)
             context = self.observation_builder.execution_context(bot)
             for action in self.executor.persistent_actions.prune_missing_actors(context.own_entities):
                 self.executor.record_failure(bot, iteration, action, "entity_missing: controlled unit no longer exists")
             self.executor.sync_active(bot)
             self.executor.run_persistent(bot, iteration, context)
-            if self.active:
-                if iteration >= self._next_planner_iteration:
-                    interval = self.game_config.planner_interval_iterations
-                    self._next_planner_iteration = (iteration // interval + 1) * interval
-                    if self._planner_pending is None:
-                        self._start_planner(bot, iteration)
-                if iteration >= self._next_excutor_iteration:
-                    interval = self.game_config.excutor_interval_iterations
-                    self._next_excutor_iteration = (iteration // interval + 1) * interval
-                    if not applied and self._pending is None and self.context_builder.working:
-                        self._start_request(bot, iteration)
+            if (self.active and self._planner_pending is None and self._pending is None
+                    and float(bot.time) >= self._next_planner_game_time):
+                self._start_planner(bot, iteration)
         finally:
             self.automation.register_worker_production(bot)
 
-    def _start_planner(self, bot: Any, iteration: int) -> None:
-        observation = self.observation_builder.build(bot, iteration, history_cycles=4)
+    async def _receive_replies(self, bot: Any, iteration: int) -> None:
+        if self._planner_pending is not None and self._planner_pending.done():
+            task, self._planner_pending = self._planner_pending, None
+            try:
+                working = task.result()
+                if not working.strip():
+                    raise ValueError("Planner returned an empty plan")
+                self._save_working(working, self._planner_iteration, self._planner_time)
+                self._start_request(bot, iteration)
+            except Exception as exc:
+                self.executor.record_failure(
+                    bot, iteration, "Planner request", exception_reason(exc), stage="system",
+                    request_iteration=self._planner_iteration, decision_id=f"d{self._planner_iteration}",
+                    request_phase="planner",
+                )
+                self._finish_cycle(bot)
+        if self._pending is not None and self._pending.done():
+            try:
+                await self._apply_pending(bot, iteration)
+            except (KeyError, TypeError, ValueError) as exc:
+                self.executor.record_failure(bot, iteration, "Model application", exception_reason(exc))
+            finally:
+                self._finish_cycle(bot)
+
+    def _finish_cycle(self, bot: Any) -> None:
+        self._next_planner_game_time = float(bot.time) + self.game_config.decision_interval_game_seconds
+        self.telemetry.event(
+            "decision_cycle_finished", game_time=float(bot.time),
+            request_iteration=self._planner_iteration,
+            next_planner_game_time=self._next_planner_game_time,
+        )
+
+    def _request_observation(self, bot: Any, iteration: int, phase: str, history_cycles: int):
+        observation = self.observation_builder.build(bot, iteration, history_cycles=history_cycles)
         surface = self.action_exposure.build(bot, observation.context)
         self.telemetry.observation(
-            iteration=iteration, phase="planner", time=bot.time_formatted, observation=observation.text,
+            iteration=iteration, phase=phase, time=bot.time_formatted, observation=observation.text,
             game_time=float(bot.time), game_loop=getattr(getattr(bot, "state", None), "game_loop", None)
         )
+        return observation, surface
+
+    def _start_planner(self, bot: Any, iteration: int) -> None:
+        observation, surface = self._request_observation(bot, iteration, "planner", 2)
         self._planner_iteration = iteration
         self._planner_time = bot.time_formatted
         messages = self.context_builder.build_planner_messages(observation.text, surface.entries)
@@ -149,15 +166,10 @@ class LLMGameController:
         ))
 
     def _start_request(self, bot: Any, iteration: int) -> None:
-        observation = self.observation_builder.build(bot, iteration, history_cycles=1)
-        surface = self.action_exposure.build(bot, observation.context)
-        self.telemetry.observation(
-            iteration=iteration, phase="excutor", time=bot.time_formatted, observation=observation.text,
-            game_time=float(bot.time), game_loop=getattr(getattr(bot, "state", None), "game_loop", None)
-        )
+        observation, surface = self._request_observation(bot, iteration, "excutor", 2)
         self._feedback = []
         self._request_iteration = iteration
-        self._request_time = float(bot.time)
+        self._request_game_time = float(bot.time)
         # Pass detached prompt data only; the task must never access the live bot.
         working = self.context_builder.working
         messages = self.context_builder.build_excutor_messages(
@@ -219,14 +231,14 @@ class LLMGameController:
         for notice in notices:
             self.executor.record_feedback(bot, notice)
         rejected = {issue.index: issue for issue in review.issues}
-        normalized = iter(review.actions)
+        normalized = dict(zip(review.indices, review.actions))
         report = []
         for index, submitted in enumerate(result.actions):
             issue = rejected.get(index)
-            accepted = None if issue else next(normalized)
+            accepted = normalized.get(index)
             report.append({
                 "parsed_index": index + 1,
-                "status": "rejected" if issue else "passed",
+                "status": "rejected" if issue else "passed" if accepted is not None else "superseded",
                 "reason": issue.text() if issue else None,
                 **({"before": submitted, "after": accepted}
                    if accepted != submitted and not any(item.index == index for item in review.notices) else {}),
@@ -236,8 +248,8 @@ class LLMGameController:
             applied_iteration=iteration,
             applied_game_time=float(bot.time),
             applied_game_loop=getattr(getattr(bot, "state", None), "game_loop", None),
-            observation_age_seconds=round(float(bot.time) - self._request_time, 2),
-            response_to_apply_ms=round((perf_counter() - result.received_at) * 1000) if result.received_at else None,
+            observation_age_game_seconds=round(float(bot.time) - self._request_game_time, 3),
+            response_to_apply_seconds=round(perf_counter() - result.received_at, 3) if result.received_at else None,
             valid=not review.issues, validation_report=report, normalizations=review.normalizations,
             validated_actions=review.actions, notices=notices,
         )
@@ -248,14 +260,10 @@ class LLMGameController:
         feedback_start = len(self._feedback)
         states = self.executor.dispatch(bot, iteration, review, context, sources=[
             sources.get(index, {"action_index": index + 1})
-            for index in range(len(result.actions)) if index not in rejected
+            for index in review.indices
         ])
-        source_indices = {
-            self.executor.action_key(action): item["parsed_index"]
-            for action, item in zip(review.actions, (row for row in report if row["status"] == "passed"))
-        }
-        for state in states:
-            state["parsed_index"] = source_indices.get(self.executor.action_key(state["action"]))
+        for state, index in zip(states, review.indices):
+            state["parsed_index"] = index + 1
         validation_feedback.extend(self._feedback[feedback_start:])
         self.executor.sync_active(bot)
         await self._publish_decision(bot, iteration, result, states, validation_feedback)
@@ -278,26 +286,25 @@ class LLMGameController:
             ),
             queued_actions=[],
             validation_feedback=feedback,
-            latency_ms=result.latency_ms,
+            request_elapsed_seconds=result.request_elapsed_seconds,
         )
         header = (
             f"[model iteration={self._request_iteration} applied={iteration}] "
-            f"t={bot.time_formatted} model={result.latency_ms / 1000:.2f}s "
+            f"t={bot.time_formatted} model={result.request_elapsed_seconds:.2f}s "
             f"active={len(self.executor.persistent_actions.actions) + int(self.automation.worker_action is not None)}"
         )
-        await self._chat_model_decision(bot, header, actions)
         lines = format_indexed_actions(actions) if actions else ["No new action submissions."]
+        await self._chat_model_decision(bot, header, lines)
         logger.info("{}\n{}\n", header, "\n".join(lines))
         if feedback:
             logger.warning("Validation feedback:\n{}", format_feedback(feedback))
 
     @staticmethod
     async def _chat_model_decision(
-        bot: Any, header: str, actions: list[dict[str, Any]]
+        bot: Any, header: str, lines: list[str]
     ) -> None:
         try:
             await bot.chat_send(header, team_only=True)
-            lines = format_indexed_actions(actions) if actions else ["No new action submissions."]
             for line in lines:
                 await bot.chat_send(
                     line if len(line) <= 240 else f"{line[:237]}...", team_only=True

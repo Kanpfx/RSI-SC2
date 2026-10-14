@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from html import escape
 from textwrap import indent
 from typing import Any
@@ -22,25 +23,37 @@ def _section(tag: str, content: str, **attributes: str) -> str:
 def _action_card(entry: dict[str, Any]) -> str:
     params = [p for p in entry['params'] if p['source'] == 'model']
     arguments = [f"{p['name']}: {p['type']}" + ("" if p['required'] else " = null") for p in params]
-    ongoing = entry['persistent']
-    lifetime = ' [Persistent]' if ongoing else ''
+    lifetime = ' [Persistent]' if entry['persistent'] else ''
     return f"- `{entry['name']}({', '.join(arguments)})`:{lifetime} {entry['description']}"
 
 
 def _actions_reference(entries: list[dict[str, Any]]) -> str:
-    groups = {}
-    for entry in entries:
-        category = entry['import'].split('.')[2]
-        groups.setdefault(category, []).append(_action_card(entry))
     legend = "# argument_definitions\n" + (PROMPTS_ROOT / "argument_definitions.md").read_text(encoding="utf-8").strip()
-    actions = '\n\n'.join(f"**{category}**\n\n" + '\n'.join(cards) for category, cards in groups.items())
+    actions = _grouped_actions(entries, _action_card)
     return _section("actions_reference", legend + "\n\n# available_actions\n" + (actions or "[None]"))
 
 
 def _action_capabilities(entries: list[dict[str, Any]]) -> str:
-    cards = []
+    return _section("action_capabilities", _grouped_actions(entries, _capability_card))
+
+
+def _capability_card(entry: dict[str, Any]) -> str:
+    marker = ' [Persistent]' if entry['persistent'] else ''
+    return f"- {entry['name']}:{marker} {entry['description']}"
+
+
+def _grouped_actions(entries: list[dict[str, Any]], render: Callable[[dict[str, Any]], str]) -> str:
+    groups = {'Individual Combat': [], 'Group Combat': [], 'Macro': []}
     for entry in entries:
-        persistent = entry['persistent']
-        marker = ' [Persistent]' if persistent else ''
-        cards.append(f"- {entry['name']}:{marker} {entry['description']}")
-    return _section("action_capabilities", '\n'.join(cards))
+        groups[_action_category(entry)].append(render(entry))
+    return '\n\n'.join(
+        f"**{category}**\n\n" + '\n'.join(cards)
+        for category, cards in groups.items() if cards
+    )
+
+
+def _action_category(entry: dict[str, Any]) -> str:
+    parts = entry['import'].split('.')
+    if parts[2] == 'macro':
+        return 'Macro'
+    return 'Individual Combat' if parts[3] == 'individual' else 'Group Combat'

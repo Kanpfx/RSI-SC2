@@ -2,11 +2,38 @@
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
+from itertools import chain
 from typing import Any
 
+from ares.consts import ALL_STRUCTURES
+from sc2.dicts.unit_research_abilities import RESEARCH_INFO
+from sc2.dicts.unit_train_build_abilities import TRAIN_INFO
+
+from agent.game.actions.formatting import format_action
+from agent.game.actions.policy.rules import actor_parameter
 from agent.game.actions.resolution.resolver import EntityContext
-from agent.game.observation.execution_context import TagIdMapper, safe_mediator
+from agent.game.observation.execution_context import TagIdMapper
+from agent.paths import KNOWLEDGE_ROOT
+
+
+COMPACT_UNIT_TYPES = frozenset({"SCV", "DRONE", "PROBE", "LARVA"})
+COMPACT_STRUCTURE_TYPES = frozenset({
+    "SUPPLYDEPOT", "SUPPLYDEPOTLOWERED", "PYLON",
+    "REFINERY", "REFINERYRICH", "ASSIMILATOR", "ASSIMILATORRICH",
+    "EXTRACTOR", "EXTRACTORRICH",
+    "BARRACKSTECHLAB", "FACTORYTECHLAB", "STARPORTTECHLAB",
+    "BARRACKSREACTOR", "FACTORYREACTOR", "STARPORTREACTOR",
+})
+PRODUCTION_ABILITIES = frozenset(
+    data["ability"].name
+    for producer, products in TRAIN_INFO.items() if producer in ALL_STRUCTURES
+    for product, data in products.items() if product not in ALL_STRUCTURES
+)
+RESEARCH_ABILITIES = frozenset(
+    data["ability"].name for upgrades in RESEARCH_INFO.values() for data in upgrades.values()
+)
 
 
 def _type_name(unit: Any) -> str:
@@ -19,64 +46,41 @@ def _type_name(unit: Any) -> str:
         return "UNKNOWN"
 
 
-def count_entities(units: list[Any]) -> dict[str, int]:
-    result: dict[str, int] = {}
-    for unit in units:
-        name = _type_name(unit)
-        result[name] = result.get(name, 0) + 1
-    return result
-
-
 class EntityRenderer:
     def __init__(self, ids: TagIdMapper):
         self.ids = ids
+        self._ability_whitelist = {
+            entry["unit"]: frozenset(entry["abilities"])
+            for entry in json.loads((KNOWLEDGE_ROOT / "terran_abilities.json").read_text(encoding="utf-8"))
+        }
+        self._active_states: dict[str, list[str]] = {}
+        self._structure_memory: dict[int, tuple[Any, float]] = {}
 
-    def _role_labels(self, bot: Any) -> dict[int, str]:
-        """Translate only the few Ares roles that make sense to a commander."""
-        try:
-            from ares.consts import UnitRole
+    def update_structure_memory(self, bot: Any) -> None:
+        """Refresh last-visible snapshots each frame; discard absent buildings."""
+        now = float(bot.time)
+        memory = {}
+        for structure in bot.enemy_structures:
+            if getattr(structure, "is_visible", True) and not getattr(structure, "is_memory", False):
+                memory[structure.tag] = (structure, now)
+            elif structure.tag in self._structure_memory:
+                memory[structure.tag] = self._structure_memory[structure.tag]
+        self._structure_memory = memory
 
-            get_units = bot.mediator.get_units_from_role
-        except (AttributeError, ImportError):
-            return {}
-        labels: dict[int, str] = {}
-        for role, label in (
-            (UnitRole.ATTACKING_MAIN_SQUAD, "attacking"),
-            (UnitRole.ATTACKING, "attacking"),
-            (UnitRole.DEFENDING, "defending"),
-            (UnitRole.BASE_DEFENDER, "defending"),
-            (UnitRole.BUILDING, "constructing"),
-            (UnitRole.GATHERING, "gathering"),
-            (UnitRole.REPAIRING, "repairing"),
-            (UnitRole.MAP_CONTROL, "scouting"),
-        ):
-            try:
-                for unit in get_units(role=role):
-                    labels[unit.tag] = label
-            except (AttributeError, KeyError, TypeError):
+    def sync_active_actions(self, actions: list[dict[str, Any]]) -> None:
+        states: dict[str, list[str]] = defaultdict(list)
+        for action in actions:
+            param = actor_parameter({"name": action["id"]})
+            actors = action["args"].get(param) if param else None
+            if actors is None:
                 continue
-        return labels
-
-
-    @staticmethod
-    def _battlecruiser_ability_lines(unit: Any) -> list[str]:
-        """Expose only the two BC decisions that model can act on directly."""
-        abilities = getattr(unit, "abilities", None)
-        if abilities is None:
-            return [
-                "EFFECT_TACTICALJUMP: [Unknown]",
-                "YAMATO_YAMATOGUN: [Unknown]",
-            ]
-        names = {getattr(ability, "name", str(ability)) for ability in abilities}
-        return [
-            "EFFECT_TACTICALJUMP: ready"
-            if "EFFECT_TACTICALJUMP" in names
-            else "EFFECT_TACTICALJUMP: unavailable",
-            "YAMATO_YAMATOGUN: ready"
-            if "YAMATO_YAMATOGUN" in names
-            else "YAMATO_YAMATOGUN: unavailable",
-        ]
-
+            label = format_action({
+                "id": action["id"],
+                "args": {key: value for key, value in action["args"].items() if key != param},
+            })
+            for actor in actors if isinstance(actors, list) else [actors]:
+                states[EntityContext.canonical_entity_alias(actor)].append(label)
+        self._active_states = dict(states)
 
     @staticmethod
     def _health_value(unit: Any, field: str = "health") -> str:
@@ -87,113 +91,88 @@ class EntityRenderer:
         percentage = getattr(unit, field + "_percentage", None)
         return f"{int(100 * percentage)}%" if isinstance(percentage, (int, float)) else "?"
 
+    def own_unit_blocks(self, units: list[Any], bot: Any) -> list[str]:
+        return self._entity_blocks(units, COMPACT_UNIT_TYPES, bot, own=True)
 
-    def own_unit_blocks(
-        self, units: list[Any], context: EntityContext, bot: Any
-    ) -> list[str]:
-        role_labels = self._role_labels(bot)
+    def enemy_unit_blocks(self, units: list[Any], bot: Any) -> list[str]:
+        return self._entity_blocks(units, COMPACT_UNIT_TYPES, bot, own=False)
+
+    def remembered_enemy_unit_blocks(self, units: list[Any], bot: Any) -> list[str]:
+        ages = {unit.tag: max(0, int(unit.age)) for unit in units}
         return self._entity_blocks(
-            [(unit, role_labels.get(unit.tag, self._own_unit_state(unit))) for unit in units],
-            context.own_entities,
+            units, COMPACT_UNIT_TYPES, bot, own=False, memory_ages=ages
         )
-
-
-    def enemy_unit_blocks(
-        self, units: list[Any], context: EntityContext, bot: Any
-    ) -> list[str]:
-        return self._entity_blocks(
-            [(unit, "attacking" if getattr(unit, "is_attacking", False) else "visible")
-             for unit in units],
-            context.enemy_entities,
-        )
-
-
-    def remembered_enemy_unit_blocks(
-        self, units: list[Any], bot: Any
-    ) -> list[str]:
-        grouped: dict[tuple[str, str], list[Any]] = defaultdict(list)
-        for unit in units:
-            grouped[(_type_name(unit), self._area_label(unit, bot))].append(unit)
-
-        blocks: dict[tuple[str, str, str], list[Any]] = {}
-        for (name, location), members in grouped.items():
-            ages: list[int] = []
-            for unit in members:
-                try:
-                    ages.append(max(0, int(float(getattr(unit, "age", 0.0)))))
-                except (AttributeError, TypeError, ValueError):
-                    ages.append(0)
-            youngest, oldest = min(ages), max(ages)
-            age = str(youngest) if youngest == oldest else f"{youngest}-{oldest}"
-            blocks[
-                (
-                    name,
-                    f"last_seen={age}s_ago",
-                    location,
-                )
-            ] = members
-        return self._memory_blocks(blocks)
-
 
     def remembered_enemy_structure_blocks(
         self, structures: list[Any], bot: Any
     ) -> list[str]:
-        grouped: dict[tuple[str, str, str], list[Any]] = defaultdict(list)
+        now = float(bot.time)
+        snapshots, ages = [], {}
         for structure in structures:
-            grouped[
-                (
-                    _type_name(structure),
-                    f"last_seen={int(getattr(structure, 'age', 0))}s_ago",
-                    self._area_label(structure, bot),
-                )
-            ].append(structure)
-        return self._memory_blocks(grouped)
-
+            saved = self._structure_memory.get(structure.tag)
+            snapshot, seen_at = saved if saved else (structure, None)
+            snapshots.append(snapshot)
+            ages[structure.tag] = max(0, int(now - seen_at)) if seen_at is not None else None
+        return self._entity_blocks(
+            snapshots, COMPACT_STRUCTURE_TYPES, bot, own=False, memory_ages=ages
+        )
 
     def structure_blocks(
-        self, structures: list[Any], context: EntityContext, bot: Any, *, own: bool
+        self, structures: list[Any], bot: Any, *, own: bool
     ) -> list[str]:
-        entries = []
-        for structure in structures:
-            state = self._structure_state(structure)
-            if getattr(structure, "is_flying", False):
-                state += " flying"
-            if getattr(structure, "has_techlab", False):
-                state += f" addon={_type_name(structure)}TECHLAB"
-            elif getattr(structure, "has_reactor", False):
-                state += f" addon={_type_name(structure)}REACTOR"
-            entries.append((structure, state))
-        target = context.own_entities if own else context.enemy_entities
-        return self._entity_blocks(entries, target)
-
+        return self._entity_blocks(structures, COMPACT_STRUCTURE_TYPES, bot, own=own)
 
     @staticmethod
-    def _memory_blocks(grouped: dict[tuple[str, str, str], list[Any]]) -> list[str]:
-        return [
-            f"{name}*{len(members)}@{location} {state}"
-            for (name, state, location), members in sorted(
-                grouped.items(), key=lambda item: (item[0][0], item[0][2], item[0][1])
-            )
-        ]
+    def _memory_age(ages: list[int | None]) -> str:
+        if any(age is None for age in ages):
+            return "unknown"
+        youngest, oldest = min(ages), max(ages)
+        return f"{youngest}s ago" if youngest == oldest else f"{youngest}-{oldest}s ago"
 
     def _entity_blocks(
-        self, entries: list[tuple[Any, str]], entity_map: dict[str, Any]
+        self, units: list[Any], compact_types: frozenset[str], bot: Any, *,
+        own: bool, memory_ages: dict[int, int | None] | None = None,
     ) -> list[str]:
         blocks = []
-        for unit, state in sorted(entries, key=lambda item: (_type_name(item[0]), item[0].tag)):
+        compact: dict[tuple[str, str], list[str]] = defaultdict(list)
+        compact_ages: dict[str, list[int | None]] = defaultdict(list)
+        gas_tags = set()
+        if own:
+            gas_tags = {unit.tag for unit in chain(
+                getattr(bot, "gas_buildings", ()), getattr(bot, "vespene_geyser", ())
+            )}
+        for unit in sorted(units, key=lambda unit: (_type_name(unit), unit.tag)):
             name = _type_name(unit)
             alias = self.ids.alias(unit.tag)
-            entity_map[alias] = unit
+            age = memory_ages[unit.tag] if memory_ages is not None else None
+            if memory_ages is not None:
+                state = self._memory_age([age])
+            elif own:
+                active = self._active_states.get(alias, []) + self._active_states.get(name, [])
+                state = self._core_state(unit, active, gas_tags)
+            else:
+                state = self._visible_enemy_state(unit)
+            if name in compact_types:
+                compact[name, "" if memory_ages is not None else state].append(alias)
+                if memory_ages is not None:
+                    compact_ages[name].append(age)
+                continue
             position = getattr(unit, "position", None)
             location = (
                 f"({position.x:.1f},{position.y:.1f})"
                 if position is not None else "[Unknown]"
             )
-            fields = [f"{alias}@{location}", state]
-            hp = self._health_value(unit)
-            if hp != "100%":
-                fields.append(f"hp={hp}")
-            for field in ("shield", "energy", "cargo"):
+            hp = self._health_value(unit) if memory_ages is None or age is not None else "?"
+            fields = [f"{name}[{alias}]@{location}", f"state={state}", f"HP={hp}"]
+            if own:
+                extra_fields = ("shield", "energy", "cargo")
+            elif memory_ages is not None:
+                extra_fields = ("shield",)
+            else:
+                extra_fields = ("shield", "energy")
+            for field in extra_fields:
+                if memory_ages is not None and age is None:
+                    continue
                 if not getattr(unit, field + "_max", 0) > 0:
                     continue
                 if field == "shield":
@@ -203,80 +182,68 @@ class EntityRenderer:
                     raw = getattr(unit, attr, None)
                     value = str(int(raw)) if isinstance(raw, (int, float)) else "?"
                 fields.append(f"{field}={value}")
-            if name == "BATTLECRUISER":
-                fields.extend(self._battlecruiser_ability_lines(unit))
-            blocks.append(f"{name}: " + " ".join(fields))
+            # Enemy ability availability is not part of the visible game state.
+            abilities = getattr(unit, "abilities", None) if own else None
+            if abilities:
+                allowed = self._ability_whitelist.get(name, ())
+                names = sorted({getattr(a, "name", str(a)) for a in abilities}.intersection(allowed))
+                if names:
+                    fields.append(",".join(names))
+            blocks.append(" | ".join(fields))
+        for (name, state), aliases in sorted(compact.items()):
+            if memory_ages is not None:
+                state = self._memory_age(compact_ages[name])
+            blocks.append(f"{name}[{','.join(aliases)}] | state={state}")
         return blocks
 
+    @staticmethod
+    def _visible_enemy_state(unit: Any) -> str:
+        progress = float(getattr(unit, "build_progress", 1.0))
+        states = [f"building({int(progress * 100)}%)"] if progress < 1.0 else []
+        states.extend(
+            label for flag, label in (
+                ("is_flying", "flying"), ("is_burrowed", "burrowed"), ("is_cloaked", "cloaked"),
+            ) if getattr(unit, flag, False)
+        )
+        buffs = getattr(unit, "buffs", ())
+        states.extend(f"buff={name}" for name in sorted(getattr(b, "name", str(b)) for b in buffs))
+        return ",".join(states) or "visible"
 
     @staticmethod
-    def _own_unit_state(unit: Any) -> str:
-        if getattr(unit, "is_constructing_scv", False):
-            return "constructing"
-        if getattr(unit, "is_repairing", False):
-            return "repairing"
-        if getattr(unit, "is_attacking", False):
-            return "attacking"
-        if getattr(unit, "is_idle", False):
-            return "idle"
-        if _type_name(unit) == "SCV":
-            return "working"
-        return "active"
-
-
-    def _area_label(self, unit: Any, bot: Any) -> str:
-        """Group entities by nearby expansion or map landmark."""
-        position = getattr(unit, "position", None)
-        if position is None:
-            return "[Unknown]"
-        main = getattr(bot, "start_location", None)
-        candidates = [
-            ("main", main),
-            ("natural", safe_mediator(bot, "get_own_nat")),
-            ("enemy_main", (getattr(bot, "enemy_start_locations", []) or [None])[0]),
-            ("enemy_natural", safe_mediator(bot, "get_enemy_nat")),
+    def _core_state(unit: Any, active: list[str], gas_tags: set[int]) -> str:
+        progress = float(getattr(unit, "build_progress", 1.0))
+        orders = getattr(unit, "orders", [])
+        if active:
+            state = ",".join(active)
+        elif progress < 1.0:
+            state = f"building({int(progress * 100)}%)"
+        elif getattr(unit, "is_gathering", False) or getattr(unit, "is_returning", False):
+            target = getattr(unit, "order_target", None)
+            gas = getattr(unit, "is_carrying_vespene", False) or target in gas_tags
+            state = "gathering_gas" if gas else "gathering_minerals"
+        else:
+            state = next((
+                label for flag, label in (
+                    ("is_constructing_scv", "constructing"), ("is_repairing", "repairing"),
+                    ("is_attacking", "attacking"), ("is_moving", "moving"),
+                ) if getattr(unit, flag, False)
+            ), None)
+            if state is None and orders:
+                order = orders[0]
+                ability = getattr(order.ability, "exact_id", None) or getattr(order.ability, "id", None)
+                name = str(getattr(ability, "name", "order"))
+                if name in PRODUCTION_ABILITIES:
+                    state = "producing"
+                elif name in RESEARCH_ABILITIES:
+                    state = "researching"
+                else:
+                    state = name + (f"({int(order.progress * 100)}%)" if 0 < order.progress < 1 else "")
+            if state is None:
+                state = "idle" if getattr(unit, "is_idle", False) else "unknown"
+        modifiers = [
+            label for flag, label in (
+                ("is_flying", "flying"), ("has_techlab", "addon=TECHLAB"),
+                ("has_reactor", "addon=REACTOR"),
+            ) if getattr(unit, flag, False)
         ]
-        known_points = [point for _, point in candidates if point is not None]
-        candidates = [
-            (f"{name}({int(point.x)},{int(point.y)})" if point is not None else name, point)
-            for name, point in candidates
-        ]
-        expansions = []
-        for point in getattr(bot, "expansion_locations_list", []) or []:
-            try:
-                if any((point.x - known.x) ** 2 + (point.y - known.y) ** 2 <= 64 for known in known_points):
-                    continue
-                distance = (point.x - main.x) ** 2 + (point.y - main.y) ** 2 if main is not None else 0
-                expansions.append((distance, point.x, point.y, point))
-            except (AttributeError, TypeError):
-                continue
-        for index, (_, _, _, point) in enumerate(sorted(expansions, key=lambda item: item[:3]), start=1):
-            candidates.append((f"expansion_{index}", point))
-        center = getattr(getattr(bot, "game_info", None), "map_center", None)
-        if center is not None:
-            candidates.append((f"center({int(center.x)},{int(center.y)})", center))
-        closest_name = "elsewhere"
-        closest_distance = float("inf")
-        for name, point in candidates:
-            if point is None:
-                continue
-            try:
-                distance = (position.x - point.x) ** 2 + (position.y - point.y) ** 2
-            except AttributeError:
-                continue
-            if distance < closest_distance:
-                closest_name, closest_distance = name, distance
-        return closest_name if closest_distance <= 400 else "elsewhere"
-
-
-    @staticmethod
-    def _structure_state(structure: Any) -> str:
-        progress = float(getattr(structure, "build_progress", 1.0))
-        if progress < 1.0:
-            return f"building={int(progress * 100)}%"
-        if _type_name(structure) == "SUPPLYDEPOTLOWERED":
-            return "lowered"
-        if getattr(structure, "is_idle", False):
-            return "idle"
-        return "busy" if getattr(structure, "orders", []) else "ready"
-
+        return ",".join([state, *modifiers])

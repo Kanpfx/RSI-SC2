@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from agent.harness.action_reference import _action_capabilities, _actions_reference, _section
@@ -41,15 +40,10 @@ class ContextBuilder:
         return changed
 
     def _previous_decisions(self) -> str:
-        rows = []
-        for time, decision in self.previous_decisions:
-            phase = re.search(r"^## Current phase\s*\n(.*?)(?=^## |\Z)", decision, re.M | re.S)
-            guidance = re.search(r"^## Guidance\s*\n(.*?)(?=^## |\Z)", decision, re.M | re.S)
-            phase_text = ' '.join(phase.group(1).split()) if phase else '[Unknown]'
-            guidance_text = ' | '.join(line.strip() for line in
-                                     (guidance.group(1) if guidance else decision).splitlines() if line.strip())
-            rows.append(f"time={time} phase={phase_text} guidance={guidance_text or '[None]'}")
-        return '\n'.join(rows) or 'No previous decision.'
+        return '\n\n'.join(
+            f"# planner决定@{time}\n{decision}"
+            for time, decision in self.previous_decisions
+        ) or 'No previous decision.'
 
     def build_planner_messages(self, observation: str,
                                action_entries: list[dict[str, Any]]) -> list[dict[str, str]]:
