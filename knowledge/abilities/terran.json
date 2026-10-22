@@ -1,0 +1,147 @@
+{
+  "REPAIR": {
+    "name": "Repair",
+    "actor": "SCV, MULE",
+    "description": "Restores eligible mechanical targets and structures while spending resources. The repairer must remain able to work; this is not biological healing."
+  },
+  "CALL_DOWN_MULE": {
+    "name": "Call Down MULE",
+    "actor": "Orbital Command",
+    "description": "Spends energy to summon a temporary mineral worker. The MULE does not replace permanent worker production and disappears when its lifetime ends."
+  },
+  "SCANNER_SWEEP": {
+    "name": "Scanner Sweep",
+    "actor": "Orbital Command",
+    "description": "Spends energy for temporary vision and detection over an area. Competes with MULE expenditure on that same Orbital Command."
+  },
+  "CALLDOWN_EXTRA_SUPPLIES": {
+    "name": "Calldown: Extra Supplies",
+    "actor": "Orbital Command",
+    "description": "Adds supply through a valid Supply Depot target. The supply is tied to that structure; it is not a map-wide invulnerable supply source."
+  },
+  "LIFT_LAND": {
+    "name": "Lift / Land",
+    "actor": "Eligible Terran structures",
+    "description": "Changes a building between flying and grounded states. Flying disables normal production; landing needs a legal footprint and add-on alignment. Planetary Fortress cannot lift."
+  },
+  "LOWER_RAISE": {
+    "name": "Lower / Raise",
+    "actor": "Supply Depot",
+    "description": "Opens or closes a ground passage while retaining the same Depot asset. Nearby units can prevent a requested raise."
+  },
+  "LOAD_UNLOAD": {
+    "name": "Load / Unload",
+    "actor": "Bunker, Medivac",
+    "description": "Stores and releases eligible passengers within cargo limits. Bunker passengers can fire from inside; Medivac passengers normally cannot."
+  },
+  "SALVAGE": {
+    "name": "Salvage",
+    "actor": "Bunker",
+    "description": "Removes the Bunker after a delay and refunds resources under its salvage rules. It sacrifices the defensive position rather than repairing it."
+  },
+  "STIMPACK": {
+    "name": "Stimpack",
+    "actor": "Marine, Marauder",
+    "description": "After research, spends the user's health for temporary movement and attack-speed increases. Repeated use without healing can make the army vulnerable."
+  },
+  "KD8_CHARGE": {
+    "name": "KD8 Charge",
+    "actor": "Reaper",
+    "description": "Throws a timed explosive that damages and displaces eligible ground targets. It can disrupt workers and spacing; it is not a sustained weapon replacement."
+  },
+  "CLOAK": {
+    "name": "Cloak",
+    "actor": "Ghost",
+    "description": "Requires Personal Cloaking research and energy. Concealment does not prevent detection or all area damage."
+  },
+  "EMP_ROUND": {
+    "name": "EMP Round",
+    "actor": "Ghost",
+    "description": "Area effect against shields and energy, with revealing interactions. Valuable against shield-heavy forces and casters; it does not simply remove ordinary health."
+  },
+  "STEADY_TARGETING_SNIPE": {
+    "name": "Steady Targeting / Snipe",
+    "actor": "Ghost",
+    "description": "Channels a high-damage shot at an eligible biological target. Target legality, channel interruption, and target movement can prevent completion."
+  },
+  "TACTICAL_NUKE": {
+    "name": "Tactical Nuke",
+    "actor": "Ghost",
+    "description": "Requires a prepared missile from the Ghost Academy and a valid designation. The delayed strike exposes a warning and can be stopped by interrupting the designator."
+  },
+  "SIEGE_UNSIEGE": {
+    "name": "Siege / Unsiege",
+    "actor": "Siege Tank",
+    "description": "Exchanges mobility and direct fire for stationary ground splash at longer range. Siege fire has a minimum engagement distance; it does not attack aircraft."
+  },
+  "BURROW_UNBURROW": {
+    "name": "Burrow / Unburrow",
+    "actor": "Widow Mine",
+    "description": "Arms or repositions the mine. Its automated shot can target eligible ground or air units; reload and concealment rules matter between shots."
+  },
+  "LOCK_ON": {
+    "name": "Lock On",
+    "actor": "Cyclone",
+    "description": "Sustained damage against a chosen legal target while maintaining the ability's tracking conditions. Breaking contact, losing the target, or being forced out can stop useful damage."
+  },
+  "TRANSFORM": {
+    "name": "Transform",
+    "actor": "Hellion / Hellbat",
+    "description": "Changes between a mobile line-fire vehicle and a short-range area attacker with a Biological interaction. Requires Armory tech; the unit keeps its identity and accumulated damage."
+  },
+  "SWITCH_ANTI_AIR_MODE": {
+    "name": "Switch anti-air mode",
+    "actor": "Thor",
+    "description": "Changes the anti-air weapon's role between area damage and focused heavy-target fire. Ground attack remains a separate weapon."
+  },
+  "ASSAULT_FIGHTER_MODE": {
+    "name": "Assault / Fighter mode",
+    "actor": "Viking",
+    "description": "Lands for ground attacks or takes off for anti-air attacks. The two forms cover different target categories and movement spaces."
+  },
+  "HEAL": {
+    "name": "Heal",
+    "actor": "Medivac",
+    "description": "Spends energy to restore eligible biological units. Does not repair mechanical units; proximity, energy, and target eligibility constrain it."
+  },
+  "IGNITE_AFTERBURNERS": {
+    "name": "Ignite Afterburners",
+    "actor": "Medivac",
+    "description": "Temporary speed increase on cooldown. Useful for travel or escape, but does not remove threats at the destination."
+  },
+  "CLOAKING_FIELD": {
+    "name": "Cloaking Field",
+    "actor": "Banshee",
+    "description": "Requires research and energy. Allows concealed ground harassment but provides no anti-air weapon or immunity to detection."
+  },
+  "AUTO_TURRET": {
+    "name": "Auto-Turret",
+    "actor": "Raven",
+    "description": "Spends energy to place a temporary attacking structure at a legal location. The turret can be attacked and expires."
+  },
+  "INTERFERENCE_MATRIX": {
+    "name": "Interference Matrix",
+    "actor": "Raven",
+    "description": "Temporarily disables eligible mechanical or psionic targets' offensive abilities. Research requirements differ across balance versions; check the baseline command set."
+  },
+  "ANTI_ARMOR_MISSILE": {
+    "name": "Anti-Armor Missile",
+    "actor": "Raven",
+    "description": "Applies a temporary armor-related debuff around the impact. It supports follow-up damage; it is not the old direct-damage missile from earlier versions."
+  },
+  "DEFENDER_MODE": {
+    "name": "Defender mode",
+    "actor": "Liberator",
+    "description": "Establishes a stationary ground firing zone; only legal units in that zone can be attacked by its ground weapon. Repositioning requires leaving the mode."
+  },
+  "TACTICAL_JUMP": {
+    "name": "Tactical Jump",
+    "actor": "Battlecruiser",
+    "description": "Relocates to a selected map point after a cast delay. It uses a cooldown rather than caster energy and does not require prior vision of the destination. Damage and interruption risks remain during the cast."
+  },
+  "YAMATO_CANNON": {
+    "name": "Yamato Cannon",
+    "actor": "Battlecruiser",
+    "description": "Requires Weapon Refit research; fires a high-damage targeted shot after a cast. The target must be legal, and casting is separate from a successful hit."
+  }
+}

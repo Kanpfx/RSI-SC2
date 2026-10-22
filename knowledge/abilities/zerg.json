@@ -1,0 +1,117 @@
+{
+  "SPAWN_LARVA": {
+    "name": "Spawn Larva",
+    "actor": "Queen",
+    "description": "Spends energy on a town hall to add Larva after a delay. It shares Queen energy with creep and healing; it does not itself train units."
+  },
+  "CREEP_TUMOR": {
+    "name": "Creep Tumor",
+    "actor": "Queen / mature tumor",
+    "description": "Extends creep through a placed tumor. Queen placement costs energy; tumor propagation has its own maturity/use rules. Buried tumors need detection to be targeted normally."
+  },
+  "TRANSFUSION": {
+    "name": "Transfusion",
+    "actor": "Queen",
+    "description": "Spends energy to heal an eligible friendly biological target. Current multiplayer rules constrain use through creep; a target merely being friendly is insufficient."
+  },
+  "BURROW": {
+    "name": "Burrow",
+    "actor": "Eligible Zerg units",
+    "description": "Conceals a unit underground, usually stopping movement and normal attacks. Standard Burrow research and unit-specific burrow modes are different unlocks."
+  },
+  "EXPLODE": {
+    "name": "Explode",
+    "actor": "Baneling",
+    "description": "Sacrifices the unit for area damage. Contact, target choice, and friendly spacing affect efficiency; a Baneling cannot resume fighting afterward."
+  },
+  "CORROSIVE_BILE": {
+    "name": "Corrosive Bile",
+    "actor": "Ravager",
+    "description": "Delayed point-targeted area damage with interactions against ground, air, and Force Fields. Targets can dodge before impact; the splash can threaten friendly units."
+  },
+  "LURKER_BURROW": {
+    "name": "Lurker Burrow",
+    "actor": "Lurker",
+    "description": "Enables its line-splash ground attack while stationary underground. Detection reveals the Lurker but does not itself stop its weapon."
+  },
+  "LUNGE_FRENZY": {
+    "name": "Lunge / Frenzy",
+    "actor": "Hydralisk",
+    "description": "Mobility burst associated with the researched Hydralisk ability in the cached command set. Requires the relevant late-game unlock; it is not a universal property of unupgraded Hydralisks."
+  },
+  "FUNGAL_GROWTH": {
+    "name": "Fungal Growth",
+    "actor": "Infestor",
+    "description": "Energy-based area damage and movement control. Hitting the area, affected unit rules, and follow-up damage matter."
+  },
+  "NEURAL_PARASITE": {
+    "name": "Neural Parasite",
+    "actor": "Infestor",
+    "description": "Researched channeled control over an eligible enemy. The Infestor remains exposed to interruption and must maintain the required relationship with the target."
+  },
+  "MICROBIAL_SHROUD": {
+    "name": "Microbial Shroud",
+    "actor": "Infestor",
+    "description": "Area protection against specified incoming attacks for units under the cloud. Research and exact protection rules changed across patches; it does not replace anti-air weapons."
+  },
+  "SPAWN_LOCUSTS": {
+    "name": "Spawn Locusts",
+    "actor": "Swarm Host",
+    "description": "Produces temporary attackers on a cooldown without spending Larva for each wave. Host safety and the gap between waves are major constraints."
+  },
+  "NYDUS_WORM": {
+    "name": "Nydus Worm",
+    "actor": "Nydus Network",
+    "description": "Creates a transport exit at a legal visible location. The emerging Worm can be attacked; using Nydus does not make passengers immune or guarantee a successful unload."
+  },
+  "GENERATE_CREEP": {
+    "name": "Generate Creep",
+    "actor": "Overlord",
+    "description": "After the relevant town-hall tech, a stationary Overlord can supply creep. Moving it stops generation; an Overlord still has no ordinary detection."
+  },
+  "TRANSPORT_MORPH": {
+    "name": "Transport morph",
+    "actor": "Overlord",
+    "description": "Paid transformation into a transport form. The transport role is distinct from the Overseer detector morph."
+  },
+  "SPAWN_CHANGELING": {
+    "name": "Spawn Changeling",
+    "actor": "Overseer",
+    "description": "Spends energy to create a temporary scouting decoy. The Changeling can imitate enemy infantry appearance but does not become a real enemy-controlled unit."
+  },
+  "CONTAMINATE": {
+    "name": "Contaminate",
+    "actor": "Overseer",
+    "description": "Temporarily disrupts an eligible enemy structure's production/research. Requires energy and reaching the target; it does not destroy the building."
+  },
+  "OVERSIGHT_MODE": {
+    "name": "Oversight Mode",
+    "actor": "Overseer",
+    "description": "Trades movement for a larger observation area while retaining its detector role. It is a mode of the existing Overseer."
+  },
+  "CAUSTIC_SPRAY": {
+    "name": "Caustic Spray",
+    "actor": "Corruptor",
+    "description": "Channels damage onto an enemy structure. It provides a building-damage option despite the Corruptor's normal anti-air-only weapon."
+  },
+  "CONSUME": {
+    "name": "Consume",
+    "actor": "Viper",
+    "description": "Drains an eligible friendly structure to restore the Viper's energy. It damages an asset and requires time rather than creating free energy without a cost."
+  },
+  "ABDUCT": {
+    "name": "Abduct",
+    "actor": "Viper",
+    "description": "Pulls an eligible enemy toward the Viper. Eligibility and immunity rules vary; do not assume every large or sieged target can be pulled."
+  },
+  "BLINDING_CLOUD": {
+    "name": "Blinding Cloud",
+    "actor": "Viper",
+    "description": "Restricts affected ranged ground attacks within the cloud. It does not disable every spell or remove aircraft weapons."
+  },
+  "PARASITIC_BOMB": {
+    "name": "Parasitic Bomb",
+    "actor": "Viper",
+    "description": "Applies a damaging area effect associated with an air target. Spreading aircraft limits how many are exposed together."
+  }
+}

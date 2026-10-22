@@ -1,0 +1,113 @@
+{
+  "INFANTRY_WEAPONS_1_3": {
+    "name": "Infantry Weapons 1-3",
+    "research_location": "Engineering Bay",
+    "description": "Improves eligible infantry attacks. Levels 2/3 need Armory and the previous level."
+  },
+  "INFANTRY_ARMOR_1_3": {
+    "name": "Infantry Armor 1-3",
+    "research_location": "Engineering Bay",
+    "description": "Improves infantry armor. Levels 2/3 need Armory and the previous level."
+  },
+  "VEHICLE_WEAPONS_1_3": {
+    "name": "Vehicle Weapons 1-3",
+    "research_location": "Armory",
+    "description": "Improves eligible ground-vehicle weapons; sequential levels."
+  },
+  "SHIP_WEAPONS_1_3": {
+    "name": "Ship Weapons 1-3",
+    "research_location": "Armory",
+    "description": "Improves eligible aircraft weapons; sequential levels."
+  },
+  "VEHICLE_AND_SHIP_PLATING_1_3": {
+    "name": "Vehicle and Ship Plating 1-3",
+    "research_location": "Armory",
+    "description": "Shared armor research for mechanical vehicle/air categories; separate from infantry armor."
+  },
+  "HI_SEC_AUTO_TRACKING": {
+    "name": "Hi-Sec Auto Tracking",
+    "research_location": "Engineering Bay",
+    "description": "Extends the range of affected defensive structures. Does not increase every unit's weapon range."
+  },
+  "BUILDING_ARMOR": {
+    "name": "Building Armor",
+    "research_location": "Engineering Bay",
+    "description": "Increases structure armor; separate from unit plating."
+  },
+  "STIMPACK": {
+    "name": "Stimpack",
+    "research_location": "Barracks Tech Lab",
+    "description": "Unlocks Stim for Marines and Marauders. The ability also spends the user's health."
+  },
+  "COMBAT_SHIELD": {
+    "name": "Combat Shield",
+    "research_location": "Barracks Tech Lab",
+    "description": "Increases Marine maximum health; does not increase Marauder health.",
+    "api_name": "SHIELDWALL"
+  },
+  "CONCUSSIVE_SHELLS": {
+    "name": "Concussive Shells",
+    "research_location": "Barracks Tech Lab",
+    "description": "Marauder attacks slow eligible targets. It does not allow anti-air fire.",
+    "api_name": "PUNISHERGRENADES"
+  },
+  "PERSONAL_CLOAKING": {
+    "name": "Personal Cloaking",
+    "research_location": "Ghost Academy",
+    "description": "Unlocks Ghost cloak, which still needs energy."
+  },
+  "INFERNAL_PRE_IGNITER": {
+    "name": "Infernal Pre-Igniter",
+    "research_location": "Factory Tech Lab",
+    "description": "Improves Hellion/Hellbat damage against Light targets.",
+    "api_name": "HIGHCAPACITYBARRELS"
+  },
+  "DRILLING_CLAWS": {
+    "name": "Drilling Claws",
+    "research_location": "Factory Tech Lab",
+    "description": "Improves Widow Mine deployment behavior; Armory prerequisite. Concealment interactions are balance-version dependent."
+  },
+  "SMART_SERVOS": {
+    "name": "Smart Servos",
+    "research_location": "Factory Tech Lab",
+    "description": "Accelerates affected transformation modes; Armory prerequisite. Does not shorten all construction or production times."
+  },
+  "MAG_FIELD_ACCELERATOR": {
+    "name": "Mag-Field Accelerator",
+    "research_location": "Factory Tech Lab",
+    "description": "Improves the appropriate Cyclone Lock On damage interaction. Cyclone versions differ substantially;",
+    "api_name": "CYCLONELOCKONDAMAGEUPGRADE"
+  },
+  "CLOAKING_FIELD": {
+    "name": "Cloaking Field",
+    "research_location": "Starport Tech Lab",
+    "description": "Unlocks Banshee cloak; distinct from Ghost research."
+  },
+  "HYPERFLIGHT_ROTORS": {
+    "name": "Hyperflight Rotors",
+    "research_location": "Starport Tech Lab",
+    "description": "Improves Banshee movement speed. Does not improve its lack of anti-air capability."
+  },
+  "INTERFERENCE_MATRIX": {
+    "name": "Interference Matrix",
+    "research_location": "Starport Tech Lab",
+    "description": "Research entry for Raven's disable ability in the installed tables. Confirm the active baseline's research gate rather than assuming all versions share it."
+  },
+  "WEAPON_REFIT": {
+    "name": "Weapon Refit",
+    "research_location": "Fusion Core",
+    "description": "Unlocks Battlecruiser Yamato Cannon. Battlecruiser training itself does not require this research."
+  },
+  "ADVANCED_BALLISTICS": {
+    "name": "Advanced Ballistics",
+    "research_location": "Fusion Core",
+    "description": "Extends Liberator ground-mode reach.",
+    "api_name": "LIBERATORAGRANGEUPGRADE"
+  },
+  "MEDIVAC_ENERGY_UPGRADE": {
+    "name": "Medivac energy upgrade",
+    "research_location": "Fusion Core",
+    "description": "Improves Medivac energy support in the relevant balance version. Installed; display names/effects have changed across versions.",
+    "api_name": "MEDIVACCADUCEUSREACTOR"
+  }
+}

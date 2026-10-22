@@ -1,0 +1,111 @@
+{
+  "MELEE_ATTACKS_1_3": {
+    "name": "Melee Attacks 1-3",
+    "research_location": "Evolution Chamber",
+    "description": "Improves eligible melee weapons; level 2 needs Lair, level 3 needs Hive, plus previous level."
+  },
+  "MISSILE_ATTACKS_1_3": {
+    "name": "Missile Attacks 1-3",
+    "research_location": "Evolution Chamber",
+    "description": "Improves eligible ranged ground weapons; same tier progression. Does not automatically improve every damaging spell."
+  },
+  "GROUND_CARAPACE_1_3": {
+    "name": "Ground Carapace 1-3",
+    "research_location": "Evolution Chamber",
+    "description": "Improves ground armor; same Lair/Hive progression."
+  },
+  "FLYER_ATTACKS_1_3": {
+    "name": "Flyer Attacks 1-3",
+    "research_location": "Spire / Greater Spire",
+    "description": "Improves eligible air-unit weapons; level 2 needs Lair, level 3 needs Hive, plus previous level."
+  },
+  "FLYER_CARAPACE_1_3": {
+    "name": "Flyer Carapace 1-3",
+    "research_location": "Spire / Greater Spire",
+    "description": "Improves air armor; same tier progression."
+  },
+  "BURROW": {
+    "name": "Burrow",
+    "research_location": "Hatchery / Lair / Hive",
+    "description": "Unlocks ordinary burrow for eligible units. Lurker and other built-in combat modes have their own rules."
+  },
+  "PNEUMATIZED_CARAPACE": {
+    "name": "Pneumatized Carapace",
+    "research_location": "Hatchery / Lair / Hive",
+    "description": "Improves Overlord/Overseer mobility under the matching unit rules.",
+    "api_name": "OVERLORDSPEED"
+  },
+  "METABOLIC_BOOST": {
+    "name": "Metabolic Boost",
+    "research_location": "Spawning Pool",
+    "description": "Improves Zergling movement speed."
+  },
+  "ADRENAL_GLANDS": {
+    "name": "Adrenal Glands",
+    "research_location": "Spawning Pool",
+    "description": "Improves Zergling attack speed; requires Hive."
+  },
+  "CENTRIFUGAL_HOOKS": {
+    "name": "Centrifugal Hooks",
+    "research_location": "Baneling Nest",
+    "description": "Improves Baneling movement, with additional bonuses varying by patch; requires Lair."
+  },
+  "GLIAL_RECONSTITUTION": {
+    "name": "Glial Reconstitution",
+    "research_location": "Roach Warren",
+    "description": "Improves Roach movement; requires Lair."
+  },
+  "TUNNELING_CLAWS": {
+    "name": "Tunneling Claws",
+    "research_location": "Roach Warren",
+    "description": "Enables Roach movement while burrowed and associated recovery behavior; requires Lair and Burrow for burrow use."
+  },
+  "GROOVED_SPINES": {
+    "name": "Grooved Spines",
+    "research_location": "Hydralisk Den",
+    "description": "Extends Hydralisk attack range."
+  },
+  "MUSCULAR_AUGMENTS": {
+    "name": "Muscular Augments",
+    "research_location": "Hydralisk Den",
+    "description": "Improves Hydralisk mobility."
+  },
+  "LUNGE": {
+    "name": "Lunge",
+    "research_location": "Hydralisk Den",
+    "description": "Unlocks the Hydralisk mobility ability; requires Hive in the installed research table.",
+    "api_name": "FRENZY"
+  },
+  "ADAPTIVE_TALONS": {
+    "name": "Adaptive Talons",
+    "research_location": "Lurker Den",
+    "description": "Improves Lurker burrow/mobility behavior; requires Hive.",
+    "api_name": "DIGGINGCLAWS"
+  },
+  "SEISMIC_SPINES": {
+    "name": "Seismic Spines",
+    "research_location": "Lurker Den",
+    "description": "Extends Lurker weapon range; requires Hive.",
+    "api_name": "LURKERRANGE"
+  },
+  "NEURAL_PARASITE": {
+    "name": "Neural Parasite",
+    "research_location": "Infestation Pit",
+    "description": "Unlocks Infestor's channeled control spell."
+  },
+  "MICROBIAL_SHROUD_RESEARCH": {
+    "name": "Microbial Shroud research",
+    "research_location": "Infestation Pit",
+    "description": "Unlocks the shroud in balance versions that gate it behind research. The installed table does not encode this gate reliably; do not infer it is free from that omission."
+  },
+  "CHITINOUS_PLATING": {
+    "name": "Chitinous Plating",
+    "research_location": "Ultralisk Cavern",
+    "description": "Improves Ultralisk armor, in addition to the applicable ground-carapace upgrades."
+  },
+  "ANABOLIC_SYNTHESIS": {
+    "name": "Anabolic Synthesis",
+    "research_location": "Ultralisk Cavern",
+    "description": "Improves Ultralisk movement under the upgrade's terrain/creep rules."
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "GROUND_WEAPONS_1_3": {
+    "name": "Ground Weapons 1-3",
+    "research_location": "Forge",
+    "description": "Improves eligible ground-unit weapons; levels 2/3 require Twilight Council and previous level."
+  },
+  "GROUND_ARMOR_1_3": {
+    "name": "Ground Armor 1-3",
+    "research_location": "Forge",
+    "description": "Improves ground-unit health armor; levels 2/3 require Twilight Council and previous level."
+  },
+  "SHIELDS_1_3": {
+    "name": "Shields 1-3",
+    "research_location": "Forge",
+    "description": "Improves shield armor across eligible Protoss units and structures; levels 2/3 require Twilight Council and previous level. Does not add shield capacity."
+  },
+  "AIR_WEAPONS_1_3": {
+    "name": "Air Weapons 1-3",
+    "research_location": "Cybernetics Core",
+    "description": "Improves eligible aircraft weapons; levels 2/3 require Fleet Beacon and previous level."
+  },
+  "AIR_ARMOR_1_3": {
+    "name": "Air Armor 1-3",
+    "research_location": "Cybernetics Core",
+    "description": "Improves aircraft health armor; levels 2/3 require Fleet Beacon and previous level."
+  },
+  "WARP_GATE": {
+    "name": "Warp Gate",
+    "research_location": "Cybernetics Core",
+    "description": "Unlocks conversion of individual Gateways. Other production buildings remain unchanged."
+  },
+  "CHARGE": {
+    "name": "Charge",
+    "research_location": "Twilight Council",
+    "description": "Unlocks Zealot's closing ability. Does not supply a ranged or anti-air weapon."
+  },
+  "BLINK": {
+    "name": "Blink",
+    "research_location": "Twilight Council",
+    "description": "Unlocks Stalker teleport. Dark Templar teleport is separate research."
+  },
+  "RESONATING_GLAIVES": {
+    "name": "Resonating Glaives",
+    "research_location": "Twilight Council",
+    "description": "Improves Adept attack speed; no additional anti-air capability.",
+    "api_name": "ADEPTPIERCINGATTACK"
+  },
+  "PSIONIC_STORM": {
+    "name": "Psionic Storm",
+    "research_location": "Templar Archives",
+    "description": "Unlocks High Templar's energy-based area spell."
+  },
+  "SHADOW_STRIDE": {
+    "name": "Shadow Stride",
+    "research_location": "Dark Shrine",
+    "description": "Unlocks Dark Templar teleport.",
+    "api_name": "DARKTEMPLARBLINKUPGRADE"
+  },
+  "EXTENDED_THERMAL_LANCE": {
+    "name": "Extended Thermal Lance",
+    "research_location": "Robotics Bay",
+    "description": "Increases Colossus ground-weapon range."
+  },
+  "GRAVITIC_DRIVE": {
+    "name": "Gravitic Drive",
+    "research_location": "Robotics Bay",
+    "description": "Improves Warp Prism movement speed. Does not change it into a Stargate unit."
+  },
+  "GRAVITIC_BOOSTERS": {
+    "name": "Gravitic Boosters",
+    "research_location": "Robotics Bay",
+    "description": "Improves Observer movement speed; surveillance remains a separate stationary mode."
+  },
+  "ANION_PULSE_CRYSTALS": {
+    "name": "Anion Pulse-Crystals",
+    "research_location": "Fleet Beacon",
+    "description": "Extends Phoenix weapon range. Does not make Phoenix attack ordinary ground targets directly."
+  },
+  "FLUX_VANES": {
+    "name": "Flux Vanes",
+    "research_location": "Fleet Beacon",
+    "description": "Improves Void Ray movement characteristics.",
+    "api_name": "VOIDRAYSPEEDUPGRADE"
+  },
+  "TECTONIC_DESTABILIZERS": {
+    "name": "Tectonic Destabilizers",
+    "research_location": "Fleet Beacon",
+    "description": "Improves Tempest damage against structures through its ground-attack specialization.",
+    "api_name": "TEMPESTGROUNDATTACKUPGRADE"
+  }
+}

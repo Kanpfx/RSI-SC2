@@ -1,0 +1,1 @@
+"""Group-oriented combat capabilities."""

@@ -1,0 +1,29 @@
+# Local credentials and machine settings
+.env
+.env.*
+!.env.example
+/.vscode/
+
+# Experiments and local archives
+/runtime/
+/docs/
+*.SC2Replay
+
+# Python environments, caches and build output
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+/build/
+/dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+/uv.lock
+
+# OS files
+.DS_Store
+Thumbs.db

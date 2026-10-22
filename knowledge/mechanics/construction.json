@@ -1,0 +1,34 @@
+{
+  "COMPLETED_REQUIREMENTS": {
+    "title": "Completed requirements",
+    "content": "An unfinished structure is not generally a completed technology unlock. Building existence, completion, local attachment, power, placement, producer availability, and resource affordability are separate conditions. A construction start proves an order reached the game; it does not prove the structure will complete. Losing a prerequisite can remove access to future orders even while already existing units remain usable."
+  },
+  "TERRAN_CONSTRUCTION_AND_REPAIR": {
+    "title": "Terran construction and repair",
+    "content": "An SCV must remain assigned to construct an ordinary Terran building; if it leaves or dies, another SCV can resume unfinished construction. The incomplete building is not automatically lost with its original worker. Repair restores mechanical units and structures at a resource cost and occupies the repairing SCV or MULE. Mechanical is the relevant repair category, not simply belonging to Terran. Severely damaged Terran structures can burn down if left unattended."
+  },
+  "LIFT_LAND_AND_ADD_ONS": {
+    "title": "Lift, land, and add-ons",
+    "content": "Command Centers, Orbital Commands, Barracks, Factories, and Starports can lift; a Planetary Fortress cannot. A flying production building cannot train its normal products and cannot use an attached add-on. Landing needs a valid footprint. A Tech Lab unlocks advanced products for the building actually attached to it; a Reactor provides parallel production for compatible basic products. A detached add-on can be reused, but occupying the landing/add-on area can prevent reconnection. Add-on research and production are distinct activities."
+  },
+  "PROTOSS_WARP_CONSTRUCTION_AND_POWER": {
+    "title": "Protoss warp construction and power",
+    "content": "A Probe starts a building and is then free to move; the building continues warping in. Most Protoss structures need a power field, while Nexus, Pylon, and Assimilator are exceptions. Power is spatial: possessing a Pylon somewhere on the map is insufficient. Destroying a supporting Pylon or moving a phased Warp Prism can disable nearby structures. A disabled structure still occupies space and can be attacked."
+  },
+  "WARP_GATE_PRODUCTION": {
+    "title": "Warp Gate production",
+    "content": "Warp Gate research unlocks conversion of individual Gateways. A Warp Gate places an eligible ground unit in a legal power field and then has a cooldown; it does not use the ordinary Gateway queue in the same way. The unit is vulnerable while materializing. Warp-in duration depends on the supporting power source and its context, so distant Pylon power should not be assumed equivalent to a reinforced power field or Warp Prism. Non-Gateway units cannot be warped in by a Warp Gate."
+  },
+  "ZERG_CONSTRUCTION_AND_CREEP": {
+    "title": "Zerg construction and creep",
+    "content": "A Drone becomes a building, reducing the worker population. Most Zerg buildings require creep for placement; Hatchery and Extractor are important exceptions. Creep spreads from sources and recedes after those sources are removed. It supports Zerg movement and construction but is not a Protoss-style power supply: losing nearby creep is not equivalent to powering off all Zerg production. Creep can prevent Terran and Protoss construction on otherwise open ground."
+  },
+  "LARVA_AND_INJECTS": {
+    "title": "Larva and injects",
+    "content": "Hatcheries, Lairs, and Hives generate Larva. Drones, most army units, and Overlords share this production resource. A Queen's Spawn Larva adds Larva to a town hall after a delay; an accepted inject is not immediate army production. Queens themselves are trained at the town hall rather than from Larva. Town-hall morphs retain the same base site; adding a tech building does not create a second independent Larva source."
+  },
+  "MORPHS_FORMS_AND_ALIASES": {
+    "title": "Morphs, forms, and aliases",
+    "content": "A morph consumes or transforms its source: Lair from Hatchery, Hive from Lair, Lurker from Hydralisk, and Brood Lord from Corruptor. A form change such as Tank siege mode or lowered Depot is a different state of the same asset. Tech aliases allow higher or alternate forms to satisfy specified prerequisites. A form's separate API type ID does not establish a new purchasable unit or a new production queue."
+  }
+}

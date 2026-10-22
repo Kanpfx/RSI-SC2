@@ -1,0 +1,26 @@
+{
+  "VISION_AND_FOG_OF_WAR": {
+    "title": "Vision and fog of war",
+    "content": "Current visibility reveals the present observable state; a previously seen building or unit is historical information. A unit can move, die, transform, or leave before the next observation. Not seeing a tech structure in one scouted area does not establish its absence elsewhere. Flying scouts, ground scouts, watchtowers, and scans cover different areas and carry different costs or risks."
+  },
+  "CLOAK_BURROW_AND_DETECTION": {
+    "title": "Cloak, burrow, and detection",
+    "content": "Cloaked and burrowed enemies generally need detection to be targeted normally. Sight and detection are different: a regular combat unit may see the area but still lack a legal target. Detectors include Raven, Observer, Overseer, Missile Turret, Photon Cannon, and Spore Crawler; Scanner Sweep provides temporary detection. An Overlord is not an Overseer. Damage or a specific revealing effect can interact with concealment, but generic area coverage does not supply permanent detection."
+  },
+  "BURROW_VERSUS_ATTACK_MODES": {
+    "title": "Burrow versus attack modes",
+    "content": "Burrow normally conceals and immobilizes eligible Zerg units; most cannot attack while burrowed. Lurkers instead attack from their burrowed combat form. Roach movement while burrowed requires its specific upgrade. A burrowed Widow Mine is a Terran weapon mode with separate concealment behavior. Burrow research is not the universal prerequisite for every built-in burrowing weapon."
+  },
+  "HIGH_GROUND_AND_LINE_OF_SIGHT": {
+    "title": "High ground and line of sight",
+    "content": "A unit on low ground may lack sight of a high-ground enemy even when nominal weapon range is sufficient. A flying spotter or another source of vision can change an engagement. Terrain cliffs restrict normal ground movement, while specific units or abilities can cross them. Air pathing avoids many ground obstacles but does not bypass anti-air defenses or grant detection."
+  },
+  "PATHING_AND_PLACEMENT": {
+    "title": "Pathing and placement",
+    "content": "A walkable position is not necessarily a buildable position. A large unit, a small unit, an SCV constructing a building, and a flying unit can have different movement constraints. Dynamic blockers and building footprints can change access after an earlier path query. A legal building location does not guarantee room for a Terran add-on or an open exit for produced units. Distance in a straight line is not travel distance around terrain."
+  },
+  "TRANSPORT_AND_RELOCATION": {
+    "title": "Transport and relocation",
+    "content": "Loading consumes cargo capacity; passengers cannot carry out normal attacks or worker jobs while inside. A transport's loss can destroy its passengers. Unloading needs legal space, while Blink, Tactical Jump, Recall, and Nydus movement each have their own targeting and delay rules. A relocated army still needs vision, a fighting position, and a safe destination; reaching the point is separate from winning the engagement."
+  }
+}

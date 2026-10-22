@@ -1,0 +1,10 @@
+{
+  "GAME_LOOPS_AND_API_VALUES": {
+    "title": "Game loops and API values",
+    "content": "Recorded match loops convert to game seconds using the project's 22.4 loops/second convention. Wall time is separate, especially in non-realtime play. The raw table deliberately retains build_time_api, speed_api, and period_api; do not treat all three as values in one common time scale or silently convert movement speed with the loop rate. Unit/upgrade effects and map balance dependencies can change displayed or effective values."
+  },
+  "STATIC_AVAILABILITY_AND_RUNTIME_LEGALITY": {
+    "title": "Static availability and runtime legality",
+    "content": "A static available flag means an entry is supplied by the map/mod data. It does not prove that a particular unit can issue that ability now. Runtime ability queries, resource checks, placement/pathing queries, and observed action results answer different questions. An accepted command is not proof that its target survived, its cast finished, or its expected effect occurred."
+  }
+}

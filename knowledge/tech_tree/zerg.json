@@ -1,0 +1,53 @@
+{
+  "nodes": {
+    "BANELING": {"name":"Baneling","category":"unit","routes":[{"producer":"ZERGLING","requires":["BANELINGNEST"]}]},
+    "HATCHERY": {"name":"Hatchery","category":"building","routes":[{"producer":"DRONE","requires":[],"requires_placement_position":true}]},
+    "CREEPTUMOR": {"name":"Creep Tumor","category":"building","routes":[{"producer":"CREEPTUMOR","requires":[],"requires_placement_position":true},{"producer":"CREEPTUMORBURROWED","requires":[],"requires_placement_position":true},{"producer":"QUEEN","requires":[],"requires_placement_position":true}]},
+    "EXTRACTOR": {"name":"Extractor","category":"building","routes":[{"producer":"DRONE","requires":[]}]},
+    "SPAWNINGPOOL": {"name":"Spawning Pool","category":"building","routes":[{"producer":"DRONE","requires":["HATCHERY"],"requires_placement_position":true}]},
+    "EVOLUTIONCHAMBER": {"name":"Evolution Chamber","category":"building","routes":[{"producer":"DRONE","requires":["HATCHERY"],"requires_placement_position":true}]},
+    "HYDRALISKDEN": {"name":"Hydralisk Den","category":"building","routes":[{"producer":"DRONE","requires":["LAIR"],"requires_placement_position":true}]},
+    "SPIRE": {"name":"Spire","category":"building","routes":[{"producer":"DRONE","requires":["LAIR"],"requires_placement_position":true}]},
+    "ULTRALISKCAVERN": {"name":"Ultralisk Cavern","category":"building","routes":[{"producer":"DRONE","requires":["HIVE"],"requires_placement_position":true}]},
+    "INFESTATIONPIT": {"name":"Infestation Pit","category":"building","routes":[{"producer":"DRONE","requires":["LAIR"],"requires_placement_position":true}]},
+    "NYDUSNETWORK": {"name":"Nydus Network","category":"building","routes":[{"producer":"DRONE","requires":["LAIR"],"requires_placement_position":true}]},
+    "BANELINGNEST": {"name":"Baneling Nest","category":"building","routes":[{"producer":"DRONE","requires":["SPAWNINGPOOL"],"requires_placement_position":true}]},
+    "ROACHWARREN": {"name":"Roach Warren","category":"building","routes":[{"producer":"DRONE","requires":["SPAWNINGPOOL"],"requires_placement_position":true}]},
+    "SPINECRAWLER": {"name":"Spine Crawler","category":"building","routes":[{"producer":"DRONE","requires":["SPAWNINGPOOL"],"requires_placement_position":true}]},
+    "SPORECRAWLER": {"name":"Spore Crawler","category":"building","routes":[{"producer":"DRONE","requires":["SPAWNINGPOOL"],"requires_placement_position":true}]},
+    "LAIR": {"name":"Lair","category":"building","routes":[{"producer":"HATCHERY","requires":["SPAWNINGPOOL"]}],"tech_aliases":["HATCHERY"]},
+    "HIVE": {"name":"Hive","category":"building","routes":[{"producer":"LAIR","requires":["INFESTATIONPIT"]}],"tech_aliases":["HATCHERY","LAIR"]},
+    "GREATERSPIRE": {"name":"Greater Spire","category":"building","routes":[{"producer":"SPIRE","requires":["HIVE"]}],"tech_aliases":["SPIRE"]},
+    "DRONE": {"name":"Drone","category":"unit","routes":[{"producer":"LARVA","requires":[]}]},
+    "ZERGLING": {"name":"Zergling","category":"unit","routes":[{"producer":"LARVA","requires":["SPAWNINGPOOL"]}],"units_per_order":2},
+    "OVERLORD": {"name":"Overlord","category":"unit","routes":[{"producer":"LARVA","requires":[]}]},
+    "HYDRALISK": {"name":"Hydralisk","category":"unit","routes":[{"producer":"LARVA","requires":["HYDRALISKDEN"]}]},
+    "MUTALISK": {"name":"Mutalisk","category":"unit","routes":[{"producer":"LARVA","requires":["SPIRE"]}]},
+    "ULTRALISK": {"name":"Ultralisk","category":"unit","routes":[{"producer":"LARVA","requires":["ULTRALISKCAVERN"]}]},
+    "ROACH": {"name":"Roach","category":"unit","routes":[{"producer":"LARVA","requires":["ROACHWARREN"]}]},
+    "INFESTOR": {"name":"Infestor","category":"unit","routes":[{"producer":"LARVA","requires":["INFESTATIONPIT"]}]},
+    "CORRUPTOR": {"name":"Corruptor","category":"unit","routes":[{"producer":"LARVA","requires":["SPIRE"]}]},
+    "BROODLORD": {"name":"Brood Lord","category":"unit","routes":[{"producer":"CORRUPTOR","requires":["GREATERSPIRE"]}]},
+    "QUEEN": {"name":"Queen","category":"unit","routes":[{"producer":"HATCHERY","requires":["SPAWNINGPOOL"]},{"producer":"HIVE","requires":["SPAWNINGPOOL"]},{"producer":"LAIR","requires":["SPAWNINGPOOL"]}]},
+    "OVERSEER": {"name":"Overseer","category":"unit","routes":[{"producer":"OVERLORD","requires":["LAIR"]},{"producer":"OVERLORDTRANSPORT","requires":["LAIR"]},{"producer":"OVERSEERSIEGEMODE","method":"transform"}],"tech_aliases":["OVERLORD"]},
+    "NYDUSCANAL": {"name":"Nydus Worm","category":"building","routes":[{"producer":"NYDUSNETWORK","requires":[],"requires_placement_position":true}]},
+    "LARVA": {"name":"Larva","category":"unit","routes":[{"producer":"HATCHERY","method":"generation_or_inject"},{"producer":"LAIR","method":"generation_or_inject"},{"producer":"HIVE","method":"generation_or_inject"}]},
+    "LOCUSTMP": {"name":"Locust","category":"unit","routes":[{"producer":"SWARMHOSTMP","method":"spawn"}]},
+    "SWARMHOSTMP": {"name":"Swarm Host","category":"unit","routes":[{"producer":"LARVA","requires":["INFESTATIONPIT"]}]},
+    "VIPER": {"name":"Viper","category":"unit","routes":[{"producer":"LARVA","requires":["HIVE"]}]},
+    "LURKERMP": {"name":"Lurker","category":"unit","routes":[{"producer":"HYDRALISK","requires":["LURKERDENMP"]},{"producer":"LURKERMPBURROWED","method":"transform"}]},
+    "LURKERMPBURROWED": {"name":"Lurker (burrowed)","category":"unit","routes":[{"producer":"LURKERMP","method":"transform"}],"unit_alias":"LURKERMP"},
+    "LURKERDENMP": {"name":"Lurker Den","category":"building","routes":[{"producer":"DRONE","requires":["HYDRALISKDEN"],"requires_placement_position":true}]},
+    "RAVAGER": {"name":"Ravager","category":"unit","routes":[{"producer":"ROACH","requires":["HATCHERY"]}]},
+    "OVERLORDTRANSPORT": {"name":"Transport Overlord","category":"unit","routes":[{"producer":"OVERLORD","requires":["LAIR"]}],"tech_aliases":["OVERLORD"]},
+    "OVERSEERSIEGEMODE": {"name":"Overseer (Oversight Mode)","category":"unit","routes":[{"producer":"OVERSEER","method":"transform"}],"tech_aliases":["OVERLORD"],"unit_alias":"OVERSEER"}
+  },
+  "upgrade_dependencies": {
+    "ZERG_MELEE_MISSILE_WEAPONS_GROUND_CARAPACE": {"family":"Zerg melee/missile weapons, ground carapace","research_location":"Evolution Chamber","requirements":"Previous level; Lair for level 2, Hive for level 3"},
+    "ZERG_FLYER_WEAPONS_CARAPACE": {"family":"Zerg flyer weapons/carapace","research_location":"Spire / Greater Spire","requirements":"Previous level; Lair for level 2, Hive for level 3"}
+  },
+  "rules": {
+    "CONSTRUCTION": {"title":"Construction","content":"A Drone constructs a new building by becoming it; it is consumed and its worker supply is released. A Hatchery creates Larva and supplies creep. Most other Zerg structures require creep; Hatchery and Extractor are exceptions. Lair/Hive and Greater Spire are morphs of existing buildings, not new Drone-built structures. A Hive satisfies Lair/Hatchery tech; Greater Spire retains Spire tech."},
+    "PRODUCTION": {"title":"Production","content":"Larva production is shared by workers, army, and Overlords. A tech building normally unlocks Larva products rather than producing those units itself. Unit morphs consume the source and pay an incremental cost; they do not consume another Larva. Additional supply is required when the final form uses more supply than the source."}
+  }
+}

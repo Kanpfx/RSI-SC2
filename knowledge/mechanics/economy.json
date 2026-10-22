@@ -1,0 +1,30 @@
+{
+  "MINERALS_AND_VESPENE": {
+    "title": "Minerals and vespene",
+    "content": "Minerals fund workers, structures, units, and upgrades. Gas is gathered from geysers through a completed Refinery, Assimilator, or Extractor. A worker gathers a load and returns it to a compatible town hall; distance, congestion, resource depletion, and interruptions affect realized income. A large resource bank is unspent purchasing power, not a direct measure of income."
+  },
+  "WORKER_SATURATION": {
+    "title": "Worker saturation",
+    "content": "A normal mineral line has multiple patches; workers must be allocated per resource site rather than by one universal base limit. Early workers on a patch are more efficient than excess workers waiting for access. Gas sites also have finite useful worker capacity. Reassigning workers can improve one resource while creating a shortage in the other. The game's ideal/assigned harvester counts are useful local indicators; they are not an army-production plan."
+  },
+  "DEPLETION_AND_TRANSFERS": {
+    "title": "Depletion and transfers",
+    "content": "Mineral patches and geysers have finite reserves. Mining a depleted line eventually loses income even if its workers remain alive. New expansions need workers transferred or produced before they become useful income sources. A transfer temporarily interrupts mining and exposes workers along the route. Rich resources and map-specific layouts change the value and capacity of a site."
+  },
+  "TOWN_HALLS_AND_WORKERS": {
+    "title": "Town halls and workers",
+    "content": "Terran trains SCVs at a grounded Command Center, Orbital Command, or Planetary Fortress. Protoss trains Probes at a Nexus. Zerg morphs Drones from Larva. Worker construction uses the same production or Larva resources needed for other tasks. An additional town hall provides production and a collection point before it necessarily provides a fully staffed economy."
+  },
+  "SUPPLY": {
+    "title": "Supply",
+    "content": "Supply is reserved by production and released when units are lost or consumed; supply providers increase the cap when their contribution becomes active. Overlord production competes for Larva, while Pylons and Depots compete for builder time and resources. A destroyed provider can leave used supply above the current cap: existing units remain, but additional supply-consuming orders may be blocked. Supply-free actions such as constructing replacement supply are still possible. The normal multiplayer cap is 200."
+  },
+  "ORDER_COST_VERSUS_UNIT_VALUE": {
+    "title": "Order cost versus unit value",
+    "content": "A Zergling order produces two units. A Baneling morph consumes a paid-for Zergling; other morphs similarly pay an incremental amount on top of a source unit. A Zerg building also consumes a Drone. The API's unit mineral/gas fields can include earlier investments and are not universally the price of one new order. Do not add the source unit's full cost twice. Mode changes usually reuse an existing unit, but a transport or detector morph can be a paid transformation."
+  },
+  "PRODUCTION_CAPACITY": {
+    "title": "Production capacity",
+    "content": "A queue holds future orders; it does not normally make all queued units simultaneously. Adding production capacity helps only when compatible producers can actually be funded. One scarce resource, one missing prerequisite, or a supply shortage can leave many facilities idle. Research and production can also compete for a building's available command queue. A completed tech building unlocks options rather than guaranteeing continuous spending."
+  }
+}

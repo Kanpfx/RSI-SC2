@@ -1,0 +1,26 @@
+{
+  "WEAPONS_AND_TARGET_CATEGORIES": {
+    "title": "Weapons and target categories",
+    "content": "Weapons can target ground, air, or both. A flying unit is not necessarily anti-air, and a ground unit is not necessarily anti-ground only. A Colossus is a special ground unit that can also be attacked by anti-air weapons. Some units deal damage through spawned units or abilities; missing weapon data does not establish that the unit cannot cause damage. Transports, detectors, and casters can be strategically valuable without normal weapons."
+  },
+  "ATTRIBUTES_AND_ARMOR": {
+    "title": "Attributes and armor",
+    "content": "Light, Armored, Biological, Mechanical, Psionic, and Massive are interaction categories. Armored is not the same as having a positive numerical armor value. Attribute bonuses apply only to matching targets. Armor reduces eligible weapon damage per hit, so many small hits and a few large hits react differently to armor upgrades. Spell damage follows the spell's rules and is not reliably predicted by the normal weapon formula."
+  },
+  "SHIELDS_HEALTH_AND_RESTORATION": {
+    "title": "Shields, health, and restoration",
+    "content": "Protoss shields and health are separate pools with different upgrade and restoration interactions. Shields regenerate after a period without damage; biological healing and mechanical repair are separate mechanics. Medivacs heal eligible biological targets, SCVs repair mechanical targets, and Shield Batteries restore shields using energy. Available restoration does not make a unit invulnerable: incoming burst, range, energy, and lost support still matter."
+  },
+  "SPLASH_AND_FORMATION": {
+    "title": "Splash and formation",
+    "content": "Area damage can hit multiple nearby units. Clumping can increase losses to mines, siege fire, spells, and explosive attacks; spreading can reduce focused fire and make individual units vulnerable. Friendly-fire rules vary by weapon and ability. Collision, chokes, ramps, and concave formation affect how much of an army can attack at once; total unit count alone does not describe effective firepower."
+  },
+  "RANGE_COOLDOWN_AND_MOVEMENT": {
+    "title": "Range, cooldown, and movement",
+    "content": "A weapon must have a legal target and satisfy its firing conditions. Range does not imply the target is visible or reachable. Repeated movement or new attack commands can interrupt an attack cycle. Kiting trades movement for time between shots, but can fail against faster enemies, surrounds, or blocked retreat paths. Siege modes trade mobility for a different weapon or firing area; transforming at the wrong time can remove useful damage output."
+  },
+  "HEALING_REPAIR_AND_ENERGY": {
+    "title": "Healing, repair, and energy",
+    "content": "Energy is a resource belonging to an individual caster. Spending it on one ability can prevent another even if global minerals and gas are abundant. Cooldowns, research unlocks, target restrictions, and cast range are additional gates. Passive energy regeneration is different from a direct recharge ability. A unit that survives a fight may still be ineffective until it has health, shields, energy, cooldowns, or support restored."
+  }
+}

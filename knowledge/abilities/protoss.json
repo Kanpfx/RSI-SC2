@@ -1,0 +1,142 @@
+{
+  "CHRONO_BOOST": {
+    "name": "Chrono Boost",
+    "actor": "Nexus",
+    "description": "Spends energy to accelerate a target friendly structure's production or research. It needs useful work to accelerate and does not satisfy missing prerequisites."
+  },
+  "STRATEGIC_RECALL": {
+    "name": "Strategic Recall",
+    "actor": "Nexus",
+    "description": "Recalls eligible friendly units from a selected area to the Nexus after a delay. It competes for energy and has cooldown/selection constraints."
+  },
+  "ENERGY_RECHARGE": {
+    "name": "Energy Recharge",
+    "actor": "Nexus",
+    "description": "Transfers a burst of energy to an eligible friendly target through the newer Nexus support ability. Do not substitute the removed Battery Overcharge behavior from old guides."
+  },
+  "RESTORE": {
+    "name": "Restore",
+    "actor": "Shield Battery",
+    "description": "Spends energy to replenish eligible friendly shields. Does not restore ordinary health; power, range, target rules, and available energy constrain support."
+  },
+  "WARP_IN": {
+    "name": "Warp In",
+    "actor": "Warp Gate",
+    "description": "Starts an eligible unit at a valid powered location and consumes that gate's production availability. The emerging unit can be attacked before completion."
+  },
+  "CHARGE": {
+    "name": "Charge",
+    "actor": "Zealot",
+    "description": "Research unlocks a closing ability against an enemy ground target. It improves contact but does not give the Zealot a ranged weapon or access to aircraft."
+  },
+  "BLINK": {
+    "name": "Blink",
+    "actor": "Stalker",
+    "description": "Research unlocks a short teleport to a legal destination. Vision and terrain legality matter; it does not make all map points accessible."
+  },
+  "PSIONIC_TRANSFER": {
+    "name": "Psionic Transfer",
+    "actor": "Adept",
+    "description": "Sends a shade that can relocate the Adept when the transfer completes. The shade is not an independent damaging Adept; cancellation avoids committing to the destination."
+  },
+  "FORCE_FIELD": {
+    "name": "Force Field",
+    "actor": "Sentry",
+    "description": "Spends energy to place a temporary movement blocker. Positioning can split armies or trap allies; Massive units and certain abilities can remove/bypass it."
+  },
+  "GUARDIAN_SHIELD": {
+    "name": "Guardian Shield",
+    "actor": "Sentry",
+    "description": "Energy-based area protection against eligible ranged attacks. It is not universal protection against every spell or melee attack."
+  },
+  "HALLUCINATION": {
+    "name": "Hallucination",
+    "actor": "Sentry",
+    "description": "Creates temporary decoys usable for scouting and deception. They do not provide the combat damage or production value of real units."
+  },
+  "PSIONIC_STORM": {
+    "name": "Psionic Storm",
+    "actor": "High Templar",
+    "description": "Requires research and energy; damages an area over time. Friendly units can be harmed, and overlapping storms should not be assumed to multiply damage on one target."
+  },
+  "FEEDBACK": {
+    "name": "Feedback",
+    "actor": "High Templar",
+    "description": "Uses an eligible enemy's energy against it and removes energy. An empty-energy target is different from a full caster."
+  },
+  "ARCHON_MERGE": {
+    "name": "Archon Merge",
+    "actor": "High / Dark Templar",
+    "description": "Consumes any two eligible Templar to create an Archon. The final unit does not retain the separate casters' energy or spell kits."
+  },
+  "SHADOW_STRIDE": {
+    "name": "Shadow Stride",
+    "actor": "Dark Templar",
+    "description": "Researched teleport for repositioning. Its attack restrictions after arrival are version-sensitive; it does not bypass detection."
+  },
+  "PURIFICATION_NOVA": {
+    "name": "Purification Nova",
+    "actor": "Disruptor",
+    "description": "Launches a controllable timed area attack. Travel, detonation timing, escape paths, and friendly fire determine the result; a Disruptor is not ordinary continuous-fire support."
+  },
+  "PHASING_MODE": {
+    "name": "Phasing Mode",
+    "actor": "Warp Prism",
+    "description": "Becomes a stationary power source for warp-ins and structures. Moving out of phasing mode removes that power."
+  },
+  "LOAD_UNLOAD": {
+    "name": "Load / Unload",
+    "actor": "Warp Prism",
+    "description": "Transports eligible ground units; pickup and unloading depend on range, cargo capacity, and legal space. The Prism must survive with its cargo."
+  },
+  "SURVEILLANCE_MODE": {
+    "name": "Surveillance Mode",
+    "actor": "Observer",
+    "description": "Trades movement for a wider observation area. Concealment differs across balance versions; surveillance must not automatically be treated as invisible."
+  },
+  "GRAVITON_BEAM": {
+    "name": "Graviton Beam",
+    "actor": "Phoenix",
+    "description": "Channels to lift an eligible non-Massive ground target. The Phoenix is occupied channeling and needs another source of damage to exploit the lifted target."
+  },
+  "PRISMATIC_ALIGNMENT": {
+    "name": "Prismatic Alignment",
+    "actor": "Void Ray",
+    "description": "Temporary weapon specialization against armored targets, with a mobility tradeoff. It does not turn every target into an armored target."
+  },
+  "PULSAR_BEAM": {
+    "name": "Pulsar Beam",
+    "actor": "Oracle",
+    "description": "Activates an energy-consuming ground weapon. It has no normal anti-air attack, and spending energy reduces remaining scouting/control options."
+  },
+  "REVELATION": {
+    "name": "Revelation",
+    "actor": "Oracle",
+    "description": "Applies a temporary revealing/tracking effect to affected enemies. It is information tied to the effect and its duration, not permanent omniscience."
+  },
+  "STASIS_WARD": {
+    "name": "Stasis Ward",
+    "actor": "Oracle",
+    "description": "Places a trap that temporarily removes affected enemies from normal interaction. Stasised targets are not freely damageable; timing matters for follow-up."
+  },
+  "BUILD_INTERCEPTORS": {
+    "name": "Build Interceptors",
+    "actor": "Carrier",
+    "description": "Replenishes the small aircraft used for normal attacks. Interceptors cost resources and can be destroyed; an empty Carrier does not have a full independent weapon battery."
+  },
+  "TIME_WARP": {
+    "name": "Time Warp",
+    "actor": "Mothership",
+    "description": "Applies area control to enemies within the effect. Delay, area, and target movement matter; it does not guarantee an engagement."
+  },
+  "MASS_RECALL": {
+    "name": "Mass Recall",
+    "actor": "Mothership",
+    "description": "Relocates eligible friendly forces to the Mothership under its recall rules. Distinct from the Nexus recall destination."
+  },
+  "CLOAKING_FIELD": {
+    "name": "Cloaking Field",
+    "actor": "Mothership",
+    "description": "Conceals eligible nearby allies through the baseline's cloak ability. Do not assume the always-on cloak model from every older version."
+  }
+}

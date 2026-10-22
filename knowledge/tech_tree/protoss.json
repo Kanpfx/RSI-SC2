@@ -1,0 +1,49 @@
+{
+  "nodes": {
+    "COLOSSUS": {"name":"Colossus","category":"unit","routes":[{"producer":"ROBOTICSFACILITY","requires":["ROBOTICSBAY"],"requires_power":true}]},
+    "MOTHERSHIP": {"name":"Mothership","category":"unit","routes":[{"producer":"NEXUS","requires":["FLEETBEACON"]}],"unique":true},
+    "NEXUS": {"name":"Nexus","category":"building","routes":[{"producer":"PROBE","requires":[],"requires_placement_position":true}]},
+    "PYLON": {"name":"Pylon","category":"building","routes":[{"producer":"PROBE","requires":[],"requires_placement_position":true}]},
+    "ASSIMILATOR": {"name":"Assimilator","category":"building","routes":[{"producer":"PROBE","requires":[]}]},
+    "GATEWAY": {"name":"Gateway","category":"building","routes":[{"producer":"PROBE","requires":["PYLON"],"requires_placement_position":true}]},
+    "FORGE": {"name":"Forge","category":"building","routes":[{"producer":"PROBE","requires":["PYLON"],"requires_placement_position":true}]},
+    "FLEETBEACON": {"name":"Fleet Beacon","category":"building","routes":[{"producer":"PROBE","requires":["STARGATE"],"requires_placement_position":true}]},
+    "TWILIGHTCOUNCIL": {"name":"Twilight Council","category":"building","routes":[{"producer":"PROBE","requires":["CYBERNETICSCORE"],"requires_placement_position":true}]},
+    "PHOTONCANNON": {"name":"Photon Cannon","category":"building","routes":[{"producer":"PROBE","requires":["FORGE"],"requires_placement_position":true}]},
+    "STARGATE": {"name":"Stargate","category":"building","routes":[{"producer":"PROBE","requires":["CYBERNETICSCORE"],"requires_placement_position":true}]},
+    "TEMPLARARCHIVE": {"name":"Templar Archives","category":"building","routes":[{"producer":"PROBE","requires":["TWILIGHTCOUNCIL"],"requires_placement_position":true}]},
+    "DARKSHRINE": {"name":"Dark Shrine","category":"building","routes":[{"producer":"PROBE","requires":["TWILIGHTCOUNCIL"],"requires_placement_position":true}]},
+    "ROBOTICSBAY": {"name":"Robotics Bay","category":"building","routes":[{"producer":"PROBE","requires":["ROBOTICSFACILITY"],"requires_placement_position":true}]},
+    "ROBOTICSFACILITY": {"name":"Robotics Facility","category":"building","routes":[{"producer":"PROBE","requires":["CYBERNETICSCORE"],"requires_placement_position":true}]},
+    "CYBERNETICSCORE": {"name":"Cybernetics Core","category":"building","routes":[{"producer":"PROBE","requires":["GATEWAY"],"requires_placement_position":true}]},
+    "ZEALOT": {"name":"Zealot","category":"unit","routes":[{"producer":"GATEWAY","requires":[],"requires_power":true},{"producer":"WARPGATE","requires":[],"requires_power":true,"requires_placement_position":true}]},
+    "STALKER": {"name":"Stalker","category":"unit","routes":[{"producer":"GATEWAY","requires":["CYBERNETICSCORE"],"requires_power":true},{"producer":"WARPGATE","requires":["CYBERNETICSCORE"],"requires_power":true,"requires_placement_position":true}]},
+    "HIGHTEMPLAR": {"name":"High Templar","category":"unit","routes":[{"producer":"GATEWAY","requires":["TEMPLARARCHIVE"],"requires_power":true},{"producer":"WARPGATE","requires":["TEMPLARARCHIVE"],"requires_power":true,"requires_placement_position":true}]},
+    "DARKTEMPLAR": {"name":"Dark Templar","category":"unit","routes":[{"producer":"GATEWAY","requires":["DARKSHRINE"],"requires_power":true},{"producer":"WARPGATE","requires":["DARKSHRINE"],"requires_power":true,"requires_placement_position":true}]},
+    "SENTRY": {"name":"Sentry","category":"unit","routes":[{"producer":"GATEWAY","requires":["CYBERNETICSCORE"],"requires_power":true},{"producer":"WARPGATE","requires":["CYBERNETICSCORE"],"requires_power":true,"requires_placement_position":true}]},
+    "PHOENIX": {"name":"Phoenix","category":"unit","routes":[{"producer":"STARGATE","requires":[],"requires_power":true}]},
+    "CARRIER": {"name":"Carrier","category":"unit","routes":[{"producer":"STARGATE","requires":["FLEETBEACON"],"requires_power":true}]},
+    "VOIDRAY": {"name":"Void Ray","category":"unit","routes":[{"producer":"STARGATE","requires":[],"requires_power":true}]},
+    "WARPPRISM": {"name":"Warp Prism","category":"unit","routes":[{"producer":"ROBOTICSFACILITY","requires":[],"requires_power":true},{"producer":"WARPPRISMPHASING","method":"transform"}]},
+    "OBSERVER": {"name":"Observer","category":"unit","routes":[{"producer":"ROBOTICSFACILITY","requires":[],"requires_power":true},{"producer":"OBSERVERSIEGEMODE","method":"transform"}]},
+    "IMMORTAL": {"name":"Immortal","category":"unit","routes":[{"producer":"ROBOTICSFACILITY","requires":[],"requires_power":true}]},
+    "PROBE": {"name":"Probe","category":"unit","routes":[{"producer":"NEXUS","requires":[]}]},
+    "WARPGATE": {"name":"Warp Gate","category":"building","routes":[{"producer":"GATEWAY","method":"convert","requires_upgrade":"WARPGATERESEARCH"}],"tech_aliases":["GATEWAY"]},
+    "WARPPRISMPHASING": {"name":"Warp Prism (Phasing Mode)","category":"unit","routes":[{"producer":"WARPPRISM","method":"transform"}],"tech_aliases":["WARPPRISM"],"unit_alias":"WARPPRISM"},
+    "ARCHON": {"name":"Archon","category":"unit","routes":[{"method":"merge","sources":{"HIGHTEMPLAR":2}},{"method":"merge","sources":{"DARKTEMPLAR":2}},{"method":"merge","sources":{"HIGHTEMPLAR":1,"DARKTEMPLAR":1}}]},
+    "ADEPT": {"name":"Adept","category":"unit","routes":[{"producer":"GATEWAY","requires":["CYBERNETICSCORE"],"requires_power":true},{"producer":"WARPGATE","requires":["CYBERNETICSCORE"],"requires_power":true,"requires_placement_position":true}]},
+    "ORACLE": {"name":"Oracle","category":"unit","routes":[{"producer":"STARGATE","requires":[],"requires_power":true}]},
+    "TEMPEST": {"name":"Tempest","category":"unit","routes":[{"producer":"STARGATE","requires":["FLEETBEACON"],"requires_power":true}]},
+    "DISRUPTOR": {"name":"Disruptor","category":"unit","routes":[{"producer":"ROBOTICSFACILITY","requires":["ROBOTICSBAY"],"requires_power":true}]},
+    "SHIELDBATTERY": {"name":"Shield Battery","category":"building","routes":[{"producer":"PROBE","requires":["CYBERNETICSCORE"],"requires_placement_position":true}]},
+    "OBSERVERSIEGEMODE": {"name":"Observer (Surveillance Mode)","category":"unit","routes":[{"producer":"OBSERVER","method":"transform"}],"unit_alias":"OBSERVER"}
+  },
+  "upgrade_dependencies": {
+    "PROTOSS_GROUND_WEAPONS_ARMOR_SHIELDS": {"family":"Protoss ground weapons/armor/shields","research_location":"Forge","requirements":"Previous level; Twilight Council for levels 2 and 3"},
+    "PROTOSS_AIR_WEAPONS_ARMOR": {"family":"Protoss air weapons/armor","research_location":"Cybernetics Core","requirements":"Previous level; Fleet Beacon for levels 2 and 3"}
+  },
+  "rules": {
+    "CONSTRUCTION": {"title":"Construction","content":"The Probe initiates construction and can leave while the building warps in. Except Nexus, Pylon, and Assimilator, standard Protoss structures require a power field to build and operate. A power source is a Pylon or a phased Warp Prism; a technology prerequisite does not itself supply power. Losing power suspends affected production, research, and powered defenses."},
+    "PRODUCTION": {"title":"Production","content":"Warp Gate units need a legal powered placement and an available gate cooldown. Warp Gate research does not turn all Gateways into Warp Gates automatically. A Warp Prism is produced by the Robotics Facility, not the Stargate. The Colossus is a ground unit but is also targetable by anti-air weapons."}
+  }
+}
