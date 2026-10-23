@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 
 from ..console import tool_progress, write_console
 from .matches import stop_process
-from .versions import editable, project_path, read_json, write_json
+from .versions import project_path, read_json, write_json
 
 
 def load_settings(project, settings):
@@ -115,137 +115,6 @@ def budgeted_llm_type(settings):
     return BudgetedLLM
 
 
-def candidate_editor(workspace):
-    """Wrap the official file editor with the exact candidate write boundary."""
-    from openhands.sdk.tool import ToolExecutor
-    from openhands.tools.file_editor import FileEditorTool, FileEditorObservation
-    root = Path(workspace).resolve()
-
-    class Executor(ToolExecutor):
-        def __init__(self, delegate):
-            """Keep the SDK's standard editing implementation."""
-            self.delegate = delegate
-
-        def __call__(self, action, conversation=None):
-            """Permit views inside the candidate and writes only to editable components."""
-            path = (root / action.path).resolve()
-            if not path.is_relative_to(root) or (action.command != "view" and not editable(path.relative_to(root).as_posix())):
-                return FileEditorObservation.from_text(command=action.command, path=str(path),
-                    text="Path exceeds candidate component scope", is_error=True)
-            return self.delegate(action.model_copy(update={"path": str(path)}), conversation)
-
-    class Editor(FileEditorTool):
-        name = FileEditorTool.name
-
-        @classmethod
-        def create(cls, conv_state, **params):
-            """Construct the official editor with a scoped executor."""
-            return [tool.model_copy(update={"executor": Executor(tool.executor)})
-                    for tool in super().create(conv_state)]
-
-    return Editor
-
-
-def investigation_tools(investigation):
-    """Expose ordinary investigation functions as tools within one SDK conversation."""
-    from typing import Any, Literal
-    from pydantic import BaseModel, ConfigDict, Field
-    from openhands.sdk.tool import Action, Observation, ToolDefinition, ToolExecutor, ToolAnnotations
-
-    class Issue(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-        symptom: str
-        runs: list[str]
-        window: list[float] = Field(min_length=2, max_length=2)
-        why_selected: str
-
-    class Hypothesis(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-        id: str
-        explanation: str
-        predictions: dict[Literal["support", "refute"], str]
-        code_targets: list[str] = Field(default_factory=list)
-
-    class EvidenceUpdate(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-        id: str
-        reason: str
-        support_refs: list[str] = Field(default_factory=list)
-        against_refs: list[str] = Field(default_factory=list)
-        unknowns: list[str] = Field(default_factory=list)
-        status: Literal["open", "supported", "weakened", "refuted", "unresolved"] | None = None
-
-    class Conclusion(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-        status: Literal["repair_ready", "unresolved"]
-        hypothesis_id: str | None = None
-        change: str = ""
-        preserve: str = ""
-        code_targets: list[str] = Field(default_factory=list)
-        evidence_refs: list[str] = Field(default_factory=list)
-        expected_effect: list[dict[str, Any]] = Field(default_factory=list)
-        risks: str = ""
-        uncertainty: str = ""
-        reason: str = ""
-
-    class SelectInput(Action):
-        model_config = ConfigDict(extra="forbid")
-        issue: Issue | None = None
-        hypotheses: list[Hypothesis] = Field(default_factory=list)
-        reason: str = ""
-
-    class QueryInput(Action):
-        model_config = ConfigDict(extra="forbid")
-        query_kind: Literal["overview", "metrics", "events", "trace", "compare", "source", "api", "knowledge", "memory"] = Field(alias="kind")
-        params: dict[str, Any] = Field(default_factory=dict)
-        purpose: str
-        updates: list[EvidenceUpdate] = Field(default_factory=list)
-
-    class ConcludeInput(Action):
-        model_config = ConfigDict(extra="forbid")
-        conclusion: Conclusion
-        updates: list[EvidenceUpdate] = Field(default_factory=list)
-
-    class Output(Observation):
-        pass
-
-    class Executor(ToolExecutor):
-        def __init__(self, function):
-            """Bind one investigation operation without a separate executor class."""
-            self.function = function
-
-        def __call__(self, action, conversation=None):
-            """Return validation failures as tool observations for correction."""
-            try:
-                value = self.function(**action.model_dump(exclude_none=True, by_alias=True,
-                                                         include=set(type(action).model_fields)))
-            except (ValueError, KeyError, TypeError, OSError) as exc:
-                value = dict(status="invalid_input", error=dict(code="invalid_input", message=str(exc)))
-            return Output.from_text(json.dumps(value, ensure_ascii=False))
-
-    def make_definition(tool_name, help_text, function, input_type):
-        """Bind SDK tool construction to one operation and its executor."""
-        class Definition(ToolDefinition):
-            @classmethod
-            def create(cls, conv_state=None, **params):
-                """Construct the bound SDK-native tool definition."""
-                return [cls(description=help_text, action_type=input_type, observation_type=Output,
-                            executor=Executor(function), annotations=ToolAnnotations(
-                                readOnlyHint=True, destructiveHint=False, openWorldHint=False))]
-        tool = type("Rsi" + tool_name.title().replace("_", ""), (Definition,), {"name": tool_name})
-        return tool.create()[0]
-
-    descriptions = {
-        "select_issue": "Initially select one issue and competing hypotheses. Later omit issue and supply only new/revised hypotheses plus reason. Omitted hypotheses remain; use updates status=refuted to retire one. Revising an existing hypothesis archives and resets its evidence; reassess rather than inherit old support. Times are game seconds; code targets start with bot/.",
-        "investigate": "Query evidence; purpose briefly states what to distinguish or clarify. Related queries may run consecutively. Supply updates when a collection of evidence changes your judgment, or at conclude; each update needs a reason. Routing follows kind. Analyzer params default to the issue's batch, runs and time; override explicitly to broaden scope, specify batch_id for multiple batches. metrics: names; events: types; trace: module/call_id/request_id/status; compare: reference_batch,names. Optional detail=raw,offset retrieve samples/pages; default summary. source/api/knowledge: path,symbol,start_line; memory: text. Source paths are relative to bot/; JSON symbols use dot keys.",
-        "conclude": "Conclude with repair_ready or unresolved. For repair_ready choose hypothesis_id, describe change and preserve behavior, cite evidence and include improvement/regression expected_effect checks. Each effect: kind=metric/event,name,statistic,time:[start,end],direction=increase/decrease/stable,role=improvement/regression, optional where for event details. State samples support mean/min/max/first/last; counters support count/first_time; events support count/first_time/duration. Use unresolved when evidence cannot distinguish causes.",
-    }
-    functions = dict(select_issue=investigation.update, investigate=investigation.query, conclude=investigation.conclude)
-    inputs = dict(select_issue=SelectInput, investigate=QueryInput, conclude=ConcludeInput)
-    return [make_definition(name, description, functions[name], inputs[name])
-            for name, description in descriptions.items()]
-
-
 def execute(job_path, llm_factory=None):
     """Worker entry; model transport can be injected for offline SDK verification."""
     os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
@@ -265,13 +134,19 @@ def execute(job_path, llm_factory=None):
         prompt = job["prompt"]
         if job["role"] == "diagnosis":
             from ..diagnosis.investigate import Investigation
+            from ..diagnosis.session import investigation_tools
             investigation = Investigation(job, directory)
             if job["diagnosis"]["query_policy"] == "fixed":
                 prompt += "\nPredeclared evidence pack:\n" + json.dumps(investigation.fixed_pack(), ensure_ascii=False)
             definitions = investigation_tools(investigation)
         elif job["role"] == "editor":
             from openhands.tools.terminal import TerminalTool
+            from ..editor import candidate_editor
             definitions = [candidate_editor(job["workspace"])]
+            if job.get("context"):
+                from ..retriever import Retriever, reference_tool
+                references = Retriever(dict(source_root=job["workspace"]), job["context"])
+                definitions.append(reference_tool(references.read_reference))
             terminal = Tool(name=TerminalTool.name, params=dict(env=dict(
                 PATH=str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", ""),
                 PYTHONPATH=str(Path(job["workspace"]).resolve()), PYTHONDONTWRITEBYTECODE="1")))
@@ -313,7 +188,7 @@ def execute(job_path, llm_factory=None):
         if investigation:
             value = investigation.state
             if not value["conclusion"]:
-                value["conclusion"] = dict(status="unresolved", reason="Session ended without a validated conclusion")
+                value.setdefault("reason", "Session ended without an actionable conclusion")
                 investigation.save()
         else:
             value = get_agent_final_response(list(conversation.state.events)).strip()

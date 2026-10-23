@@ -58,17 +58,22 @@ def _tool_progress(event, role, workspace=None):
         match role, name:
             case "diagnosis", "select_issue":
                 if action.get("issue"):
-                    progress(role, "Issue: " + action["issue"]["symptom"])
+                    progress(role, "Issue: " + action["issue"]["problem"])
                 for hypothesis in action.get("hypotheses", []):
                     progress(role, f"Hypothesis {hypothesis['id']}: {hypothesis['explanation']}")
-            case "diagnosis", "investigate":
+            case "diagnosis", "query_logs":
                 params = action.get("params", {})
                 target = params.get("path") or params.get("names") or params.get("types") or ""
                 if isinstance(target, (list, tuple)):
                     target = ", ".join(map(str, target))
                 progress(role, f"Query {action['kind']} {brief(target, 110)}; purpose: {brief(action['purpose'], 180)}")
+            case ("diagnosis" | "editor"), "read_reference":
+                progress(role, "Read " + brief(action["path"], 140) +
+                         ("; key: " + brief(action["key"], 80) if action.get("key") else ""))
+            case "diagnosis", "query_memory":
+                progress(role, "Query memory: " + brief(action.get("text") or "all available experiences", 140))
             case "diagnosis", "conclude":
-                progress(role, "Submitting conclusion: " + action["conclusion"]["status"])
+                progress(role, "Submitting conclusion" if action.get("conclusion") else "Ending without a proposal: " + action.get("reason", ""))
             case "editor", "file_editor":
                 path = Path(action["path"])
                 if path.is_absolute() and workspace and path.is_relative_to(workspace):
@@ -81,17 +86,18 @@ def _tool_progress(event, role, workspace=None):
     elif kind == "ObservationEvent":
         observation = event.observation
         match role, name:
-            case "diagnosis", "select_issue" | "investigate" | "conclude":
+            case ("diagnosis", "select_issue" | "query_logs" | "read_reference" | "query_memory" | "conclude") | ("editor", "read_reference"):
                 value = json.loads(observation.text)
                 if value.get("status") in {"invalid_input", "invalid_query"}:
                     progress(role, "Tool rejected: " + value["error"]["message"])
-                elif name == "investigate":
+                elif name in {"query_logs", "read_reference", "query_memory"}:
                     progress(role, f"Evidence returned: {len(value.get('items', []))} items" +
                              (" (truncated; further queries available)" if value.get("truncated") else ""))
                 elif name == "conclude" and value.get("conclusion"):
                     conclusion = value["conclusion"]
-                    progress(role, f"Conclusion validated: {conclusion.get('hypothesis_id') or conclusion['status']}; " +
-                             (conclusion.get("change") or conclusion.get("reason", "")))
+                    progress(role, "Conclusion validated: " + conclusion["change"])
+                elif name == "conclude":
+                    progress(role, "Unresolved: " + value.get("reason", "No proposal"))
             case "editor", "terminal":
                 code = observation.exit_code
                 progress(role, f"Command result: exit_code={code}" +

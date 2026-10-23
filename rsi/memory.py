@@ -10,20 +10,19 @@ def record(root, report):
     item = {key: report.get(key) for key in
             ("iteration_id", "parent", "status", "reason", "conditions", "changed_files")}
     diagnosis = report.get("diagnosis", {})
-    conclusion = diagnosis.get("conclusion", {})
+    conclusion = diagnosis.get("conclusion")
     item["issue"] = diagnosis.get("issue")
-    item["proposal"] = {key: conclusion.get(key) for key in
-                        ("hypothesis_id", "change", "preserve", "code_targets", "expected_effect", "risks", "uncertainty")}
-    item["hypotheses"] = [{key: h.get(key) for key in ("id", "explanation", "status", "unknowns")}
+    item["proposal"] = conclusion
+    item["hypotheses"] = [{key: h.get(key) for key in ("id", "explanation", "predictions", "code_targets")}
                           for h in diagnosis.get("hypotheses", [])]
     validation, evaluation = report.get("validation", {}), report.get("evaluation", {})
     item["validation"] = dict(passed=validation.get("passed"),
                               checks=[dict(name=c["name"], passed=c["passed"]) for c in validation.get("checks", [])])
     item["evaluation"] = {key: evaluation.get(key) for key in ("decision", "reason", "comparison")}
-    item["evaluation"]["effects"] = [{key: effect.get(key) for key in ("effect", "difference", "result")}
-                                      for effect in evaluation.get("expected_effects", [])]
+    item["evaluation"]["supplementary"] = [{key: effect.get(key) for key in ("effect", "difference", "result")}
+                                      for effect in evaluation.get("supplementary", [])]
     item["artifacts"] = dict(report.get("artifacts", {}))
-    item["interpretation"] = "Validation, local effects and formal acceptance are separate; diagnosis remains a hypothesis."
+    item["interpretation"] = "Verification advice is qualitative; fixed evaluation decides acceptance; diagnosis remains a hypothesis."
     write_json(Path(root) / "memory" / f"{report['iteration_id']}.json", item)
 
 

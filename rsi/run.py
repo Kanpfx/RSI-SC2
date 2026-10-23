@@ -17,7 +17,7 @@ from .evaluator import evaluate, freeze_plan, parse_specialist, specialist_job
 from .memory import record, search
 from .tools.llm import call_session, load_settings, preflight
 from .tools.matches import MATCH_START_INTERVAL, run_batch
-from .tools.retriever import freeze_context
+from .retriever import Retriever, freeze_context
 from .tools.validate import validate
 from .tools.versions import Versions, path_reference, project_path, read_json, write_json
 
@@ -71,8 +71,7 @@ class Run:
         self.collect, self.enable_model = collect, enable_model
         self.root = self.project / "runtime/rsi"
         self.versions = Versions(self.project, self.root)
-        self.analyzer = Analyzer(self.project, config["analysis"],
-                                 config["diagnosis"]["max_items"], config["diagnosis"]["max_chars"])
+        self.analyzer = Analyzer(self.project, config["analysis"])
         self.started = time.monotonic()
         self.directory = self.root / "iterations" / (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ_") + uuid4().hex[:8])
         self.report = dict(iteration_id=self.directory.name, status="running", stage="prepare",
@@ -87,7 +86,7 @@ class Run:
         self.report["costs"]["wall_seconds"] = time.monotonic() - self.started
         summary = dict(self.report)
         if "diagnosis" in summary:
-            summary["diagnosis"] = dict(status=self.report["diagnosis"]["conclusion"]["status"])
+            summary["diagnosis"] = dict(status="repair_ready" if self.report["diagnosis"].get("conclusion") else "unresolved")
         if "validation" in summary:
             summary["validation"] = dict(passed=self.report["validation"]["passed"], failed_checks=[
                 check["name"] for check in self.report["validation"]["checks"] if not check["passed"]])
@@ -128,9 +127,6 @@ class Run:
         print(progress_line(purpose, "Matches finished; analyzing logs"), flush=True)
         analysis = self.analyzer.add_batch(batch)
         self.save(name + "_analysis", analysis)
-        if purpose != "explore":
-            for run_id in batch["runs"]:
-                self.analyzer.records.pop(run_id, None)
         summary = analysis["summary"]
         outcomes = ", ".join(f"{name}={count}" for name, count in summary["outcomes"].items())
         events = sorted(summary["event_counts"].items(), key=lambda item: item[1], reverse=True)[:3]
@@ -166,7 +162,6 @@ class Run:
     def finish(self, status, reason):
         """Retain all outcomes and write memory only when diagnosis actually ran."""
         self.report.update(status=status, reason=reason)
-        self.analyzer.records.clear()
         if "diagnosis" in self.report:
             record(self.root, self.report)
         self.save("final", dict(status=status, reason=reason))
@@ -199,14 +194,17 @@ class Run:
                             or manifest.get("run_id") != run_id):
                         raise ValueError("Reused run identity/purpose mismatch")
                 batches.append(batch)
-                analyses.append(self.analyzer.add_batch(batch))
+                analyses.append(self.save(batch["batch_id"] + "_analysis", self.analyzer.add_batch(batch)))
             if self.collect:
                 batch, analysis = self.batch(parent, self.config["explore"], "explore")
                 batches.append(batch)
                 analyses.append(analysis)
             if not batches:
                 return self.finish("awaiting_data", "Use --collect or --reuse-batch PATH")
-            overview = [self.analyzer.query("overview", b["batch_id"]) for b in batches]
+            retriever = Retriever(parent, self.project, self.config["diagnosis"]["max_chars"],
+                                  analyses=analyses, max_items=self.config["diagnosis"]["max_items"])
+            overview = [retriever.query_logs("overview", batch_id=b["batch_id"]) for b in batches]
+            del retriever
             self.save("overview", overview)
             if self.config["mode"] == "analyze_only":
                 return self.finish("analysis_only", "Exploration analysis saved; no model calls")
@@ -219,19 +217,16 @@ class Run:
             experiences = search(self.root, self.report["conditions"]) if self.config["diagnosis"]["use_memory"] else []
             print(progress_line("diagnosis", f"Freezing references; memory_items={len(experiences)}"), flush=True)
             freeze_context(self.project, context, experiences)
-            # Analysis and future queries use the same frozen reference catalogue.
             self.analyzer.catalog = Analyzer(context).catalog
-            # Diagnosis loads its own exploration logs; the coordinator no longer queries them.
-            self.analyzer.records.clear()
-            diagnosis = self.model("diagnosis", diagnosis_job(self.project, parent, batches, overview, context, self.config))
+            diagnosis = self.model("diagnosis", diagnosis_job(self.project, parent, batches, overview, context, self.config,
+                analysis_paths=[self.report["artifacts"][b["batch_id"] + "_analysis"] for b in batches]))
             self.report["diagnosis"] = self.save("diagnosis", diagnosis)
-            progress("diagnosis", f"Completed: {diagnosis['conclusion']['status']}; queries={len(diagnosis.get('queries', []))}")
+            progress("diagnosis", f"Completed: {'repair_ready' if diagnosis.get('conclusion') else 'unresolved'}; "
+                     f"queries={len(diagnosis.get('queries', []))}")
             for hypothesis in diagnosis.get("hypotheses", []):
-                updates = hypothesis.get("updates", [])
-                progress("diagnosis", f"{hypothesis['id']} -> {hypothesis.get('status', 'open')}; " +
-                         (updates[-1]["reason"] if updates else hypothesis["explanation"]))
-            if diagnosis["conclusion"]["status"] != "repair_ready":
-                return self.finish("unresolved", diagnosis["conclusion"].get("reason", "Diagnosis unresolved"))
+                progress("diagnosis", f"{hypothesis['id']}: {hypothesis['explanation']}")
+            if not diagnosis.get("conclusion"):
+                return self.finish("unresolved", diagnosis.get("reason", "Diagnosis unresolved"))
             candidate = self.versions.candidate(parent, self.directory / "candidate")
             feedback = None
             for attempt in range(self.config["max_repairs"] + 1):
@@ -271,13 +266,14 @@ class Run:
                     (self.directory / "patch.diff").read_text(encoding="utf-8"), rules["max_checks"]))
                 supplementary = parse_specialist(value, rules["max_checks"])
             plan = self.save("evaluation_plan", freeze_plan(rules, diagnosis, supplementary))
+            progress("evaluation", "Verification guidance: " + plan["verification"])
             print(progress_line("evaluation", f"Plan frozen; formal={rules['formal']} "
                                 f"matches_per_version={len(rules['matches'])}"), flush=True)
             _, parent_analysis = self.batch(parent, rules["matches"], "eval_parent")
             _, candidate_analysis = self.batch(child, rules["matches"], "eval_candidate")
             evaluation = evaluate(parent_analysis, candidate_analysis, plan)
             self.report["evaluation"] = self.save("evaluation", evaluation)
-            for check in evaluation["expected_effects"]:
+            for check in evaluation["supplementary"]:
                 effect = check["effect"]
                 progress("evaluation", f"{effect['name']}.{effect['statistic']}: {check['result']}; " +
                          f"parent={check['parent']} candidate={check['candidate']}")

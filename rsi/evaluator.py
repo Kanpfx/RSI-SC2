@@ -1,21 +1,20 @@
-"""Predeclared local predictions plus a fixed, conservative parent/candidate gate."""
+"""Fixed parent/candidate gate with textual verification and optional explanatory checks."""
 import json
 from math import sqrt
 from statistics import NormalDist, mean
 
 from .analyzer import EVENT_KINDS, metric_statistics, statistics
-from .diagnosis.investigate import validate_effect
 
 
 def specialist_job(diagnosis, diff, max_checks):
     """Request optional supplementary checks before any candidate outcomes are available."""
     return dict(role="evaluation_plan", prompt="""Return ONLY a JSON array of supplementary checks for this patch.
-No games have been run. Do not change acceptance thresholds or the original expectations.
+No evaluation games have been run. Use the natural-language verification advice to suggest measurable checks; do not change acceptance thresholds.
 Use only existing Analyzer metrics/events; no shell or arbitrary code execution is available.
 Each check: {kind:metric/event,name,statistic:mean/min/max/first/last/count/first_time/duration,
 time:[start,end] seconds,direction:increase/decrease/stable,role:improvement/regression,
 where:{optional event detail keys such as type/facility/reason}}. Return [] if unnecessary.
-These checks explain effects; the original fixed gate alone decides promotion.
+These checks explain effects; the fixed win-rate gate alone decides promotion.
 """ + json.dumps(dict(proposal=diagnosis["conclusion"], diff=diff[:20000], max_checks=max_checks), ensure_ascii=False))
 
 
@@ -32,8 +31,8 @@ def parse_specialist(value, maximum):
 
 
 def freeze_plan(config, diagnosis, supplementary=None):
-    """Freeze configurations and executable predictions before evaluation matches run."""
-    return dict(rules=config, expected_effect=diagnosis["conclusion"]["expected_effect"],
+    """Freeze fixed rules, textual verification advice and optional quantitative checks."""
+    return dict(rules=config, verification=diagnosis["conclusion"]["verification"],
                 supplementary=supplementary or [],
                 note="Supplementary checks are explanatory; promotion rules remain fixed.")
 
@@ -94,8 +93,7 @@ def evaluate(parent, candidate, plan):
     """Decide accept/reject/inconclusive using only the frozen plan and complete fixed data."""
     rules = plan["rules"]
     p, c = list(parent["runs"].values()), list(candidate["runs"].values())
-    effects = check_effects(parent, candidate, plan["expected_effect"])
-    report = dict(decision="inconclusive", reason="Insufficient fixed evidence", expected_effects=effects,
+    report = dict(decision="inconclusive", reason="Insufficient fixed evidence", verification=plan["verification"],
                   supplementary=check_effects(parent, candidate, plan["supplementary"]),
                   parent_batch=parent["batch_id"], candidate_batch=candidate["batch_id"])
     if any(r["outcome"].get("execution_status") == "bot_error" for r in c):
@@ -126,8 +124,31 @@ def evaluate(parent, candidate, plan):
         return dict(report, reason="Functional comparison or fewer than the predeclared minimum samples")
     if cu - pl < 0:
         return dict(report, decision="reject", reason="Fixed comparison indicates overall regression")
-    if any(e["result"] != "met" for e in effects):
-        return dict(report, reason="A declared effect is missing or unconfirmed")
     if cl - pu > rules["min_improvement"]:
-        return dict(report, decision="accept", reason="Overall improvement and declared effects satisfy the fixed gate")
+        return dict(report, decision="accept", reason="Overall improvement satisfies the fixed gate")
     return report
+
+
+def validate_effect(effect):
+    """Require an executable metric/event expectation and an explicit time window."""
+    if effect.get("kind") not in {"metric", "event"} or not effect.get("name"):
+        raise ValueError("Effect requires kind=metric/event and name")
+    if effect["kind"] == "event" and effect["name"] not in EVENT_KINDS:
+        raise ValueError("Unsupported effect event name")
+    if effect.get("statistic") not in {"mean", "min", "max", "first", "last", "count", "first_time", "duration"}:
+        raise ValueError("Unsupported effect statistic")
+    if effect["kind"] == "event" and effect["statistic"] not in {"count", "first_time", "duration"}:
+        raise ValueError("Event effects support count, first_time and duration")
+    if effect["kind"] == "metric" and effect["statistic"] == "duration":
+        raise ValueError("Metric effects do not support duration")
+    if effect["kind"] == "metric" and effect["statistic"] not in metric_statistics(effect["name"]):
+        raise ValueError(f"Unsupported statistic for {effect['name']}; allowed: {metric_statistics(effect['name'])}")
+    window = effect.get("time", [])
+    if len(window) != 2 or not all(isinstance(t, (int, float)) for t in window) or not 0 <= window[0] < window[1]:
+        raise ValueError("Effect time must be [start, end] in seconds")
+    if effect.get("direction") not in {"increase", "decrease", "stable"}:
+        raise ValueError("Effect direction must be increase/decrease/stable")
+    if effect.get("role") not in {"improvement", "regression"}:
+        raise ValueError("Effect role must be improvement/regression")
+    if not isinstance(effect.get("where", {}), dict):
+        raise ValueError("Effect where must be a dictionary of event details")

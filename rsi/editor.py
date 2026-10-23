@@ -4,12 +4,12 @@ import os
 from pathlib import Path
 import sys
 
-from .analyzer import compact_refs, refs as source_refs
-from .tools.versions import path_reference, project_path, write_json
+from .retriever import Retriever
+from .tools.versions import editable, path_reference, project_path, write_json
 
 
 def make_job(candidate, diagnosis, feedback=None, context=None):
-    """Give the coding session its fixed target, cited evidence and optional repair errors."""
+    """Pass the proposal and hypotheses with query records available for selective checks."""
     candidate = project_path(candidate)
 
     def workspace_path(path):
@@ -21,41 +21,27 @@ def make_job(candidate, diagnosis, feedback=None, context=None):
             return path.as_posix()
 
     conclusion = diagnosis["conclusion"]
-    refs = set(conclusion["evidence_refs"])
-    evidence, complete_evidence, omitted_refs, size = [], [], set(), 0
-    for query in diagnosis["queries"]:
-        for item in query["result"]["items"]:
-            cited = refs & set(source_refs(item))
-            if not cited:
-                continue
-            complete_evidence.append(dict(channel=query["channel"], kind=query["kind"], item=item))
-            item = compact_refs(item)
-            if isinstance(item.get("source"), str) and len(item["source"]) > 6000:
-                item = dict(item, source=item["source"][:6000], excerpt_truncated=True)
-            length = len(json.dumps(item, ensure_ascii=False))
-            if size + length > 16000:
-                omitted_refs.update(cited)
-                continue
-            evidence.append(dict(channel=query["channel"], kind=query["kind"], item=item))
-            size += length
-    hypothesis = next((h for h in diagnosis.get("hypotheses", []) if h["id"] == conclusion.get("hypothesis_id")), None)
-    if hypothesis:
-        hypothesis = {k: hypothesis[k] for k in ("id", "explanation", "predictions") if k in hypothesis}
+    hypotheses = [{key: h[key] for key in ("id", "explanation", "predictions", "code_targets") if key in h}
+                  for h in diagnosis.get("hypotheses", [])]
     evidence_path = candidate.parent / "editor_evidence.json"
-    write_json(evidence_path, complete_evidence)
+    write_json(evidence_path, diagnosis["queries"])
     failures = None if feedback is None else dict(passed=feedback["passed"], checks=[
         {k: (v[-4000:] if k == "output" else v) for k, v in check.items()}
         for check in feedback["checks"] if not check["passed"]])
     prompt = """Implement this single diagnosis in the candidate workspace. Edit only Python files under
 bot/components/behaviors/, bot/components/tasks/, bot/components/tactics/. Read other Bot files as needed.
-Keep the diagnosis target and expected effects fixed. Do not change tests, core, spatial, telemetry or RSI.
+Keep the diagnosis target and verification advice fixed. Do not change tests, core, spatial, telemetry or RSI.
 Modules implement async execute(frame, explicit_business_inputs) -> bool and are called through frame.run.
 Read native observations via frame.game; propose commands via frame.actions. True means some control intent
 is handled, not arbitration or engine success. Do not issue Unit/BotAI commands or add manual tracking/logging.
 Keep changes small and modular. Include concise English docstrings for new/changed functions.
-The prompt contains evidence excerpts. Read evidence_path for the full selected evidence when needed.
-If reference_directory is provided, read its api/ and knowledge/ files for missing reference details.
-These supporting files are read-only; do not change the diagnosis or expected effects.
+The issue contains natural-language evidence descriptions. Read evidence_path selectively to check them;
+it contains all recorded queries, their parameters and results. Avoid loading the whole file into context.
+Use the proposal verification advice to choose relevant offline checks and report remaining uncertainty.
+When a references index is provided, use read_reference to inspect API definitions and Knowledge entries.
+source/ reads the current candidate's bot/ tree; api/ and knowledge/ read this iteration's frozen references.
+Use lines=[start,end] for text, or key for JSON entries; omit key to list entry names.
+These supporting files are read-only; do not change the diagnosis or verification advice.
 Use the official file editor and terminal to inspect, edit, run offline checks, read failures and repair in this session.
 The terminal starts in the candidate workspace; Python resolves candidate modules through PYTHONPATH.
 All relative paths in the task are relative to this candidate workspace.
@@ -64,8 +50,41 @@ python -B -m unittest discover -s <tests_directory> -p test_bot.py -v
 Use platform-appropriate quoting; Windows uses PowerShell. Keep tests and all files outside the candidate unchanged.
 Do not install dependencies or start SC2, model calls or RSI iterations. External validation and fixed matches still run afterward.
 """
-    return dict(role="editor", workspace=path_reference(candidate), prompt=prompt + "\n" + json.dumps(
+    return dict(role="editor", workspace=path_reference(candidate), context=path_reference(context) if context else None,
+        prompt=prompt + "\n" + json.dumps(
         dict(python=Path(sys.executable).as_posix(), tests_directory=workspace_path(Path(__file__).resolve().parents[1] / "scripts/test"),
-             issue=diagnosis.get("issue"), hypothesis=hypothesis, proposal=conclusion, evidence=evidence,
+             issue=diagnosis.get("issue"), hypotheses=hypotheses, proposal=conclusion,
              evidence_path=workspace_path(evidence_path), reference_directory=workspace_path(context) if context else None,
-             omitted_evidence_refs=sorted(omitted_refs), validator_feedback=failures), ensure_ascii=False))
+             references=Retriever(dict(source_root=candidate), context).index() if context else None,
+             validator_feedback=failures), ensure_ascii=False))
+
+
+def candidate_editor(workspace):
+    """Wrap the official file editor with the exact candidate write boundary."""
+    from openhands.sdk.tool import ToolExecutor
+    from openhands.tools.file_editor import FileEditorTool, FileEditorObservation
+    root = Path(workspace).resolve()
+
+    class Executor(ToolExecutor):
+        def __init__(self, delegate):
+            """Keep the SDK's standard editing implementation."""
+            self.delegate = delegate
+
+        def __call__(self, action, conversation=None):
+            """Permit views inside the candidate and writes only to editable components."""
+            path = (root / action.path).resolve()
+            if not path.is_relative_to(root) or (action.command != "view" and not editable(path.relative_to(root).as_posix())):
+                return FileEditorObservation.from_text(command=action.command, path=str(path),
+                    text="Path exceeds candidate component scope", is_error=True)
+            return self.delegate(action.model_copy(update={"path": str(path)}), conversation)
+
+    class Editor(FileEditorTool):
+        name = FileEditorTool.name
+
+        @classmethod
+        def create(cls, conv_state, **params):
+            """Construct the official editor with a scoped executor."""
+            return [tool.model_copy(update={"executor": Executor(tool.executor)})
+                    for tool in super().create(conv_state)]
+
+    return Editor

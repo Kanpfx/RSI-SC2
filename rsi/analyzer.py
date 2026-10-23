@@ -1,4 +1,4 @@
-"""Facts and bounded queries over the Bot's original JSONL, without causal diagnosis."""
+"""Compute static metrics and descriptive events from the Bot's original JSONL."""
 from collections import Counter, defaultdict
 import json
 from pathlib import Path
@@ -70,28 +70,11 @@ def metric_summary(name, rows, window=None):
     return {key: values[key] for key in metric_statistics(name)}
 
 
-def compact_refs(value):
-    """Keep representative evidence references in responses; full lists remain in artifacts."""
-    if isinstance(value, list):
-        return [compact_refs(item) for item in value]
-    if not isinstance(value, dict):
-        return value
-    result = {key: compact_refs(item) for key, item in value.items() if key != "source_refs"}
-    if "source_refs" in value:
-        references = value["source_refs"]
-        result["source_refs"] = references if len(references) <= 3 else references[:2] + references[-1:]
-        if len(references) > 3:
-            result["source_ref_count"] = len(references)
-    return result
-
-
 class Analyzer:
-    def __init__(self, project, config=None, max_items=40, max_chars=16000):
-        """Bind event thresholds and independent output bounds; batches are explicitly registered."""
+    def __init__(self, project, config=None):
+        """Bind fixed analysis thresholds and the unit knowledge used for calculations."""
         self.project = project_path(project)
         self.config = dict(DEFAULTS, **(config or {}))
-        self.max_items, self.max_chars = max_items, max_chars
-        self.batches, self.records = {}, {}
         self.catalog = {}
         for path in (self.project / "knowledge/units").glob("*.json"):
             self.catalog.update(read_json(path))
@@ -101,7 +84,6 @@ class Analyzer:
         directory = project_path(directory)
         manifest, result = read_json(directory / "manifest.json"), read_json(directory / "result.json")
         rows, problems = read_records(directory, run_id)
-        self.records[run_id] = rows
         samples = [r for r in rows if r["event"] == "state"]
         duration = result.get("duration_loops", max((r["frame"] for r in rows), default=0))
         series, events, modules = defaultdict(list), [], defaultdict(Counter)
@@ -294,159 +276,5 @@ class Analyzer:
                        event_counts=dict(Counter(e["kind"] for r in reports.values() for e in r["events"])),
                        metric_stats={name: {run_id: statistics(r["metrics"].get(name, [])) for run_id, r in reports.items()}
                                      for name in set().union(*(r["metrics"] for r in reports.values()))})
-        result = dict(batch_id=batch["batch_id"], version=batch["version"], purpose=batch["purpose"],
-                      runs=reports, summary=summary)
-        self.batches[batch["batch_id"]] = result
-        return result
-
-    def query(self, kind, batch_id, runs="all", **filters):
-        """Return summaries by default; paginate explicit raw data with bounded references."""
-        if kind not in {"overview", "metrics", "events", "trace", "compare"}:
-            raise ValueError("Unknown Analyzer query kind")
-        allowed = dict(overview=set(), metrics={"names"}, events={"types"},
-                       trace={"module", "call_id", "request_id", "status"}, compare={"names", "reference_batch"})
-        unknown = set(filters) - allowed[kind] - {"time", "offset", "detail"}
-        if unknown:
-            raise ValueError(f"Unknown {kind} filters: {sorted(unknown)}")
-        detail = filters.get("detail", "summary")
-        if detail not in {"summary", "raw"}:
-            raise ValueError("detail must be summary or raw")
-        batch = self.batches[batch_id]
-        ids = list(batch["runs"]) if runs == "all" else runs
-        if not isinstance(ids, list) or not set(ids) <= batch["runs"].keys():
-            raise ValueError("Invalid run scope")
-        window = filters.get("time", [0, float("inf")])
-        if len(window) != 2 or not all(isinstance(n, (int, float)) for n in window) or window[0] > window[1]:
-            raise ValueError("time must be [start_second, end_second]")
-        coverage = {i: batch["runs"][i]["coverage"] for i in ids}
-        if kind == "compare":
-            reference = self.batches[filters["reference_batch"]]
-            coverage.update({rid: r["coverage"] for rid, r in reference["runs"].items()})
-
-        def items():
-            """Yield matching rows without copying an entire raw result before pagination."""
-            for run_id in ids:
-                report = batch["runs"][run_id]
-                if kind == "overview":
-                    names = list(report["metrics"]) if detail == "raw" else [
-                        "minerals", "vespene", "workers", "idle_workers", "supply_left", "supply_block_ratio", "army_supply"]
-                    yield run_id, dict(conditions=report["conditions"], outcome=report["outcome"],
-                        metrics={n: metric_summary(n, report["metrics"].get(n, []), window) for n in names},
-                        metric_names=sorted(report["metrics"]),
-                        modules=report["modules"] if detail == "raw" else dict(
-                            count=len(report["modules"]), exceptions=sum(m["exceptions"] for m in report["modules"].values())),
-                        actions=report["actions"],
-                        events=report["events"][:10] if detail == "raw" else dict(Counter(
-                            e["kind"] for e in report["events"] if e["start"] <= window[1] and e["end"] >= window[0])),
-                        source_refs=([self.records[run_id][0]["source_ref"], self.records[run_id][-1]["source_ref"]]
-                                     if self.records[run_id] else []))
-                elif kind == "metrics":
-                    names = filters.get("names", list(report["metrics"]))
-                    for name in names:
-                        rows = [r for r in report["metrics"].get(name, []) if window[0] <= r["time"] <= window[1]]
-                        yield run_id, dict(name=name, statistics=metric_summary(name, rows),
-                            allowed_statistics=metric_statistics(name),
-                            source_refs=[ref for row in rows for ref in row.get("source_refs", [])],
-                            missing_reason=None if rows else "Metric unavailable or no samples in window")
-                    if detail == "raw":
-                        for name in names:
-                            for row in report["metrics"].get(name, []):
-                                if window[0] <= row["time"] <= window[1]:
-                                    yield run_id, dict(row, name=name)
-                elif kind == "events":
-                    for event in report["events"]:
-                        if (event["start"] <= window[1] and event["end"] >= window[0]
-                                and (not filters.get("types") or event["kind"] in filters["types"])):
-                            yield run_id, event
-                elif kind == "trace":
-                    for row in self._trace(run_id, window, filters):
-                        yield run_id, row
-                elif kind == "compare":
-                    names = filters.get("names", list(report["metrics"]))
-                    yield run_id, dict(conditions=report["conditions"],
-                        metrics={n: metric_summary(n, report["metrics"].get(n, []), window) for n in names},
-                        modules=report["modules"], events=dict(Counter(e["kind"] for e in report["events"])),
-                        reference={rid: dict(conditions=r["conditions"],
-                            metrics={n: metric_summary(n, r["metrics"].get(n, []), window) for n in names},
-                            modules=r["modules"], events=dict(Counter(e["kind"] for e in r["events"])))
-                            for rid, r in reference["runs"].items()},
-                        source_refs=[row["source_ref"] for row in self.records[run_id] if row["event"] == "state"] +
-                                    [row["source_ref"] for rid in reference["runs"] for row in self.records[rid]
-                                     if row["event"] == "state"])
-        offset = filters.get("offset", 0)
-        if not isinstance(offset, int) or offset < 0:
-            raise ValueError("offset must be nonnegative")
-        kept, chars, truncated = [], 0, False
-        for index, (run_id, row) in enumerate(items()):
-            if index < offset:
-                continue
-            if len(kept) == self.max_items:
-                truncated = True
-                break
-            item = compact_refs(dict(row, run_id=run_id))
-            size = len(json.dumps(item, ensure_ascii=False))
-            if size > self.max_chars:
-                item = {key: item[key] for key in ("run_id", "event", "frame", "kind", "start", "end",
-                                                  "name", "call_id", "request_id", "status", "source_ref", "source_refs")
-                        if key in item}
-                item.update(detail_omitted=True, hint="Narrow time/runs/names or retrieve the source record")
-                size = len(json.dumps(item, ensure_ascii=False))
-            if chars + size > self.max_chars:
-                truncated = True
-                break
-            kept.append(item)
-            chars += size
-        return dict(items=kept, source_refs=sorted(set(refs(kept))), coverage=coverage,
-                    truncated=truncated or any(i.get("detail_omitted") for i in kept),
-                    missing_reason=None if kept else "No matching data or item exceeds output budget",
-                    next_offset=offset + len(kept) if truncated and kept else None)
-
-    def _trace(self, run_id, window, filters):
-        """Follow native call ancestry and request histories, including later confirmations."""
-        rows = self.records[run_id]
-        calls = {r["call_id"]: r for r in rows if r["event"] == "module_call"}
-        selected = {cid for cid, r in calls.items() if window[0] <= r["frame"] / LOOPS <= window[1]
-                    and (not filters.get("module") or filters["module"] in (r["module_id"], r["module_path"], r["path"]))
-                    and (not filters.get("call_id") or cid == filters["call_id"])}
-        if filters.get("status") in {"invoked_true", "invoked_false", "skipped", "exception"}:
-            selected &= {cid for cid, row in calls.items() if row["status"] == filters["status"]}
-        if filters.get("request_id"):
-            selected = {r.get("call_id") for r in rows if r.get("request_id") == filters["request_id"]}
-        descendants = set(selected)
-        for _ in range(len(calls)):
-            added = {cid for cid, r in calls.items() if r.get("parent_id") in descendants} - descendants
-            if not added:
-                break
-            descendants.update(added)
-        linked = set(descendants)
-        for cid in list(descendants):
-            parent = calls.get(cid, {}).get("parent_id")
-            while parent and parent not in linked:
-                linked.add(parent)
-                parent = calls.get(parent, {}).get("parent_id")
-        request_ids = {r["request_id"] for r in rows if r["event"] == "action"
-                       and r.get("request_id") and r.get("call_id") in descendants
-                       and (not filters.get("request_id") or r["request_id"] == filters["request_id"])}
-        if filters.get("status"):
-            request_ids &= {r.get("request_id") for r in rows if r.get("status") == filters["status"]}
-        for row in rows:
-            if ((row["event"] == "module_call" and row["call_id"] in linked)
-                    or (row["event"] == "action" and row.get("request_id") in request_ids)
-                    or (filters.get("detail") == "raw" and row["event"] == "state"
-                        and window[0] <= row["frame"] / LOOPS <= window[1])):
-                yield row
-
-
-def refs(value):
-    """Extract only source references actually present in a returned object."""
-    if isinstance(value, dict):
-        for key, item in value.items():
-            if key == "source_ref":
-                yield item
-            elif key == "source_refs":
-                yield from item
-            else:
-                yield from refs(item)
-    elif isinstance(value, list):
-        for item in value:
-            yield from refs(item)
+        return dict(batch_id=batch["batch_id"], version=batch["version"], purpose=batch["purpose"],
+                    runs=reports, summary=summary)
