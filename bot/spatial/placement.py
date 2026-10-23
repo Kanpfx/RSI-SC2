@@ -13,6 +13,12 @@ class Placement:
         """Bind native placement queries and initialize accepted-request footprint reservations."""
         self.game, self.map = game, map_data
         self.reserved = {}
+        self.corridors = []
+        for resource in self.map.resources:
+            base = min(self.map.expansions, key=lambda p: p.distance_to(resource), default=None)
+            if base is not None and base.distance_to(resource) < 12:
+                self.corridors.extend(base.towards(resource, base.distance_to(resource) * fraction)
+                                      for fraction in (.25, .5, .75))
 
     def footprint(self, product, position, addon_space=False):
         """Calculate a building rectangle, optionally extending its right side for Terran addons."""
@@ -52,13 +58,10 @@ class Placement:
                               min(max(resource.y, bottom), top)))
             if nearest.distance_to(resource) < 1.5:
                 return False
-            # Keep the worker corridor between each mineral patch and its base open.
-            base = min(self.map.expansions, key=lambda p: p.distance_to(resource), default=None)
-            if product != U.COMMANDCENTER and base is not None and base.distance_to(resource) < 12:
-                for fraction in (.25, .5, .75):
-                    point = base.towards(resource, base.distance_to(resource) * fraction)
-                    if left-1 < point.x < right+1 and bottom-1 < point.y < top+1:
-                        return False
+        # Resource corridors depend only on the static map, not the candidate or frame.
+        if product != U.COMMANDCENTER and any(
+                left-1 < point.x < right+1 and bottom-1 < point.y < top+1 for point in self.corridors):
+            return False
         return position.distance_to(self.map.ramp) > 3
 
     async def find(self, product, near, *, addon_space=False, max_distance=16, exact=False):
@@ -78,9 +81,16 @@ class Placement:
             for dx in range(-max_distance, max_distance+1, 2)]
         candidates.sort(key=lambda p: (p.distance_to(near), p.x, p.y))
         # Test a batch through the engine rather than one RPC per candidate.
-        candidates = [p for p in candidates if self.clear_access(product, p, addon_space)]
-        for index in range(0, len(candidates), 32):
-            batch = candidates[index:index+32]
+        candidates = iter(candidates)
+        while True:
+            batch = []
+            for position in candidates:
+                if self.clear_access(product, position, addon_space):
+                    batch.append(position)
+                    if len(batch) == 32:
+                        break
+            if not batch:
+                break
             legal = await self.game.can_place(product, batch)
             for position, valid in zip(batch, legal):
                 if valid:

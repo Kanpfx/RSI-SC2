@@ -2,7 +2,7 @@
   "mode": "analyze_only",
   "max_matches": 24,
   "max_wall_seconds": 7200,
-  "parallel_matches": 5,
+  "parallel_matches": 3,
   "max_repairs": 2,
   "model": {
     "api_key_env": "LLM_API_KEY",
@@ -35,7 +35,7 @@
     "map": "AbyssalReefLE", "race": "Zerg", "difficulty": "Easy",
     "game_time_limit": 1800, "wall_timeout": 600
   },
-  "explore": [{"seed": 1}, {"seed": 2}, {"seed": 3}, {"seed": 4}, {"seed": 5}],
+  "explore": [{"seed": 1}, {"seed": 2}, {"seed": 3}],
   "validation": {"seed": 100, "game_time_limit": 300, "wall_timeout": 180},
   "evaluation": {
     "specialist": false,
@@ -46,7 +46,7 @@
     "alpha": 0.05,
     "min_improvement": 0,
     "time_limit_score": "nonwin",
-    "matches": [{"seed": 201}, {"seed": 202}, {"seed": 203}, {"seed": 204}, {"seed": 205}]
+    "matches": [{"seed": 201}, {"seed": 202}, {"seed": 203}]
   },
   "holdout": []
 }

@@ -31,6 +31,11 @@ class HarassTask:
                 retreat.append(unit.tag)
         handled = await frame.run(self.jump, tags=jump, target=retreat_target, priority=110)
         handled |= await frame.run(self.retreat, tags=retreat, target=retreat_target, priority=105)
-        handled |= await frame.run(self.attack, tags=advance, target=target)
-        handled |= await frame.run(self.focus, tags=advance, priority=70)
+        moving = []
+        for tag in advance:
+            if await frame.run(self.focus, tags=(tag,), priority=70):
+                handled = True
+            else:
+                moving.append(tag)
+        handled |= await frame.run(self.attack, tags=moving, target=target)
         return handled

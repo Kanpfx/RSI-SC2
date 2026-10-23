@@ -5,7 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace as NS
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import numpy as np
 from sc2.ids.ability_id import AbilityId as A
@@ -17,6 +17,7 @@ from bot.core.actions import Actions
 from bot.core.frame import Frame
 from bot.core.units import UnitControl
 from bot.spatial import Spatial
+from bot.spatial.placement import Placement
 from bot.telemetry.logger import Logger
 from bot.components.behaviors.combat.attack_move import AttackMove
 from bot.components.behaviors.economy.mining import Mining
@@ -24,6 +25,9 @@ from bot.components.behaviors.production.build_structure import BuildStructure
 from bot.components.behaviors.production.train_units import TrainUnits
 from bot.components.behaviors.production.research import Research
 from bot.components.tactics.bc_rush import BcRush
+from bot.components.tasks.defense import DefenseTask
+from bot.components.tasks.harass import HarassTask
+from bot.components.behaviors.helpers import attack_target
 
 
 PRODUCTS = {
@@ -59,7 +63,7 @@ class Unit(NS):
             health=45, health_max=45, shield=0, radius=.5, build_progress=1,
             is_structure=product not in {U.SCV, U.MARINE, U.BATTLECRUISER},
             is_constructing_scv=False, is_carrying_resource=False, is_flying=False,
-            is_visible=True, mineral_contents=0, vespene_contents=0,
+            is_visible=True, can_be_attacked=True, mineral_contents=0, vespene_contents=0,
             add_on_tag=0, weapon_cooldown=0, can_attack_ground=False, can_attack_air=False,
             ground_range=0, air_range=0, ground_dps=0, air_dps=0, assigned_harvesters=0)
         self.__dict__.update(fields)
@@ -137,6 +141,31 @@ class Request:
 
 
 class ExecutionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_combat_maintains_focus_without_interrupting_other_units(self):
+        """Maintained focus fire must not be overwritten by lower-priority attack-move."""
+        for task, product in ((DefenseTask(), U.MARINE), (HarassTask(), U.BATTLECRUISER)):
+            with self.subTest(task=type(task).__name__):
+                unit = Unit(1, product, can_attack_ground=True, ground_range=6)
+                idle = Unit(2, product, (30, 30), can_attack_ground=True, ground_range=6)
+                enemy = Unit(90, U.MARINE, (13, 10))
+                unit.orders = [NS(ability=NS(id=A.ATTACK), target=enemy.tag)]
+                frame = make_frame(unit, idle)
+                frame.game.enemy_units.append(enemy)
+                frame.game.all_units.append(enemy)
+                inputs = dict(tags=(1, 2), target=Point2((50, 50)))
+                if isinstance(task, HarassTask):
+                    inputs["retreat_target"] = Point2((5, 5))
+                await frame.run(task, **inputs)
+                await frame.actions.resolve()
+                self.assertEqual([c.unit.tag for c in frame.game.commands], [2])
+
+    async def test_focus_ignores_undetected_cloaked_targets(self):
+        """An unattackable low-health target must not hide a legal target."""
+        unit = Unit(1, U.MARINE, can_attack_ground=True, ground_range=6)
+        hidden = Unit(90, U.MARINE, (12, 10), can_be_attacked=False, health=1)
+        visible = Unit(91, U.MARINE, (13, 10), health=20)
+        self.assertIs(attack_target(unit, [hidden, visible]), visible)
+
     async def test_inherited_priority_skip_and_exception_are_distinct(self):
         """Verify inherited call metadata and separate disabled, invoked and exceptional outcomes."""
         frame = make_frame(Unit(1))
@@ -362,6 +391,24 @@ class SpatialTests(unittest.TestCase):
         self.assertGreater(pathing.threat(enemy.position), 0)
         safe = pathing.safe_point(enemy.position)
         self.assertLess(pathing.threat(safe), pathing.threat(enemy.position))
+        target = Point2((np.float64(10), np.float64(10)))
+        self.assertIsNotNone(pathing.safe_point(enemy.position, towards=target))
+
+    def test_placement_static_corridors_and_lazy_search(self):
+        """Retain resource clearance rules and avoid evaluating unused candidate batches."""
+        frame = make_frame()
+        frame.spatial.map.resources = (Point2((25, 25)),)
+        frame.spatial.map.expansions = (Point2((25, 15)),)
+        placement = Placement(frame.game, frame.spatial.map)
+        self.assertFalse(placement.clear_access(U.BARRACKS, Point2((25, 20))))
+        self.assertTrue(placement.clear_access(U.COMMANDCENTER, Point2((25, 20))))
+        self.assertFalse(placement.clear_access(U.COMMANDCENTER, Point2((25, 25))))
+        with patch.object(placement, "clear_access", return_value=True) as clear:
+            position = asyncio.run(placement.find(U.BARRACKS, Point2((40, 40))))
+        self.assertIsNotNone(position)
+        self.assertEqual(clear.call_count, 32)
+        frame.game.can_place.side_effect = lambda product, positions: [False] * len(positions)
+        self.assertIsNone(asyncio.run(placement.find(U.BARRACKS, Point2((40, 40)))))
 
     def test_placement_preserves_addon_space_and_queries_engine(self):
         """Verify addon footprint expansion, reservation release and native placement queries."""

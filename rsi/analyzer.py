@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from statistics import mean
 
-from .tools.versions import read_json, write_json
+from .tools.versions import path_reference, project_path, read_json, write_json
 
 LOOPS = 22.4
 EVENT_KINDS = {"unit_created", "construction_started", "construction_complete", "supply_block",
@@ -46,7 +46,8 @@ def statistics(rows, window=None):
         return dict(mean=None, min=None, max=None, first=None, last=None, count=0, first_time=None)
     weights = [r.get("seconds", 0) for r in selected]
     values = [r["value"] for r in selected]
-    average = sum(v * w for v, w in zip(values, weights)) / sum(weights) if sum(weights) else mean(values)
+    total_weight = sum(weights)
+    average = sum(v * w for v, w in zip(values, weights)) / total_weight if total_weight else mean(values)
     return dict(mean=average, min=min(values), max=max(values), first=values[0], last=values[-1],
                 count=len(values), first_time=selected[0]["time"])
 
@@ -87,7 +88,7 @@ def compact_refs(value):
 class Analyzer:
     def __init__(self, project, config=None, max_items=40, max_chars=16000):
         """Bind event thresholds and independent output bounds; batches are explicitly registered."""
-        self.project = Path(project)
+        self.project = project_path(project)
         self.config = dict(DEFAULTS, **(config or {}))
         self.max_items, self.max_chars = max_items, max_chars
         self.batches, self.records = {}, {}
@@ -97,7 +98,7 @@ class Analyzer:
 
     def analyze_run(self, directory, run_id):
         """Compute supported metrics and descriptive events; never infer missing telemetry as zero."""
-        directory = Path(directory)
+        directory = project_path(directory)
         manifest, result = read_json(directory / "manifest.json"), read_json(directory / "result.json")
         rows, problems = read_records(directory, run_id)
         self.records[run_id] = rows
@@ -133,10 +134,8 @@ class Analyzer:
                 unit = known.pop(row["tag"], None)
                 if unit:
                     category = self.catalog.get(unit["type"], {}).get("category", "").lower()
-                    kind = "worker" if unit["type"] in WORKERS else "army" if category == "unit" else "unknown"
-                    # Unknown/nonstandard categories remain unattributed rather than count as army.
-                    if kind == "unknown" and category in {"combat unit", "army", "combat"}:
-                        kind = "army"
+                    kind = ("worker" if unit["type"] in WORKERS else
+                            "army" if category in {"unit", "combat unit", "army", "combat"} else "unknown")
                     losses[kind].append(row)
                 else:
                     coverage["unattributed_deaths"] = coverage.get("unattributed_deaths", 0) + 1
@@ -176,19 +175,22 @@ class Analyzer:
                     army_supply += supply
             if complete:
                 values["army_supply"] = army_supply
-            ready = [u for u in units if u["type"] in PRODUCERS and u["build_progress"] >= 1]
-            for name in PRODUCERS:
-                group = [u for u in ready if u["type"] == name]
-                if group:
-                    values[f"production_busy_ratio.{name}"] = sum(bool(u["orders"]) for u in group) / len(group)
-            for name, value in values.items():
-                series[name].append(dict(time=sample["frame"] / LOOPS, value=value, seconds=seconds,
-                                         source_refs=[sample["source_ref"]]))
+            ready = defaultdict(list)
+            for unit in units:
+                if unit["type"] in PRODUCERS and unit["build_progress"] >= 1:
+                    ready[unit["type"]].append(unit)
             flags = dict(supply_block=values["supply_block_ratio"] == 1,
                          resource_float=sample["minerals"] >= self.config["float_minerals"] or
                                         sample["vespene"] >= self.config["float_vespene"])
-            flags.update({f"production_idle.{name}": any(u["type"] == name and not u["orders"] for u in ready)
-                          for name in PRODUCERS})
+            for name in PRODUCERS:
+                group = ready.get(name, ())
+                busy = sum(bool(u["orders"]) for u in group)
+                if group:
+                    values[f"production_busy_ratio.{name}"] = busy / len(group)
+                flags[f"production_idle.{name}"] = busy < len(group)
+            for name, value in values.items():
+                series[name].append(dict(time=sample["frame"] / LOOPS, value=value, seconds=seconds,
+                                         source_refs=[sample["source_ref"]]))
             intervals.append((sample, next_frame, seconds, flags))
         active = {}
         for sample, end_frame, seconds, flags in intervals + [(dict(frame=duration), duration, 0, {})]:
@@ -210,13 +212,19 @@ class Analyzer:
             if kind in {"worker", "army"}:
                 self._clusters(deaths, f"{kind}_loss_spike", self.config[f"{kind}_loss_count"], events)
         blocked = []
+        submitted = confirmed = 0
         for history in requests.values():
             first = history[0]
+            facts = {}
+            for row in history:
+                facts.setdefault(row["status"], row)
+            submitted += "submitted" in facts
+            confirmed += "observed" in facts or "completed" in facts
             call = calls.get(first["call_id"], {})
             key = call.get("module_path", "unknown") + ":" + call.get("module_id", first.get("source", ""))
             modules[key]["requests"] += 1
             for status in ("submitted", "observed", "completed", "failed", "unknown"):
-                if any(r["status"] == status for r in history):
+                if status in facts:
                     modules[key][status] += 1
             refusal = next((r for r in history if r["status"] in {"rejected", "deferred"}), None)
             if refusal:
@@ -224,7 +232,7 @@ class Analyzer:
                 blocked.append(refusal)
             for status, metric in (("proposed", "requests"), ("submitted", "submitted_commands"),
                                    ("observed", "observed_actions"), ("completed", "completed_actions")):
-                fact = next((r for r in history if r["status"] == status), None)
+                fact = facts.get(status)
                 if fact:
                     series[metric].append(dict(time=fact["frame"] / LOOPS, value=1,
                                                source_refs=[fact["source_ref"]]))
@@ -235,11 +243,10 @@ class Analyzer:
             self._clusters(sorted((r for r in blocked if r["reason"] == reason), key=lambda r: r["frame"]),
                            "action_block_cluster", self.config["block_count"], events, reason=reason)
         proposals = len(requests)
-        submitted = sum(any(r["status"] == "submitted" for r in h) for h in requests.values())
         summary = dict(requests=proposals, submitted=submitted,
                        submitted_ratio=submitted / proposals if proposals else None,
                        bot_commands_per_minute=submitted * 60 * LOOPS / duration if duration else None,
-                       confirmed=sum(any(r["status"] in {"observed", "completed"} for r in h) for h in requests.values()),
+                       confirmed=confirmed,
                        blocked_by_reason=dict(Counter(r["reason"] for r in blocked)),
                        duplicate_requests=sum(r["reason"] == "duplicate_order" for r in blocked))
         summary["blocked_ratio_by_reason"] = {reason: count / proposals for reason, count in
@@ -257,7 +264,7 @@ class Analyzer:
             item["blocked_by_reason"] = {name.removeprefix("blocked:"): count for name, count in counters.items()
                                          if name.startswith("blocked:")}
             module_stats[key] = item
-        report = dict(run_id=run_id, log_path=str(directory / "trace.jsonl"),
+        report = dict(run_id=run_id, log_path=path_reference(directory / "trace.jsonl"),
                       conditions={k: manifest.get(k) for k in ("map", "race", "difficulty", "seed")},
                       environment={k: manifest.get(k) for k in ("map_sha256", "environment", "game_time_limit")},
                       outcome=result, coverage=coverage, metrics=dict(series),

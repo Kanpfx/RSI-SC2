@@ -9,13 +9,18 @@ class DefenseTask:
         self.attack, self.focus, self.kite = AttackMove(), FocusFire(), Kite()
 
     async def execute(self, frame, *, tags, target):
-        # Evaluate every group; arbitration resolves overlapping local controls.
         """Control the Tactics-assigned tags around the supplied defense destination.
 
-        Evaluate advance, focus fire and kite for the group; their explicit priorities
-        resolve overlapping requests in Actions. Do not reassign strategic ownership.
+        Prefer kite, then focus fire, then advance for each unit. Maintained higher
+        priority orders must not be overwritten by fallback movement.
         """
-        handled = await frame.run(self.attack, tags=tags, target=target)
-        handled |= await frame.run(self.focus, tags=tags, priority=70)
-        handled |= await frame.run(self.kite, tags=tags, priority=80)
+        handled, advance = False, []
+        for tag in tags:
+            if await frame.run(self.kite, tags=(tag,), priority=80):
+                handled = True
+            elif await frame.run(self.focus, tags=(tag,), priority=70):
+                handled = True
+            else:
+                advance.append(tag)
+        handled |= await frame.run(self.attack, tags=advance, target=target)
         return handled

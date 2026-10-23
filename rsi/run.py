@@ -10,15 +10,16 @@ from uuid import uuid4
 from sc2.data import Difficulty
 
 from .analyzer import Analyzer
+from .console import error_summary, progress, progress_line
 from .diagnosis.session import make_job as diagnosis_job
 from .editor import make_job as editor_job
 from .evaluator import evaluate, freeze_plan, parse_specialist, specialist_job
 from .memory import record, search
 from .tools.llm import call_session, load_settings, preflight
-from .tools.matches import run_batch
+from .tools.matches import MATCH_START_INTERVAL, run_batch
 from .tools.retriever import freeze_context
 from .tools.validate import validate
-from .tools.versions import Versions, read_json, write_json
+from .tools.versions import Versions, path_reference, project_path, read_json, write_json
 
 
 def validate_config(config):
@@ -81,7 +82,7 @@ class Run:
         """Persist a stage artifact and update the small iteration report."""
         path = self.directory / f"{name}.json"
         write_json(path, value)
-        self.report["artifacts"][name] = str(path)
+        self.report["artifacts"][name] = path_reference(path)
         self.report["stage"] = name
         self.report["costs"]["wall_seconds"] = time.monotonic() - self.started
         summary = dict(self.report)
@@ -109,6 +110,9 @@ class Run:
             raise RuntimeError("Empty batch or match budget exhausted")
         self.report["costs"]["matches"] += count
         remaining = self.remaining()
+        remaining -= MATCH_START_INTERVAL * (count - 1)
+        if remaining < 1:
+            raise RuntimeError("Insufficient wall budget for staggered match starts")
         # Share the remaining deadline across queued waves, not just each worker.
         waves = (count + self.config["parallel_matches"] - 1) // self.config["parallel_matches"]
         conditions = []
@@ -118,38 +122,40 @@ class Run:
             conditions.append(condition)
         name = purpose + "_" + uuid4().hex[:8]
         self.save(name + "_started", dict(version=version, purpose=purpose, conditions=conditions))
-        print(f"[{time.strftime('%H:%M:%S')}] [{purpose}] Starting {count} matches; "
-              f"parallel={self.config['parallel_matches']}", flush=True)
+        print(progress_line(purpose, f"Starting {count} matches; parallel={self.config['parallel_matches']}"), flush=True)
         batch = run_batch(self.project, version, conditions, self.directory / "batches" / name,
                           purpose, self.config["parallel_matches"])
-        print(f"[{time.strftime('%H:%M:%S')}] [{purpose}] Matches finished; analyzing logs", flush=True)
+        print(progress_line(purpose, "Matches finished; analyzing logs"), flush=True)
         analysis = self.analyzer.add_batch(batch)
         self.save(name + "_analysis", analysis)
         if purpose != "explore":
             for run_id in batch["runs"]:
                 self.analyzer.records.pop(run_id, None)
-        print(f"[{time.strftime('%H:%M:%S')}] [{purpose}] Analysis saved", flush=True)
+        summary = analysis["summary"]
+        outcomes = ", ".join(f"{name}={count}" for name, count in summary["outcomes"].items())
+        events = sorted(summary["event_counts"].items(), key=lambda item: item[1], reverse=True)[:3]
+        progress(purpose, f"Outcomes: {outcomes}; main events: " +
+                 (", ".join(f"{name}={count}" for name, count in events) or "none"))
         return batch, analysis
 
     def model(self, name, job):
         """Allocate remaining shared model budget and charge every completed/failed session."""
         settings = dict(self.model_settings)
         spent = self.report["costs"]["sessions"]
-        settings["max_total_tokens"] -= sum((s.get("tokens") or 0) for s in spent)
-        settings["max_cost"] -= sum((s.get("cost") or 0) for s in spent)
+        settings["max_total_tokens"] -= sum(s.get("tokens") or 0 for s in spent)
+        settings["max_cost"] -= sum(s.get("cost") or 0 for s in spent)
         if settings["max_total_tokens"] <= 0 or settings["max_cost"] <= 0:
             raise RuntimeError("Iteration model budget exhausted")
         settings["wall_timeout"] = min(settings["wall_timeout"], self.remaining())
         job = dict(job, model=settings)
         self.save(name + "_started", dict(role=job["role"], model=settings))
-        print(f"[{time.strftime('%H:%M:%S')}] [{name}] Model session started; "
-              f"timeout={settings['wall_timeout']:.0f}s", flush=True)
+        print(progress_line(name, f"Model session started; timeout={settings['wall_timeout']:.0f}s"), flush=True)
         response = call_session(self.project, job, self.directory / "sessions" / name)
         usage = response.get("usage", {})
         self.report["costs"]["sessions"].append(dict(name=name, **usage))
         self.save(name + "_response", response)
-        print(f"[{time.strftime('%H:%M:%S')}] [{name}] Model session finished: "
-              f"status={response['status']} tokens={usage.get('tokens')} cost={usage.get('cost')}", flush=True)
+        print(progress_line(name, f"Model session finished: status={response['status']} "
+                            f"tokens={usage.get('tokens')} cost={usage.get('cost')}"), flush=True)
         # Unknown usage after a failed worker cannot safely be treated as free.
         if response["status"] != "ok":
             raise RuntimeError(response["reason"])
@@ -164,34 +170,31 @@ class Run:
         if "diagnosis" in self.report:
             record(self.root, self.report)
         self.save("final", dict(status=status, reason=reason))
-        print(f"[{time.strftime('%H:%M:%S')}] [iteration] Finished: {status}; "
-              f"reason={str(reason).splitlines()[-1][:400] if reason else 'unspecified'}; "
-              f"elapsed={time.monotonic() - self.started:.1f}s", flush=True)
+        progress("iteration", f"Finished: {status}; {error_summary(reason)}; elapsed={time.monotonic() - self.started:.1f}s")
+        progress("iteration", f"Report: {path_reference(self.directory / 'iteration.json')}")
         return self.report
 
     def execute(self, reuse=()):
         """Run the minimal sequential loop; no generic state machine or automatic resume."""
         try:
-            print(f"[{time.strftime('%H:%M:%S')}] [iteration] Started: {self.directory.name}", flush=True)
-            print(f"[{time.strftime('%H:%M:%S')}] [iteration] Artifacts: {self.directory}", flush=True)
+            progress("iteration", f"Started: {path_reference(self.directory)}")
             if self.config["mode"] == "iterate":
                 if not self.enable_model:
                     return self.finish("awaiting_model", "Use --enable-model to explicitly enable paid sessions")
                 self.model_settings = load_settings(self.project, self.config["model"])
-                print(f"[{time.strftime('%H:%M:%S')}] [prepare] Checking model settings and dependencies", flush=True)
                 preflight(self.model_settings)
             parent = self.versions.current()
             self.report["parent"] = parent
             self.save("config", self.config)
-            print(f"[{time.strftime('%H:%M:%S')}] [prepare] Parent version: {parent['version']}", flush=True)
+            progress("prepare", f"Parent: {parent['version'][:12]}; mode={self.config['mode']}")
             batches, analyses = [], []
             for path in reuse:
-                print(f"[{time.strftime('%H:%M:%S')}] [explore] Loading reused batch: {path}", flush=True)
+                print(progress_line("explore", f"Loading reused batch: {path}"), flush=True)
                 batch = read_json(Path(path))
                 if batch["purpose"] != "explore" or batch["version"] != parent["version"]:
                     raise ValueError("Reuse requires exploration data from the current parent")
                 for run_id, run_path in batch["runs"].items():
-                    manifest = read_json(Path(run_path) / "manifest.json")
+                    manifest = read_json(project_path(run_path) / "manifest.json")
                     if (manifest.get("purpose") != "explore" or manifest.get("version") != parent["version"]
                             or manifest.get("run_id") != run_id):
                         raise ValueError("Reused run identity/purpose mismatch")
@@ -214,7 +217,7 @@ class Run:
             self.report["conditions"] = conditions[0] if conditions and all(c == conditions[0] for c in conditions) else {}
             context = self.directory / "context"
             experiences = search(self.root, self.report["conditions"]) if self.config["diagnosis"]["use_memory"] else []
-            print(f"[{time.strftime('%H:%M:%S')}] [diagnosis] Freezing references; memory_items={len(experiences)}", flush=True)
+            print(progress_line("diagnosis", f"Freezing references; memory_items={len(experiences)}"), flush=True)
             freeze_context(self.project, context, experiences)
             # Analysis and future queries use the same frozen reference catalogue.
             self.analyzer.catalog = Analyzer(context).catalog
@@ -222,22 +225,25 @@ class Run:
             self.analyzer.records.clear()
             diagnosis = self.model("diagnosis", diagnosis_job(self.project, parent, batches, overview, context, self.config))
             self.report["diagnosis"] = self.save("diagnosis", diagnosis)
-            print(f"[{time.strftime('%H:%M:%S')}] [diagnosis] Conclusion: {diagnosis['conclusion']['status']}", flush=True)
+            progress("diagnosis", f"Completed: {diagnosis['conclusion']['status']}; queries={len(diagnosis.get('queries', []))}")
+            for hypothesis in diagnosis.get("hypotheses", []):
+                updates = hypothesis.get("updates", [])
+                progress("diagnosis", f"{hypothesis['id']} -> {hypothesis.get('status', 'open')}; " +
+                         (updates[-1]["reason"] if updates else hypothesis["explanation"]))
             if diagnosis["conclusion"]["status"] != "repair_ready":
                 return self.finish("unresolved", diagnosis["conclusion"].get("reason", "Diagnosis unresolved"))
             candidate = self.versions.candidate(parent, self.directory / "candidate")
             feedback = None
             for attempt in range(self.config["max_repairs"] + 1):
-                print(f"[{time.strftime('%H:%M:%S')}] [editor] Attempt {attempt + 1}/{self.config['max_repairs'] + 1}", flush=True)
-                self.model(f"editor_{attempt}", editor_job(candidate, diagnosis, feedback))
+                print(progress_line("editor", f"Attempt {attempt + 1}/{self.config['max_repairs'] + 1}"), flush=True)
+                self.model(f"editor_{attempt}", editor_job(candidate, diagnosis, feedback, context=context))
                 changed = self.versions.diff(parent, candidate, self.directory / "patch.diff")
                 self.report["changed_files"] = changed
-                self.report["artifacts"]["patch"] = str(self.directory / "patch.diff")
-                print(f"[{time.strftime('%H:%M:%S')}] [validation] Checking {len(changed)} changed files", flush=True)
+                self.report["artifacts"]["patch"] = path_reference(self.directory / "patch.diff")
+                progress("editor", "Changed files: " + (", ".join(changed) or "none"))
                 feedback = validate(parent, candidate, timeout=min(30, self.remaining()))
                 for check in feedback["checks"]:
-                    print(f"[{time.strftime('%H:%M:%S')}] [validation] {check['name']}: "
-                          f"{'passed' if check['passed'] else 'failed'}", flush=True)
+                    print(progress_line("validation", f"{check['name']}: {'passed' if check['passed'] else 'failed'}"), flush=True)
                 smoke_unavailable = False
                 if feedback["passed"]:
                     child = self.versions.freeze(candidate)
@@ -247,8 +253,7 @@ class Run:
                     feedback["checks"].append(dict(name="smoke", passed=passed, outcome=run["outcome"], coverage=run["coverage"]))
                     feedback["passed"] = passed
                     smoke_unavailable = not passed and run["outcome"].get("execution_status") != "bot_error"
-                    print(f"[{time.strftime('%H:%M:%S')}] [validation] Smoke match: "
-                          f"{'passed' if passed else 'failed'}", flush=True)
+                    print(progress_line("validation", f"Smoke match: {'passed' if passed else 'failed'}"), flush=True)
                 self.report["validation"] = self.save(f"validation_{attempt}", feedback)
                 if smoke_unavailable:
                     return self.finish("inconclusive", "Validation match execution or log integrity is incomplete")
@@ -266,17 +271,20 @@ class Run:
                     (self.directory / "patch.diff").read_text(encoding="utf-8"), rules["max_checks"]))
                 supplementary = parse_specialist(value, rules["max_checks"])
             plan = self.save("evaluation_plan", freeze_plan(rules, diagnosis, supplementary))
-            print(f"[{time.strftime('%H:%M:%S')}] [evaluation] Plan frozen; "
-                  f"formal={rules['formal']} matches_per_version={len(rules['matches'])}", flush=True)
+            print(progress_line("evaluation", f"Plan frozen; formal={rules['formal']} "
+                                f"matches_per_version={len(rules['matches'])}"), flush=True)
             _, parent_analysis = self.batch(parent, rules["matches"], "eval_parent")
             _, candidate_analysis = self.batch(child, rules["matches"], "eval_candidate")
             evaluation = evaluate(parent_analysis, candidate_analysis, plan)
             self.report["evaluation"] = self.save("evaluation", evaluation)
-            print(f"[{time.strftime('%H:%M:%S')}] [evaluation] Decision: {evaluation['decision']}; "
-                  f"reason={evaluation['reason']}", flush=True)
+            for check in evaluation["expected_effects"]:
+                effect = check["effect"]
+                progress("evaluation", f"{effect['name']}.{effect['statistic']}: {check['result']}; " +
+                         f"parent={check['parent']} candidate={check['candidate']}")
+            print(progress_line("evaluation", f"Decision: {evaluation['decision']}; reason={evaluation['reason']}"), flush=True)
             if evaluation["decision"] == "accept":
                 self.versions.accept(child)
-                print(f"[{time.strftime('%H:%M:%S')}] [evaluation] Accepted version: {child['version']}", flush=True)
+                print(progress_line("evaluation", f"Accepted version: {child['version']}"), flush=True)
             return self.finish(evaluation["decision"], evaluation["reason"])
         except KeyboardInterrupt:
             return self.finish("interrupted", "Cancelled without automatic retry")
@@ -293,6 +301,7 @@ def main():
     parser.add_argument("--collect", action="store_true")
     parser.add_argument("--enable-model", action="store_true")
     parser.add_argument("--reuse-batch", type=Path, action="append", default=[])
+    parser.add_argument("--json", action="store_true", help="Also print the final machine-readable summary")
     args = parser.parse_args()
     config = read_json(args.config)
     if args.mode:
@@ -305,8 +314,9 @@ def main():
     except (ValueError, KeyError) as exc:
         print(json.dumps(dict(status="configuration_error", reason=str(exc)), ensure_ascii=False))
         return 2
-    print(json.dumps({k: report.get(k) for k in ("iteration_id", "status", "stage", "reason", "costs", "artifacts")},
-                     ensure_ascii=False, indent=2))
+    if args.json:
+        print(json.dumps({k: report.get(k) for k in ("iteration_id", "status", "stage", "reason", "costs", "artifacts")},
+                         ensure_ascii=False, indent=2))
     return 1 if report["status"] == "error" else 0
 
 

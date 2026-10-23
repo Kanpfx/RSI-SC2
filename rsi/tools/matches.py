@@ -9,7 +9,10 @@ import time
 import traceback
 from uuid import uuid4
 
-from .versions import read_json, write_json, source_hash
+from ..console import error_summary, progress
+from .versions import path_reference, project_path, read_json, write_json, source_hash
+
+MATCH_START_INTERVAL = 3
 
 
 def stop_process(process):
@@ -25,18 +28,17 @@ def stop_process(process):
 
 def run_match(project, version, conditions, directory, purpose, batch_id):
     """Execute one match and preserve infrastructure failures separately from outcomes."""
-    if source_hash(version["source_root"]) != version["version"]:
+    if source_hash(project_path(version["source_root"])) != version["version"]:
         raise ValueError("Bot snapshot changed")
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=False)
     spec = dict(conditions, **version, purpose=purpose, batch_id=batch_id,
-                run_id=directory.name, output_dir=str(directory),
+                run_id=directory.name, output_dir=path_reference(directory),
                 environment=read_json(Path(project) / "environment.json"))
     write_json(directory / "manifest.json", spec)
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     started = time.monotonic()
-    print(f"[{time.strftime('%H:%M:%S')}] [match] Started: purpose={purpose} "
-          f"seed={conditions['seed']} difficulty={conditions['difficulty']} run={directory.name}", flush=True)
+    progress(purpose, f"Match started: seed={conditions['seed']} {conditions['map']} / {conditions['race']} / {conditions['difficulty']}")
     with (directory / "stdout.txt").open("w", encoding="utf-8") as out, \
             (directory / "stderr.txt").open("w", encoding="utf-8") as err:
         process = subprocess.Popen([sys.executable, "-B", "-m", "rsi.tools.matches",
@@ -55,25 +57,29 @@ def run_match(project, version, conditions, directory, purpose, batch_id):
     if not result_path.exists():
         write_json(result_path, dict(execution_status="unknown", outcome=None,
                    termination="worker_exited_without_result", exit_code=process.returncode))
-    result = dict(read_json(result_path), run_id=directory.name, directory=str(directory))
-    print(f"[{time.strftime('%H:%M:%S')}] [match] Finished: purpose={purpose} "
-          f"seed={conditions['seed']} run={directory.name} status={result.get('execution_status')} "
-          f"outcome={result.get('outcome')} termination={result.get('termination')} "
-          f"elapsed={time.monotonic() - started:.1f}s", flush=True)
+    result = dict(read_json(result_path), run_id=directory.name, directory=path_reference(directory))
+    progress(purpose, f"Match finished: seed={conditions['seed']} {result.get('outcome') or 'unknown'}; " +
+             f"{result.get('execution_status')} / {result.get('termination')}; " +
+             f"game={result.get('duration_loops', 0) / 22.4:.1f}s elapsed={time.monotonic() - started:.1f}s")
+    if result.get("error"):
+        progress(purpose, "Match error: " + error_summary(result["error"]))
     return result
 
 
-def run_batch(project, version, conditions, directory, purpose, parallel=5):
-    """Run a fixed batch without retries; retain its manifest before execution."""
+def run_batch(project, version, conditions, directory, purpose, parallel=3):
+    """Stagger worker submissions to avoid simultaneous client startup; never retry matches."""
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=False)
     jobs = [(condition, directory / uuid4().hex) for condition in conditions]
     batch = dict(batch_id=directory.name, version=version["version"], purpose=purpose,
-                 runs={path.name: str(path) for _, path in jobs}, conditions=conditions)
+                 runs={path.name: path_reference(path) for _, path in jobs}, conditions=conditions)
     write_json(directory / "batch.json", batch)
     with ThreadPoolExecutor(max_workers=parallel) as pool:
-        futures = [pool.submit(run_match, project, version, condition, path, purpose, directory.name)
-                   for condition, path in jobs]
+        futures = []
+        for index, (condition, path) in enumerate(jobs):
+            if index:
+                time.sleep(MATCH_START_INTERVAL)
+            futures.append(pool.submit(run_match, project, version, condition, path, purpose, directory.name))
         results = [future.result() for future in futures]
     batch["results"] = results
     write_json(directory / "batch.json", batch)
@@ -83,9 +89,9 @@ def run_batch(project, version, conditions, directory, purpose, parallel=5):
 def worker(spec_path):
     """Load only the selected frozen Bot and reuse its native Logger."""
     spec = read_json(spec_path)
-    directory = Path(spec["output_dir"])
+    directory = project_path(spec["output_dir"])
     os.environ["SC2PATH"] = spec["environment"]["sc2_path"]
-    sys.path.insert(0, spec["source_root"])
+    sys.path.insert(0, str(project_path(spec["source_root"])))
     bot = logger = None
     stage, error = "import", None
     status, termination = "unknown", "worker_error"

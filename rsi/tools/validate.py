@@ -5,14 +5,14 @@ from pathlib import Path
 import subprocess
 import sys
 
-from .versions import editable, inventory
+from .versions import editable, inventory, project_path
 
 
 def validate(parent, candidate, timeout=30):
     """Reject empty/out-of-scope patches, parse modified files and import Bot modules in isolation."""
     checks = []
     try:
-        before, after = inventory(parent["source_root"]), inventory(candidate)
+        before, after = inventory(project_path(parent["source_root"])), inventory(candidate)
         changed = sorted(n for n in before.keys() | after.keys() if before.get(n) != after.get(n))
         forbidden = [n for n in changed if not editable(n)]
         checks.append(dict(name="scope", passed=bool(changed) and not forbidden, changed=changed, forbidden=forbidden))

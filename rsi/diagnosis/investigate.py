@@ -19,10 +19,12 @@ class Investigation:
         self.issued_refs = set()
         self.calls = 0
 
-    def update(self, issue=None, hypotheses=None):
-        """Record issue selection and competing predictions before any investigation query."""
-        if self.calls and self.state["issue"] is not None:
-            raise ValueError("Issue and hypotheses are fixed after the first query")
+    def update(self, issue=None, hypotheses=None, reason=""):
+        """Select one issue; revise hypotheses without discarding their evidence history."""
+        if self.state["conclusion"]:
+            raise ValueError("Investigation has already concluded")
+        if self.calls and self.state["issue"] is not None and issue is not None:
+            raise ValueError("Issue is fixed after the first query")
         if issue is not None:
             if not all(issue.get(k) for k in ("symptom", "runs", "window", "why_selected")):
                 raise ValueError("Issue requires symptom, runs, window and why_selected")
@@ -31,19 +33,31 @@ class Investigation:
                 raise ValueError("Issue refers to unavailable runs")
             self.state["issue"] = issue
         if hypotheses is not None:
+            existing = {h["id"]: h for h in self.state["hypotheses"]}
+            if existing and not reason:
+                raise ValueError("Hypothesis revisions require a reason")
             minimum = 2 if self.options["competing_hypotheses"] else 1
-            if len(hypotheses) < minimum or len({h["id"] for h in hypotheses}) != len(hypotheses):
+            ids = {h["id"] for h in hypotheses}
+            if len(existing.keys() | ids) < minimum or len(ids) != len(hypotheses):
                 raise ValueError("Insufficient or duplicate hypotheses")
             for h in hypotheses:
                 if not all(h.get(k) for k in ("id", "explanation", "predictions")):
                     raise ValueError("Hypotheses require id, explanation and support/refutation predictions")
-                h.update(support_refs=[], against_refs=[], unknowns=[], status="open")
-            self.state["hypotheses"] = hypotheses
+            for h in hypotheses:
+                previous = existing.get(h["id"])
+                revised = dict(h, support_refs=[], against_refs=[], unknowns=[], status="open")
+                if previous:
+                    revised["revisions"] = previous.get("revisions", []) + [dict(reason=reason,
+                        previous={k: v for k, v in previous.items() if k != "revisions"})]
+                elif existing:
+                    revised["introduced_reason"] = reason
+                existing[h["id"]] = revised
+            self.state["hypotheses"] = list(existing.values())
         self.save()
-        return {"issue": self.state["issue"], "hypotheses": self.state["hypotheses"]}
+        return dict(status="ok", hypothesis_ids=[h["id"] for h in self.state["hypotheses"]])
 
-    def query(self, channel, kind, params, purpose, distinguishes, updates=None):
-        """Apply prior evidence updates, then execute one purposeful bounded query."""
+    def query(self, kind, purpose, params=None, updates=None):
+        """Collect related evidence freely; review it together before concluding."""
         if self.state["conclusion"]:
             raise ValueError("Investigation has already concluded")
         if not self.state["issue"] or not self.state["hypotheses"]:
@@ -51,22 +65,28 @@ class Investigation:
         if self.options["query_policy"] == "fixed":
             raise ValueError("Fixed policy uses only the predeclared evidence pack")
         self.apply_updates(updates or [])
-        if self.state["queries"] and not self.state["queries"][-1].get("updated"):
-            raise ValueError("Update hypotheses from the previous result before querying again")
-        if not purpose or not distinguishes:
-            raise ValueError("Explain query purpose and predicted differences")
+        if not purpose:
+            raise ValueError("Explain what the query should distinguish or clarify")
         if self.calls >= self.options["max_queries"]:
             return dict(items=[], source_refs=[], coverage={}, truncated=False, missing_reason="query_budget_exhausted")
         self.calls += 1
+        params = dict(params or {})
+        channel = "analyzer" if kind in {"overview", "metrics", "events", "trace", "compare"} else "retriever"
         try:
             if channel == "analyzer":
+                if "batch_id" not in params:
+                    batches = [b for b in self.job["batches"] if set(self.state["issue"]["runs"]) & set(b["runs"])]
+                    if len(batches) != 1:
+                        raise ValueError("Specify batch_id when the issue spans multiple batches")
+                    params["batch_id"] = batches[0]["batch_id"]
+                batch = self.analyzer.batches[params["batch_id"]]
+                params.setdefault("runs", [rid for rid in self.state["issue"]["runs"] if rid in batch["runs"]])
+                params.setdefault("time", self.state["issue"]["window"])
                 result = self.analyzer.query(kind, **params)
-            elif channel == "retriever":
+            else:
                 if kind == "memory" and not self.options["use_memory"]:
                     raise ValueError("Memory disabled for this experiment")
                 result = self.retriever.query(kind, **params)
-            else:
-                raise ValueError("channel must be analyzer or retriever")
         except (ValueError, KeyError, TypeError, OSError) as exc:
             result = dict(status="invalid_query", error=dict(code="invalid_query", message=str(exc)),
                           items=[], source_refs=[], coverage={}, truncated=False, missing_reason=None)
@@ -74,7 +94,7 @@ class Investigation:
             result["status"] = "ok" if result["items"] else "empty"
         self.issued_refs.update(result["source_refs"])
         self.state["queries"].append(dict(channel=channel, kind=kind, filters=params, purpose=purpose,
-                                         distinguishes=distinguishes, result=result,
+                                         result=result,
                                          updated=result["status"] == "invalid_query"))
         self.save()
         return result
@@ -97,7 +117,8 @@ class Investigation:
             h.setdefault("updates", []).append(update)
         if updates and self.state["queries"]:
             self.state["queries"][-1]["update"] = updates
-            self.state["queries"][-1]["updated"] = True
+            for query in self.state["queries"]:
+                query["updated"] = True
 
     def conclude(self, conclusion, updates=None):
         """Validate source/scope and measurable expectations, without certifying causality."""
@@ -109,9 +130,12 @@ class Investigation:
         if conclusion["status"] == "repair_ready":
             if not self.state["issue"] or not self.state["hypotheses"]:
                 raise ValueError("Missing investigation")
-            if conclusion.get("hypothesis_id") not in {h["id"] for h in self.state["hypotheses"]}:
+            selected = next((h for h in self.state["hypotheses"] if h["id"] == conclusion.get("hypothesis_id")), None)
+            if selected is None:
                 raise ValueError("Choose an existing hypothesis_id")
-            if not self.state["queries"] or not self.state["queries"][-1].get("updated"):
+            if not selected.get("updates"):
+                raise ValueError("Review evidence for the selected hypothesis before proposing a change")
+            if not self.state["queries"] or any(not q.get("updated") for q in self.state["queries"]):
                 raise ValueError("Review returned evidence before proposing a change")
             if not conclusion.get("evidence_refs") or not set(conclusion["evidence_refs"]) <= self.issued_refs:
                 raise ValueError("Conclusion requires returned evidence")
@@ -131,7 +155,7 @@ class Investigation:
                 raise ValueError("Describe the change, preserved behavior, risks and remaining uncertainty")
         self.state["conclusion"] = conclusion
         self.save()
-        return {"conclusion": conclusion, "hypotheses": self.state["hypotheses"]}
+        return {"conclusion": conclusion}
 
     def fixed_pack(self):
         """Build a hypothesis-independent query schedule for the fixed-policy ablation."""
@@ -151,7 +175,7 @@ class Investigation:
             self.calls += 1
             self.issued_refs.update(result["source_refs"])
             self.state["queries"].append(dict(channel=channel, kind=kind, filters=params,
-                                             purpose="Predeclared fixed schedule", distinguishes="not adaptive",
+                                             purpose="Predeclared fixed schedule",
                                              result=result, updated=False))
         self.save()
         return self.state["queries"]

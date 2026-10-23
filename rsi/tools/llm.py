@@ -5,11 +5,13 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 import traceback
 from urllib.parse import urlsplit
 
+from ..console import tool_progress, write_console
 from .matches import stop_process
-from .versions import editable, read_json, write_json
+from .versions import editable, project_path, read_json, write_json
 
 
 def load_settings(project, settings):
@@ -52,9 +54,25 @@ def call_session(project, job, directory):
             (directory / "stderr.txt").open("w", encoding="utf-8") as err:
         process = subprocess.Popen([sys.executable, "-B", "-m", "rsi.tools.llm",
                                     str(directory / "job.json")], cwd=project,
-                                   stdout=out, stderr=err, creationflags=flags)
+                                   stdout=out, stderr=err, creationflags=flags,
+                                   env=dict(os.environ, PYTHONIOENCODING="utf-8"))
         try:
-            process.wait(timeout=job["model"]["wall_timeout"])
+            # Relay only worker stdout; SDK diagnostics remain in stderr.txt.
+            deadline = time.monotonic() + job["model"]["wall_timeout"]
+            with (directory / "stdout.txt").open(encoding="utf-8", errors="replace") as stream:
+                while True:
+                    for line in stream:
+                        write_console(line, end="")
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise subprocess.TimeoutExpired(process.args, job["model"]["wall_timeout"])
+                    try:
+                        process.wait(timeout=min(0.25, remaining))
+                        break
+                    except subprocess.TimeoutExpired:
+                        pass
+                for line in stream:
+                    write_console(line, end="")
         except subprocess.TimeoutExpired:
             stop_process(process)
             return dict(status="error", reason="model_session_wall_timeout",
@@ -77,7 +95,9 @@ def budgeted_llm_type(settings):
             spent = usage.prompt_tokens + usage.completion_tokens if usage else 0
             estimate = self.get_token_count(messages, tools, security)
             required = math.ceil(estimate * 1.15) + 1024 + self.max_output_tokens
-            if estimate <= 0 or spent + required > settings["max_total_tokens"]:
+            if estimate <= 0:
+                raise ValueError("Token estimation failed; check SDK token counter and tool schemas")
+            if spent + required > settings["max_total_tokens"]:
                 raise ValueError("Next request cannot fit the token budget")
             if self.metrics.costs and self.metrics.accumulated_cost >= settings["max_cost"]:
                 raise ValueError("Observed model cost budget reached")
@@ -136,7 +156,7 @@ def investigation_tools(investigation):
         model_config = ConfigDict(extra="forbid")
         symptom: str
         runs: list[str]
-        window: tuple[float, float]
+        window: list[float] = Field(min_length=2, max_length=2)
         why_selected: str
 
     class Hypothesis(BaseModel):
@@ -170,16 +190,15 @@ def investigation_tools(investigation):
 
     class SelectInput(Action):
         model_config = ConfigDict(extra="forbid")
-        issue: Issue
-        hypotheses: list[Hypothesis]
+        issue: Issue | None = None
+        hypotheses: list[Hypothesis] = Field(default_factory=list)
+        reason: str = ""
 
     class QueryInput(Action):
         model_config = ConfigDict(extra="forbid")
-        channel: Literal["analyzer", "retriever"]
         query_kind: Literal["overview", "metrics", "events", "trace", "compare", "source", "api", "knowledge", "memory"] = Field(alias="kind")
-        params: dict[str, Any]
+        params: dict[str, Any] = Field(default_factory=dict)
         purpose: str
-        distinguishes: str
         updates: list[EvidenceUpdate] = Field(default_factory=list)
 
     class ConcludeInput(Action):
@@ -190,42 +209,41 @@ def investigation_tools(investigation):
     class Output(Observation):
         pass
 
-    definitions = []
+    class Executor(ToolExecutor):
+        def __init__(self, function):
+            """Bind one investigation operation without a separate executor class."""
+            self.function = function
+
+        def __call__(self, action, conversation=None):
+            """Return validation failures as tool observations for correction."""
+            try:
+                value = self.function(**action.model_dump(exclude_none=True, by_alias=True,
+                                                         include=set(type(action).model_fields)))
+            except (ValueError, KeyError, TypeError, OSError) as exc:
+                value = dict(status="invalid_input", error=dict(code="invalid_input", message=str(exc)))
+            return Output.from_text(json.dumps(value, ensure_ascii=False))
+
+    def make_definition(tool_name, help_text, function, input_type):
+        """Bind SDK tool construction to one operation and its executor."""
+        class Definition(ToolDefinition):
+            @classmethod
+            def create(cls, conv_state=None, **params):
+                """Construct the bound SDK-native tool definition."""
+                return [cls(description=help_text, action_type=input_type, observation_type=Output,
+                            executor=Executor(function), annotations=ToolAnnotations(
+                                readOnlyHint=True, destructiveHint=False, openWorldHint=False))]
+        tool = type("Rsi" + tool_name.title().replace("_", ""), (Definition,), {"name": tool_name})
+        return tool.create()[0]
+
     descriptions = {
-        "select_issue": "Select one issue and competing hypotheses before investigation. Times are game seconds; source code targets start with bot/.",
-        "investigate": "Query evidence and explain what distinguishes hypotheses. Updates require a reason; evidence references and unknowns accumulate. Review the previous valid result first. Analyzer params: batch_id,runs,time,detail=summary/raw,offset; metrics/compare add names, events adds types, trace adds module/call_id/request_id/status, compare adds reference_batch. Default summaries; raw retrieves samples or trace snapshots. Retriever params: path (source relative to bot/),symbol,start_line,text. JSON symbols use dot keys. Invalid queries may be corrected without hypothesis updates.",
+        "select_issue": "Initially select one issue and competing hypotheses. Later omit issue and supply only new/revised hypotheses plus reason. Omitted hypotheses remain; use updates status=refuted to retire one. Revising an existing hypothesis archives and resets its evidence; reassess rather than inherit old support. Times are game seconds; code targets start with bot/.",
+        "investigate": "Query evidence; purpose briefly states what to distinguish or clarify. Related queries may run consecutively. Supply updates when a collection of evidence changes your judgment, or at conclude; each update needs a reason. Routing follows kind. Analyzer params default to the issue's batch, runs and time; override explicitly to broaden scope, specify batch_id for multiple batches. metrics: names; events: types; trace: module/call_id/request_id/status; compare: reference_batch,names. Optional detail=raw,offset retrieve samples/pages; default summary. source/api/knowledge: path,symbol,start_line; memory: text. Source paths are relative to bot/; JSON symbols use dot keys.",
         "conclude": "Conclude with repair_ready or unresolved. For repair_ready choose hypothesis_id, describe change and preserve behavior, cite evidence and include improvement/regression expected_effect checks. Each effect: kind=metric/event,name,statistic,time:[start,end],direction=increase/decrease/stable,role=improvement/regression, optional where for event details. State samples support mean/min/max/first/last; counters support count/first_time; events support count/first_time/duration. Use unresolved when evidence cannot distinguish causes.",
     }
     functions = dict(select_issue=investigation.update, investigate=investigation.query, conclude=investigation.conclude)
     inputs = dict(select_issue=SelectInput, investigate=QueryInput, conclude=ConcludeInput)
-    for name, description in descriptions.items():
-        def make_executor(function):
-            """Bind each executor to its own investigation operation."""
-            class Executor(ToolExecutor):
-                def __call__(self, action, conversation=None):
-                    """Return validation failures as tool observations for correction."""
-                    try:
-                        value = function(**action.model_dump(exclude_none=True, by_alias=True,
-                                                             include=set(type(action).model_fields)))
-                    except (ValueError, KeyError, TypeError, OSError) as exc:
-                        value = dict(status="invalid_input", error=dict(code="invalid_input", message=str(exc)))
-                    return Output.from_text(json.dumps(value, ensure_ascii=False))
-            return Executor()
-
-        def make_definition(tool_name, help_text, executor, input_type):
-            """Bind SDK tool construction to one operation and its executor."""
-            class Definition(ToolDefinition):
-                @classmethod
-                def create(cls, conv_state=None, **params):
-                    """Construct the bound SDK-native tool definition."""
-                    return [cls(description=help_text, action_type=input_type, observation_type=Output,
-                                executor=executor, annotations=ToolAnnotations(
-                                    readOnlyHint=True, destructiveHint=False, openWorldHint=False))]
-            tool = type("Rsi" + tool_name.title().replace("_", ""), (Definition,), {"name": tool_name})
-            return tool.create()[0]
-
-        definitions.append(make_definition(name, description, make_executor(functions[name]), inputs[name]))
-    return definitions
+    return [make_definition(name, description, functions[name], inputs[name])
+            for name, description in descriptions.items()]
 
 
 def execute(job_path, llm_factory=None):
@@ -234,6 +252,8 @@ def execute(job_path, llm_factory=None):
     os.environ["OPENHANDS_SUPPRESS_BANNER"] = "1"
     job_path = Path(job_path)
     job, directory = read_json(job_path), job_path.parent
+    if "workspace" in job:
+        job["workspace"] = str(project_path(job["workspace"]))
     conversation = investigation = llm = None
     response = {}
     try:
@@ -277,6 +297,7 @@ def execute(job_path, llm_factory=None):
             if conversation and ((value["tokens"] or 0) >= settings["max_total_tokens"] or
                                  (value["cost"] or 0) >= settings["max_cost"]):
                 conversation.pause()
+            tool_progress(event, job["role"], job.get("workspace"))
             return value
 
         workspace = Path(job.get("workspace", directory / "readonly_session"))

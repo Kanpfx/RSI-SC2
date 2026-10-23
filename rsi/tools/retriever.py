@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import shutil
 
-from .versions import source_paths, read_json, write_json
+from .versions import project_path, source_paths, read_json, write_json
 
 
 def freeze_context(project, directory, experiences):
@@ -26,11 +26,11 @@ def freeze_context(project, directory, experiences):
 class Retriever:
     def __init__(self, version, context, max_chars=16000):
         """Bind exactly one parent snapshot and frozen non-log context."""
-        self.version, self.context, self.max_chars = version, Path(context), max_chars
+        self.version, self.context, self.max_chars = version, project_path(context), max_chars
 
     def index(self):
         """Expose names only; reference catalogues are retrieved on demand."""
-        roots = dict(source=Path(self.version["source_root"]) / "bot",
+        roots = dict(source=project_path(self.version["source_root"]) / "bot",
                      knowledge=self.context / "knowledge", api=self.context / "api")
         return dict({kind: sorted(path.relative_to(root).as_posix() for path in source_paths(root))
                      for kind, root in roots.items()},
@@ -44,7 +44,7 @@ class Retriever:
             items = [dict(v, source_ref=f"memory:{v['iteration_id']}") for v in values
                      if not text or text.casefold() in json.dumps(v, ensure_ascii=False).casefold()]
         else:
-            roots = dict(source=Path(self.version["source_root"]) / "bot",
+            roots = dict(source=project_path(self.version["source_root"]) / "bot",
                          knowledge=self.context / "knowledge", api=self.context / "api")
             if kind not in roots:
                 raise ValueError("Retriever kinds: source, api, knowledge, memory")

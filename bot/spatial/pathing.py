@@ -69,7 +69,7 @@ class Pathing:
                   for px in range(x-radius, x+radius+1)
                   if hypot(px-x, py-y) <= radius and self.valid(px, py, flying)]
         return min(points, key=lambda p: (self.threat(p, flying),
-                   p.distance_to(towards or position), p.x, p.y), default=None)
+                   p.distance_to(towards if towards is not None else position), p.x, p.y), default=None)
 
     def path(self, start, target, *, flying=False, max_nodes=12000):
         """Return a cached bounded A* route using distance plus visible threat costs.

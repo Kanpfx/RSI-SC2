@@ -1,5 +1,7 @@
 """Verify evidence boundaries and one offline iteration using scripted external boundaries."""
 import copy
+from contextlib import chdir, redirect_stdout
+from io import StringIO
 import json
 import os
 from pathlib import Path
@@ -15,16 +17,16 @@ from rsi.evaluator import check_effects, effect_value, evaluate, freeze_plan
 from rsi.editor import make_job as editor_job
 from rsi.memory import record, search
 from rsi.run import Run
-from rsi.tools.llm import execute, investigation_tools
-from rsi.tools.matches import run_match
+from rsi.tools.llm import budgeted_llm_type, call_session, execute, investigation_tools
+from rsi.tools.matches import run_batch, run_match
 from rsi.tools.retriever import Retriever, freeze_context
 from rsi.tools.validate import validate
-from rsi.tools.versions import Versions, read_json, write_json
+from rsi.tools.versions import Versions, path_reference, project_path, read_json, write_json
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def fixture_batch(project, version, conditions, directory, purpose, parallel=5):
+def fixture_batch(project, version, conditions, directory, purpose, parallel=3):
     """Produce native-shaped Bot logs for a fixed batch without launching SC2."""
     directory = Path(directory)
     directory.mkdir(parents=True)
@@ -112,7 +114,26 @@ class PipelineTests(unittest.TestCase):
             with self.subTest(with_id=with_id), patch("rsi.tools.matches.subprocess.Popen") as process:
                 process.return_value.wait.side_effect = lambda **kwargs: write_json(directory / "result.json", result)
                 merged = run_match(ROOT, self.parent, conditions, directory, "explore", "batch")
-            self.assertEqual(merged, dict(result, run_id=directory.name, directory=str(directory)))
+            self.assertEqual(merged, dict(result, run_id=directory.name, directory=path_reference(directory)))
+
+    def test_batch_staggers_three_submissions(self):
+        """Three configured matches launch with two delays and no extra games."""
+        events = []
+        conditions = [dict(self.config["matches"], seed=seed) for seed in (1, 2, 3)]
+        with patch("rsi.tools.matches.ThreadPoolExecutor") as executor, \
+                patch("rsi.tools.matches.time.sleep", side_effect=lambda seconds: events.append(("sleep", seconds))):
+            pool = executor.return_value.__enter__.return_value
+            def submit(function, project, version, condition, *args):
+                events.append(("submit", condition["seed"]))
+                from concurrent.futures import Future
+                future = Future()
+                future.set_result(dict(seed=condition["seed"]))
+                return future
+            pool.submit.side_effect = submit
+            batch = run_batch(ROOT, self.parent, conditions, self.root / "staggered", "explore")
+        self.assertEqual(events, [("submit", 1), ("sleep", 3), ("submit", 2), ("sleep", 3), ("submit", 3)])
+        self.assertEqual(len(batch["results"]), 3)
+        executor.assert_called_once_with(max_workers=3)
 
     def test_analyzer_summaries_and_large_evidence_are_retrievable(self):
         """Summaries cover every requested metric and long events retain usable references."""
@@ -210,6 +231,34 @@ class PipelineTests(unittest.TestCase):
         run.finish("analysis_only", "fixture")
         self.assertFalse(run.analyzer.records)
 
+    def test_project_references_resolve_outside_project_cwd(self):
+        """Persist portable paths and consume them from an unrelated working directory."""
+        with TemporaryDirectory(dir=ROOT / "runtime/checks") as temporary:
+            directory = Path(temporary)
+            versions = Versions(ROOT, directory / "rsi")
+            parent = versions.freeze(ROOT)
+            self.assertFalse(Path(parent["source_root"]).is_absolute())
+            self.assertNotIn("\\", parent["source_root"])
+            batch = fixture_batch(ROOT, parent, [dict(self.config["matches"], seed=1)],
+                                  directory / "explore", "explore")
+            batch["runs"] = {run_id: path_reference(path) for run_id, path in batch["runs"].items()}
+            run = Run(ROOT, self.config)
+            run.directory = directory / "iteration"
+            run.save("fixture", dict(ok=True))
+            reference = run.report["artifacts"]["fixture"]
+            self.assertFalse(Path(reference).is_absolute())
+            with chdir(self.root):
+                self.assertEqual(read_json(project_path(reference)), dict(ok=True))
+                versions.verify(parent)
+                # Existing absolute version references remain readable.
+                versions.verify(dict(parent, source_root=str(project_path(parent["source_root"]))))
+                candidate = versions.candidate(parent, directory / "candidate")
+                self.assertTrue((candidate / "bot/entry.py").is_file())
+                report = Analyzer(ROOT).add_batch(batch)
+                log_path = next(iter(report["runs"].values()))["log_path"]
+                self.assertFalse(Path(log_path).is_absolute())
+                self.assertTrue(project_path(log_path).is_file())
+
     def test_iteration_summary_keeps_details_in_stage_artifacts(self):
         """Small disk summaries do not mutate the complete in-memory report or stage files."""
         run = Run(ROOT, self.config)
@@ -226,7 +275,7 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(summary["validation"], dict(passed=False, failed_checks=["import"]))
         self.assertEqual(summary["evaluation"], dict(decision="inconclusive", reason="fixture"))
         for name, value in (("diagnosis", diagnosis), ("validation_0", validation), ("evaluation", evaluation)):
-            self.assertEqual(read_json(summary["artifacts"][name]), value)
+            self.assertEqual(read_json(project_path(summary["artifacts"][name])), value)
         self.assertIs(run.report["diagnosis"], diagnosis)
         self.assertIs(run.report["validation"], validation)
         self.assertIs(run.report["evaluation"], evaluation)
@@ -326,18 +375,17 @@ class PipelineTests(unittest.TestCase):
                    batches=[self.batch], diagnosis=options, analysis=self.config["analysis"])
         return Investigation(job, self.root), job
 
-    def test_investigation_requires_updates_and_real_refs(self):
-        """Active queries require prior review and reject invented evidence citations."""
+    def test_investigation_allows_collection_but_requires_review_and_real_refs(self):
+        """Related queries run freely; intervention still needs review and real citations."""
         investigation, _ = self.investigation()
         investigation.update(issue=dict(symptom="fixture", runs=list(self.batch["runs"]),
             window=[0, 20], why_selected="repeated"), hypotheses=[
                 dict(id=str(i), explanation="fixture", predictions=dict(support="a", refute="b")) for i in range(2)])
-        query = dict(channel="analyzer", kind="metrics", params=dict(batch_id=self.batch["batch_id"], names=["workers"]),
-                     purpose="inspect worker count", distinguishes="different worker curves")
+        query = dict(kind="metrics", params=dict(batch_id=self.batch["batch_id"], names=["workers"]),
+                     purpose="distinguish worker curves")
         result = investigation.query(**query)
         self.assertTrue(result["source_refs"])
-        with self.assertRaises(ValueError):
-            investigation.query(**query)
+        investigation.query(**query)
         with self.assertRaises(ValueError):
             investigation.apply_updates([dict(id="0", support_refs=["invented"] )])
         final = investigation.query(**query, updates=[dict(id="0", reason="Observed worker count", support_refs=result["source_refs"][:1], unknowns=["cause unknown"])])
@@ -357,9 +405,48 @@ class PipelineTests(unittest.TestCase):
             window=[0, 20], why_selected="repeated"), hypotheses=[
                 dict(id=str(i), explanation="fixture", predictions=dict(support="a", refute="b")) for i in range(2)])
         with self.assertRaises(ValueError):
-            investigation.query("analyzer", "overview", dict(batch_id=self.batch["batch_id"]), "test", "test")
+            investigation.query("overview", "test")
         result = investigation.conclude(dict(status="unresolved", reason="No discriminating evidence"))
         self.assertEqual(result["conclusion"]["status"], "unresolved")
+
+    def test_query_defaults_and_hypothesis_revision(self):
+        """Default scope is explicit in artifacts; revised explanations cannot inherit support."""
+        investigation, _ = self.investigation()
+        issue = dict(symptom="fixture", runs=list(self.batch["runs"]), window=[0, 20], why_selected="fixture")
+        hypotheses = [dict(id=str(i), explanation="fixture", predictions=dict(support="a", refute="b"))
+                      for i in range(2)]
+        investigation.update(issue=issue, hypotheses=hypotheses)
+        result = investigation.query("metrics", "distinguish worker curves", dict(names=["workers"]))
+        filters = investigation.state["queries"][-1]["filters"]
+        self.assertEqual(filters["batch_id"], self.batch["batch_id"])
+        self.assertEqual(filters["runs"], issue["runs"])
+        self.assertEqual(filters["time"], issue["window"])
+        investigation.query("source", "inspect the responsible task", dict(path="components/tasks/economy.py"))
+        self.assertFalse(investigation.state["queries"][-1]["updated"])
+        investigation.apply_updates([dict(id="0", reason="Initial evidence", support_refs=result["source_refs"][:1])])
+        self.assertTrue(all(q["updated"] for q in investigation.state["queries"]))
+        with self.assertRaisesRegex(ValueError, "fixed"):
+            investigation.update(issue=issue)
+        with self.assertRaisesRegex(ValueError, "reason"):
+            investigation.update(hypotheses=[dict(hypotheses[0], explanation="revised")])
+        investigation.update(hypotheses=[dict(hypotheses[0], explanation="revised"),
+            dict(hypotheses[1], id="2", explanation="new upstream cause")], reason="Source suggests another cause")
+        revised = investigation.state["hypotheses"][0]
+        self.assertEqual(revised["support_refs"], [])
+        self.assertTrue(revised["revisions"][0]["previous"]["support_refs"])
+        self.assertEqual([h["id"] for h in investigation.state["hypotheses"]], ["0", "1", "2"])
+        conclusion = dict(status="repair_ready", hypothesis_id="0", change="fixture", preserve="economy",
+            risks="fixture", uncertainty="fixture", code_targets=["bot/components/tasks/economy.py"],
+            evidence_refs=result["source_refs"][:1], expected_effect=effects())
+        with self.assertRaisesRegex(ValueError, "selected hypothesis"):
+            investigation.conclude(conclusion)
+        investigation.apply_updates([dict(id="0", reason="Reassessed evidence", support_refs=result["source_refs"][:1])])
+        investigation.query("metrics", "check wider interval", dict(names=["workers"], time=[0, 150], runs="all"))
+        self.assertEqual(investigation.state["queries"][-1]["filters"]["time"], [0, 150])
+        investigation.query("metrics", "invalid query", dict(typo="workers"))
+        with self.assertRaisesRegex(ValueError, "Review returned evidence"):
+            investigation.conclude(conclusion)
+        investigation.conclude(conclusion, updates=[dict(id="0", reason="Wider window reviewed")])
 
     def test_query_correction_and_effect_preflight(self):
         """Invalid queries do not need evidence updates; conclusions require usable checks."""
@@ -367,7 +454,7 @@ class PipelineTests(unittest.TestCase):
         investigation.update(issue=dict(symptom="fixture", runs=list(self.batch["runs"]), window=[0, 150],
             why_selected="fixture"), hypotheses=[dict(id=str(i), explanation="fixture",
             predictions=dict(support="a", refute="b")) for i in range(2)])
-        query = dict(channel="analyzer", kind="metrics", purpose="inspect", distinguishes="worker counts")
+        query = dict(kind="metrics", purpose="inspect worker counts")
         invalid = investigation.query(**query, params=dict(batch_id=self.batch["batch_id"], typo="workers"))
         self.assertEqual(invalid["status"], "invalid_query")
         result = investigation.query(**query, params=dict(batch_id=self.batch["batch_id"], names=["workers"]))
@@ -409,6 +496,15 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(payload["issue"], issue)
         self.assertEqual(len(payload["evidence"]), 1)
         self.assertNotIn("updates", payload["hypothesis"])
+        full_evidence = read_json((self.root / "candidate" / payload["evidence_path"]).resolve())
+        self.assertEqual(len(full_evidence), 1)
+        self.assertEqual(full_evidence[0]["item"]["name"], "workers")
+        diagnosis["queries"][0]["result"]["items"][0]["source"] = "x" * 20000
+        clipped_job = editor_job(self.root / "candidate", diagnosis, context=self.root / "context")
+        clipped = json.loads(clipped_job["prompt"].split("\n")[-1])
+        self.assertTrue(clipped["evidence"][0]["item"]["excerpt_truncated"])
+        self.assertEqual(len(read_json((self.root / "candidate" / clipped["evidence_path"]).resolve())[0]["item"]["source"]), 20000)
+        self.assertEqual(clipped["reference_directory"], "../context")
         self.assertEqual(len(payload["validator_feedback"]["checks"]), 1)
         self.assertLess(len(payload["validator_feedback"]["checks"][0]["output"]), 10000)
         report = dict(iteration_id="fixture", status="inconclusive", conditions=dict(race="Zerg"), diagnosis=diagnosis,
@@ -474,6 +570,51 @@ class PipelineTests(unittest.TestCase):
         plan = freeze_plan(config["evaluation"], dict(conclusion=dict(expected_effect=effects())))
         self.assertEqual(evaluate(p, p, plan)["decision"], "inconclusive")
 
+    def test_diagnosis_tool_token_budget(self):
+        """Count real SDK tool schemas offline before applying the request budget."""
+        os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
+        from openhands.sdk.llm import Message, TextContent
+        from pydantic import ValidationError
+        investigation, _ = self.investigation()
+        tools = investigation_tools(investigation)
+        settings = dict(self.config["model"])
+        llm = budgeted_llm_type(settings)(model="openai/gpt-4o", api_key="offline",
+                                        max_output_tokens=settings["max_output_tokens"])
+        messages = [Message(role="user", content=[TextContent(text="Investigate the evidence.")])]
+        self.assertGreater(llm.get_token_count(messages, tools), 0)
+        llm.check_request(messages, tools)
+        settings["max_total_tokens"] = 1
+        with self.assertRaisesRegex(ValueError, "token budget"):
+            llm.check_request(messages, tools)
+        issue_type = tools[0].action_type.model_fields["issue"].annotation.__args__[0]
+        issue = dict(symptom="fixture", runs=["run"], why_selected="fixture")
+        for window in ([0], [0, 1, 2]):
+            with self.assertRaises(ValidationError):
+                issue_type(**issue, window=window)
+
+    def test_model_worker_console_relay_keeps_stderr_in_file(self):
+        """Forward worker progress without leaking SDK stderr into the console."""
+        import subprocess
+        import sys
+        popen = subprocess.Popen
+        directory = self.root / "relay"
+        code = ("import json,sys; from pathlib import Path; "
+                "print('[diagnosis] evidence progress', flush=True); "
+                "print('SDK internal noise', file=sys.stderr); "
+                "Path(sys.argv[1]).write_text(json.dumps(dict(status='ok')), encoding='utf-8')")
+
+        def worker(args, **kwargs):
+            """Use a real local worker without calling any model endpoint."""
+            return popen([sys.executable, "-B", "-c", code, str(directory / "response.json")], **kwargs)
+
+        output = StringIO()
+        with patch("rsi.tools.llm.subprocess.Popen", side_effect=worker), redirect_stdout(output):
+            result = call_session(ROOT, dict(model=dict(wall_timeout=10)), directory)
+        self.assertEqual(result["status"], "ok")
+        self.assertIn("[diagnosis] evidence progress", output.getvalue())
+        self.assertNotIn("SDK internal noise", output.getvalue())
+        self.assertIn("SDK internal noise", (directory / "stderr.txt").read_text(encoding="utf-8"))
+
     def test_sdk_tools_with_scripted_transport(self):
         """Use the installed SDK with TestLLM; no network/model endpoint is called."""
         os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
@@ -485,6 +626,8 @@ class PipelineTests(unittest.TestCase):
         schema = definitions["investigate"].action_type.to_mcp_schema()
         self.assertIn("kind", schema["properties"])
         self.assertIn("kind", schema["required"])
+        self.assertNotIn("channel", schema["properties"])
+        self.assertNotIn("distinguishes", schema["properties"])
         self.assertNotIn("params", definitions["select_issue"].action_type.to_mcp_schema()["properties"])
         query_params = dict(batch_id=self.batch["batch_id"], names=["workers"], time=[0, 2])
         evidence = investigation.analyzer.query("metrics", **query_params)["source_refs"][:1]
@@ -493,16 +636,20 @@ class PipelineTests(unittest.TestCase):
             ("select_issue", dict(issue=dict(symptom="fixture", runs=list(self.batch["runs"]), window=[0, 20],
                 why_selected="fixture"), hypotheses=[dict(id=str(i), explanation="fixture",
                 predictions=dict(support="a", refute="b")) for i in range(2)])),
-            ("investigate", dict(channel="analyzer", kind="metrics", params=dict(batch_id=self.batch["batch_id"],
-                typo="workers"), purpose="fixture", distinguishes="fixture")),
-            ("investigate", dict(channel="analyzer", kind="metrics", params=query_params,
-                purpose="fixture", distinguishes="fixture")),
+            ("investigate", dict(kind="metrics", params=dict(batch_id=self.batch["batch_id"],
+                typo="workers"), purpose="fixture")),
+            ("investigate", dict(kind="metrics", params=query_params,
+                purpose="fixture")),
             ("conclude", dict(conclusion=dict(status="repair_ready", hypothesis_id="0", change="Fixture intervention",
                 preserve="Keep economy behavior", code_targets=["bot/components/tasks/economy.py"],
                 evidence_refs=evidence, expected_effect=effects(), risks="fixture", uncertainty="fixture"),
                 updates=[dict(id="0", reason="Fixture observations support investigation", support_refs=evidence,
                               status="supported")])),
         ]
+        # Reproduce the real failure: schema rejection emits ActionEvent(action=None).
+        invalid_selection = copy.deepcopy(calls[0][1])
+        invalid_selection["hypotheses"][0]["predictions"]["support"] = ["must be a string"]
+        calls.insert(0, ("select_issue", invalid_selection))
         messages = [Message(role="assistant", content=[TextContent(text="Offline fixture")],
             tool_calls=[MessageToolCall(id=str(i), name=name, arguments=json.dumps(params), origin="completion")])
             for i, (name, params) in enumerate(calls)]
@@ -511,12 +658,30 @@ class PipelineTests(unittest.TestCase):
         directory = self.root / "sdk"
         write_json(directory / "job.json", job)
         # Global SDK vision profiles are unrelated to this text-only fixture and live outside the sandbox.
-        with patch("openhands.sdk.agent.base.has_vision_profile_available", return_value=False):
+        output = StringIO()
+        with patch("openhands.sdk.agent.base.has_vision_profile_available", return_value=False), redirect_stdout(output):
             result = execute(directory / "job.json", llm_factory=lambda: TestLLM.from_messages(messages))
         self.assertEqual(result["status"], "ok", result.get("reason"))
         self.assertEqual(result["value"]["conclusion"]["status"], "repair_ready")
         self.assertEqual(len(result["value"]["queries"]), 2)
         self.assertEqual(result["value"]["queries"][0]["result"]["status"], "invalid_query")
+        self.assertIn("Issue: fixture", output.getvalue())
+        self.assertIn("Hypothesis 0: fixture", output.getvalue())
+        self.assertIn("Query metrics", output.getvalue())
+        self.assertIn("Tool rejected:", output.getvalue())
+        self.assertIn("Conclusion validated: 0", output.getvalue())
+        self.assertIn("Tool rejected (select_issue):", output.getvalue())
+        for failure, target in (("render", "rsi.console._tool_progress"), ("write", "rsi.console.print")):
+            with self.subTest(failure=failure):
+                failed_directory = self.root / ("sdk_display_" + failure)
+                write_json(failed_directory / "job.json", job)
+                with patch("openhands.sdk.agent.base.has_vision_profile_available", return_value=False), \
+                        patch(target, side_effect=RuntimeError("Display failure"), create=True):
+                    recovered = execute(failed_directory / "job.json", llm_factory=lambda: TestLLM.from_messages(messages))
+                self.assertEqual(recovered["status"], "ok", recovered.get("reason"))
+                self.assertEqual(recovered["value"]["conclusion"]["status"], "repair_ready")
+                self.assertTrue((failed_directory / "usage.json").is_file())
+                self.assertTrue((failed_directory / "investigation.json").is_file())
 
     def test_sdk_editor_can_edit_and_run_candidate_tests(self):
         """Use real SDK editing and terminal tools with a scripted, offline model."""
@@ -564,7 +729,8 @@ class PipelineTests(unittest.TestCase):
             observations.append(observation)
             return observation
 
-        with patch("openhands.sdk.agent.base.has_vision_profile_available", return_value=False), \
+        output = StringIO()
+        with patch("openhands.sdk.agent.base.has_vision_profile_available", return_value=False), redirect_stdout(output), \
                 patch.object(TerminalExecutor, "__call__", new=observe_terminal):
             result = execute(directory / "job.json", llm_factory=lambda: TestLLM.from_messages(messages))
         self.assertEqual(result["status"], "ok", result.get("reason"))
@@ -576,6 +742,9 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(observations[2].exit_code, 0, observations[2].text)
         self.assertIn("OK", observations[2].text)
         self.assertIn("# Offline SDK editor fixture.", path.read_text(encoding="utf-8"))
+        self.assertIn("File str_replace: bot/components/tasks/economy.py", output.getvalue())
+        self.assertIn("Command:", output.getvalue())
+        self.assertIn("Command result: exit_code=0", output.getvalue())
         self.assertTrue(validate(self.parent, candidate)["passed"])
 
 

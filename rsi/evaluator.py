@@ -70,12 +70,12 @@ def check_effects(parent, candidate, effects):
         p = [effect_value(r, effect) for r in parent["runs"].values()]
         c = [effect_value(r, effect) for r in candidate["runs"].values()]
         delta = mean(c) - mean(p) if p and len(p) == len(c) and all(v is not None for v in p + c) else None
-        signed = delta if effect["direction"] == "increase" else -delta if delta is not None else None
         if delta is None:
             result = "missing"
         elif effect["direction"] == "stable":
             result = "met" if delta == 0 else "not_met"
         else:
+            signed = delta if effect["direction"] == "increase" else -delta
             result = "met" if (signed > 0 if effect["role"] == "improvement" else signed >= 0) else "not_met"
         output.append(dict(effect=effect, parent=p, candidate=c, difference=delta, result=result))
     return output

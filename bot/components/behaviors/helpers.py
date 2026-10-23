@@ -19,7 +19,7 @@ def attack_target(unit, enemies):
 
     Respect air/ground targeting and radii; return None when no target is attackable.
     """
-    targets = [enemy for enemy in enemies if enemy.is_visible
+    targets = [enemy for enemy in enemies if enemy.is_visible and enemy.can_be_attacked
                and (unit.can_attack_air if enemy.is_flying else unit.can_attack_ground)
                and unit.distance_to(enemy) <= (unit.air_range if enemy.is_flying else unit.ground_range)
                    + unit.radius + enemy.radius]

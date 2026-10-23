@@ -5,6 +5,19 @@ import json
 from pathlib import Path
 import shutil
 
+PROJECT = Path(__file__).resolve().parents[2]
+
+
+def project_path(path):
+    """Resolve stored project-relative paths independently of the working directory."""
+    return (PROJECT / path).resolve()
+
+
+def path_reference(path):
+    """Store project files as relative POSIX paths; retain external absolute paths."""
+    path = Path(path).resolve()
+    return path.relative_to(PROJECT).as_posix() if path.is_relative_to(PROJECT) else path.as_posix()
+
 
 def read_json(path):
     """Read a UTF-8 JSON artifact."""
@@ -56,7 +69,7 @@ class Versions:
 
     def freeze(self, source):
         """Freeze Bot files without importing them; verify existing snapshots before reuse."""
-        files = {name: data for name, data in inventory(Path(source) / "bot").items()}
+        files = inventory(Path(source) / "bot")
         if "entry.py" not in files:
             raise ValueError("Snapshot requires bot/entry.py")
         digest = hashlib.sha256()
@@ -69,13 +82,13 @@ class Versions:
                 path = target / "bot" / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(data)
-        record = dict(version=version, source_root=str(target))
+        record = dict(version=version, source_root=path_reference(target))
         self.verify(record)
         return record
 
     def verify(self, version):
         """Reject modified snapshots before reading, editing or running them."""
-        if source_hash(version["source_root"]) != version["version"]:
+        if source_hash(project_path(version["source_root"])) != version["version"]:
             raise ValueError("Snapshot content does not match its version")
 
     def current(self):
@@ -88,13 +101,13 @@ class Versions:
     def candidate(self, parent, directory):
         """Copy one verified parent into a fresh writable candidate directory."""
         self.verify(parent)
-        shutil.copytree(parent["source_root"], directory)
+        shutil.copytree(project_path(parent["source_root"]), directory)
         return Path(directory)
 
     def diff(self, parent, candidate, output):
         """Save the complete candidate diff and return changed paths."""
         self.verify(parent)
-        before, after = inventory(parent["source_root"]), inventory(candidate)
+        before, after = inventory(project_path(parent["source_root"])), inventory(candidate)
         changed = sorted(name for name in before.keys() | after.keys() if before.get(name) != after.get(name))
         lines = []
         for name in changed:
