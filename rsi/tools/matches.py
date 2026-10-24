@@ -1,16 +1,18 @@
 """Bounded parallel batches; each frozen Bot runs in its own process."""
-from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import os
-from pathlib import Path
 import subprocess
 import sys
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from threading import Event
 from uuid import uuid4
 
-from ..console import error_summary, progress
-from .versions import path_reference, project_path, read_json, write_json, source_hash
+from .artifacts import path_reference, project_path, read_json, write_json
+from .console import error_summary, progress
+from .versions import source_hash
 
 MATCH_START_INTERVAL = 3
 
@@ -26,8 +28,11 @@ def stop_process(process):
         process.wait(timeout=15)
 
 
-def run_match(project, version, conditions, directory, purpose, batch_id):
+def run_match(project, version, conditions, directory, purpose, batch_id, *, cancel=None):
     """Execute one match and preserve infrastructure failures separately from outcomes."""
+    if cancel is not None and cancel.is_set():
+        return dict(run_id=Path(directory).name, directory=path_reference(directory),
+                    execution_status="unknown", outcome=None, termination="cancelled")
     if source_hash(project_path(version["source_root"])) != version["version"]:
         raise ValueError("Bot snapshot changed")
     directory = Path(directory)
@@ -45,7 +50,23 @@ def run_match(project, version, conditions, directory, purpose, batch_id):
                                     "--worker", str(directory / "manifest.json")],
                                    cwd=project, stdout=out, stderr=err, creationflags=flags)
         try:
-            process.wait(timeout=conditions["wall_timeout"])
+            deadline = time.monotonic() + conditions["wall_timeout"]
+            while True:
+                if cancel is not None and cancel.is_set():
+                    stop_process(process)
+                    if not (directory / "result.json").exists():
+                        write_json(directory / "result.json", dict(execution_status="unknown", outcome=None,
+                                   termination="cancelled", error="Batch cancelled"))
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(process.args, conditions["wall_timeout"])
+                try:
+                    process.wait(timeout=min(0.25, remaining) if cancel is not None else remaining)
+                    break
+                except subprocess.TimeoutExpired:
+                    if cancel is None:
+                        raise
         except subprocess.TimeoutExpired:
             stop_process(process)
             write_json(directory / "result.json", dict(execution_status="unknown", outcome=None,
@@ -74,13 +95,31 @@ def run_batch(project, version, conditions, directory, purpose, parallel=3):
     batch = dict(batch_id=directory.name, version=version["version"], purpose=purpose,
                  runs={path.name: path_reference(path) for _, path in jobs}, conditions=conditions)
     write_json(directory / "batch.json", batch)
-    with ThreadPoolExecutor(max_workers=parallel) as pool:
-        futures = []
-        for index, (condition, path) in enumerate(jobs):
-            if index:
-                time.sleep(MATCH_START_INTERVAL)
-            futures.append(pool.submit(run_match, project, version, condition, path, purpose, directory.name))
-        results = [future.result() for future in futures]
+    cancel = Event()
+    futures = []
+    try:
+        with ThreadPoolExecutor(max_workers=parallel) as pool:
+            try:
+                for index, (condition, path) in enumerate(jobs):
+                    if index:
+                        time.sleep(MATCH_START_INTERVAL)
+                    futures.append(pool.submit(run_match, project, version, condition, path, purpose, directory.name,
+                                               cancel=cancel))
+                results = [future.result() for future in futures]
+            except BaseException:
+                cancel.set()
+                for future in futures:
+                    future.cancel()
+                raise
+    except BaseException as exc:
+        batch["status"] = "interrupted" if isinstance(exc, KeyboardInterrupt) else "error"
+        batch["error"] = f"{type(exc).__name__}: {exc}"
+        batch["results"] = [dict(
+            read_json(path / "result.json") if (path / "result.json").exists() else
+            dict(execution_status="unknown", outcome=None, termination="cancelled"),
+            run_id=path.name, directory=path_reference(path)) for _, path in jobs]
+        write_json(directory / "batch.json", batch)
+        raise
     batch["results"] = results
     write_json(directory / "batch.json", batch)
     return batch

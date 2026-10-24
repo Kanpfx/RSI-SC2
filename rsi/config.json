@@ -1,52 +1,32 @@
 {
-  "mode": "analyze_only",
   "max_matches": 24,
   "max_wall_seconds": 7200,
-  "parallel_matches": 3,
+  "parallel_matches": 5,
   "max_repairs": 2,
   "model": {
     "api_key_env": "LLM_API_KEY",
+    "reasoning_effort": "high",
     "max_total_tokens": 1500000,
     "max_cost": 2.0,
     "max_iterations": 80,
     "max_output_tokens": 8192,
     "request_timeout": 180,
-    "wall_timeout": 1200
+    "wall_timeout": 1200,
+    "diagnosis": {},
+    "editor": {}
   },
   "diagnosis": {
     "query_policy": "active",
     "competing_hypotheses": true,
     "use_memory": true,
-    "max_queries": 32,
-    "max_items": 60,
-    "max_chars": 24000
-  },
-  "analysis": {
-    "sample_gap_loops": 32,
-    "event_seconds": 10,
-    "float_minerals": 500,
-    "float_vespene": 300,
-    "loss_window_seconds": 10,
-    "worker_loss_count": 3,
-    "army_loss_count": 3,
-    "block_count": 5
+    "max_queries": 32
   },
   "matches": {
-    "map": "AbyssalReefLE", "race": "Zerg", "difficulty": "Easy",
-    "game_time_limit": 1800, "wall_timeout": 600
+    "map": "AbyssalReefLE",
+    "race": "Terran",
+    "difficulty": "CheatInsane",
+    "game_time_limit": 1800,
+    "wall_timeout": 600
   },
-  "explore": [{"seed": 1}, {"seed": 2}, {"seed": 3}],
-  "validation": {"seed": 100, "game_time_limit": 300, "wall_timeout": 180},
-  "evaluation": {
-    "specialist": false,
-    "max_checks": 4,
-    "formal": false,
-    "min_samples": 50,
-    "min_coverage": 0.95,
-    "alpha": 0.05,
-    "min_improvement": 0,
-    "time_limit_score": "nonwin",
-    "matches": [{"seed": 201}, {"seed": 202}, {"seed": 203}]
-  },
-  "holdout": []
+  "parent_batch": null
 }

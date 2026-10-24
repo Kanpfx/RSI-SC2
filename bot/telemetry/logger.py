@@ -4,6 +4,13 @@ import json
 from pathlib import Path
 
 
+SCORE_FIELDS = (
+    "killed_value_units", "killed_value_structures", "collected_minerals", "collected_vespene",
+    "used_minerals_army", "used_vespene_army", "total_used_minerals_army", "total_used_vespene_army",
+) + tuple(f"lost_{resource}_{category}" for resource in ("minerals", "vespene")
+          for category in ("none", "army", "economy", "technology", "upgrade"))
+
+
 class Logger:
     def __init__(self, directory=None, sample_period=16):
         """Open a new trace file or disable persistence when directory is None."""
@@ -34,6 +41,7 @@ class Logger:
             self.next_sample = loop + self.sample_period
             self.emit("state", loop, minerals=game.minerals, vespene=game.vespene,
                       supply_used=game.supply_used, supply_cap=game.supply_cap,
+                      score={name: getattr(game.state.score, name) for name in SCORE_FIELDS},
                       own=[self.unit(u) for u in game.units + game.structures],
                       enemies=[self.unit(u) for u in game.enemy_units + game.enemy_structures
                                if u.is_visible], enemy_scope="visible_only")

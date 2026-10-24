@@ -1,4 +1,4 @@
-"""Project entry for the bounded RSI loop; see python -B run_iteration.py --help."""
+"""Project entry for sequential RSI experiments; see python -B run_iteration.py --help."""
 from rsi.run import main
 
 

@@ -1,15 +1,31 @@
 """Compute static metrics and descriptive events from the Bot's original JSONL."""
-from collections import Counter, defaultdict
 import json
+from collections import Counter, defaultdict
 from pathlib import Path
 from statistics import mean
 
-from .tools.versions import path_reference, project_path, read_json, write_json
+from .tools.artifacts import path_reference, project_path, read_json, write_json
+
+
+def save_batch_analysis(path, analysis):
+    """Store each run once and keep only references in the batch report."""
+    path = Path(path)
+    runs = {}
+    for run_id, report in analysis["runs"].items():
+        run_path = path.parent / run_id / "analysis.json"
+        write_json(run_path, report)
+        runs[run_id] = path_reference(run_path)
+    write_json(path, dict(analysis, runs=runs))
+
+
+def load_batch_analysis(path):
+    """Load referenced run reports, including existing embedded historical reports."""
+    analysis = read_json(project_path(path))
+    analysis["runs"] = {run_id: read_json(project_path(report)) if isinstance(report, str) else report
+                        for run_id, report in analysis["runs"].items()}
+    return analysis
 
 LOOPS = 22.4
-EVENT_KINDS = {"unit_created", "construction_started", "construction_complete", "supply_block",
-               "resource_float", "production_idle", "worker_loss_spike", "army_loss_spike",
-               "action_block_cluster"}
 WORKERS = {"SCV", "DRONE", "PROBE", "MULE"}
 BASES = {"COMMANDCENTER", "ORBITALCOMMAND", "PLANETARYFORTRESS", "NEXUS", "HATCHERY", "LAIR", "HIVE"}
 PRODUCERS = BASES | {"BARRACKS", "FACTORY", "STARPORT", "GATEWAY", "WARPGATE", "STARGATE", "ROBOTICSFACILITY"}
@@ -58,8 +74,9 @@ def metric_statistics(name):
                 "worker_losses", "army_losses", "unknown_losses"} or name.startswith(("units_produced.", "blocked.")):
         return ("count", "first_time")
     if name in {"minerals", "vespene", "supply_used", "supply_cap", "supply_left", "workers",
-                "idle_workers", "bases", "supply_block_ratio", "army_supply"} or name.startswith(
-                    ("unit_count.", "production_busy_ratio.")):
+                "idle_workers", "bases", "supply_block_ratio", "army_supply", "combat_value",
+                "trade_efficiency", "army_value", "army_investment", "resource_collection_rate"} or name.startswith(
+                    ("unit_count.", "production_busy_ratio.", "score.")):
         return ("mean", "min", "max", "first", "last")
     return ()
 
@@ -79,55 +96,66 @@ class Analyzer:
         for path in (self.project / "knowledge/units").glob("*.json"):
             self.catalog.update(read_json(path))
 
-    def analyze_run(self, directory, run_id):
-        """Compute supported metrics and descriptive events; never infer missing telemetry as zero."""
+    def analyze_run(self, directory, run_id, *, persist=True):
+        """Read one run and optionally persist its static report beside the logs."""
         directory = project_path(directory)
-        manifest, result = read_json(directory / "manifest.json"), read_json(directory / "result.json")
+        manifest = read_json(directory / "manifest.json")
+        result = read_json(directory / "result.json")
         rows, problems = read_records(directory, run_id)
-        samples = [r for r in rows if r["event"] == "state"]
         duration = result.get("duration_loops", max((r["frame"] for r in rows), default=0))
-        series, events, modules = defaultdict(list), [], defaultdict(Counter)
-        calls, requests, known, losses = {}, defaultdict(list), {}, defaultdict(list)
-        coverage = dict(problems=problems, duration_seconds=duration / LOOPS,
-                        sampled_seconds=0, sample_ratio=None, approximate_durations=True,
-                        missing_metrics={"mineral_income": "No income/score counters in Bot Logger",
-                                         "gas_income": "No income/score counters in Bot Logger",
-                                         "upgrade_state": "No upgrade-state snapshots or completion callbacks",
-                                         "army_value": "Static costs do not reliably encode invested unit value"})
-        if not any(r["event"] == "game_started" for r in rows):
-            problems.append("missing_game_started")
-        if not any(r["event"] == "game_ended" for r in rows):
-            problems.append("missing_game_ended")
+        for event in ("game_started", "game_ended"):
+            if not any(row["event"] == event for row in rows):
+                problems.append("missing_" + event)
         if result.get("execution_status") != "normal":
             problems.append("run_not_normal")
+
+        series, events = defaultdict(list), []
         for row in rows:
-            if row["event"] == "module_call":
-                calls[row["call_id"]] = row
-                key = row["module_path"] + ":" + row["module_id"]
-                modules[key]["calls"] += 1
-                modules[key][row["status"]] += 1
-            elif row["event"] == "action" and row.get("request_id"):
-                requests[row["request_id"]].append(row)
-            elif row["event"] == "state":
-                known.update({u["tag"]: u for u in row["own"]})
-            elif row["event"] == "unit_created":
-                known[row["tag"]] = dict(type=row["type"])
-            elif row["event"] == "unit_destroyed":
-                unit = known.pop(row["tag"], None)
-                if unit:
-                    category = self.catalog.get(unit["type"], {}).get("category", "").lower()
-                    kind = ("worker" if unit["type"] in WORKERS else
-                            "army" if category in {"unit", "combat unit", "army", "combat"} else "unknown")
-                    losses[kind].append(row)
-                else:
-                    coverage["unattributed_deaths"] = coverage.get("unattributed_deaths", 0) + 1
             if row["event"] in {"unit_created", "construction_started", "construction_complete"}:
-                events.append(dict(kind=row["event"], start=row["frame"] / LOOPS,
-                                   end=row["frame"] / LOOPS, details=row,
-                                   source_refs=[row["source_ref"]]))
-                if row["event"] == "unit_created":
-                    series["units_produced." + row["type"]].append(dict(time=row["frame"] / LOOPS,
-                        value=1, source_refs=[row["source_ref"]]))
+                events.append(dict(kind=row["event"], start=row["frame"] / LOOPS, end=row["frame"] / LOOPS,
+                                   details=row, source_refs=[row["source_ref"]]))
+            if row["event"] == "unit_created":
+                series["units_produced." + row["type"]].append(dict(
+                    time=row["frame"] / LOOPS, value=1, source_refs=[row["source_ref"]]))
+
+        samples = self._analyze_samples([row for row in rows if row["event"] == "state"], duration)
+        losses = self._analyze_losses(rows)
+        actions = self._analyze_actions(rows, duration)
+        for analysis in (samples, losses, actions):
+            series.update(analysis["metrics"])
+            events.extend(analysis["events"])
+        coverage = self._coverage(duration, problems, samples["sampled_seconds"])
+        if "army_value" in series:
+            coverage["missing_metrics"].pop("army_value", None)
+        if losses["unattributed_deaths"]:
+            coverage["unattributed_deaths"] = losses["unattributed_deaths"]
+        report = dict(run_id=run_id, log_path=path_reference(directory / "trace.jsonl"),
+                      conditions={k: manifest.get(k) for k in ("map", "race", "difficulty", "seed")},
+                      environment={k: manifest.get(k) for k in ("map_sha256", "environment", "game_time_limit")},
+                      outcome=result, coverage=coverage, metrics=dict(series),
+                      events=sorted(events, key=lambda e: e["start"]),
+                      modules=actions["modules"], actions=actions["actions"])
+        if persist:
+            write_json(directory / "analysis.json", report)
+        return report
+
+    def _coverage(self, duration, problems, sampled_seconds):
+        """Describe observed coverage and known limits without filling missing metrics."""
+        return dict(problems=problems, duration_seconds=duration / LOOPS,
+                    sampled_seconds=sampled_seconds,
+                    sample_ratio=min(1, sampled_seconds * LOOPS / duration) if duration else None,
+                    approximate_durations=True, integrity="partial" if problems else "complete",
+                    missing_metrics={
+                        "mineral_income": "Separate mineral income metric is not derived",
+                        "gas_income": "Separate gas income metric is not derived",
+                        "upgrade_state": "No upgrade-state snapshots or completion callbacks",
+                        "army_value": "Static costs do not reliably encode invested unit value",
+                        "army_supply": "Omitted at samples with missing static supply; estimate excludes workers"})
+
+    def _analyze_samples(self, samples, duration):
+        """Calculate sampled state metrics and sustained events over covered intervals."""
+        series, events = defaultdict(list), []
+        sampled_seconds = 0
         intervals = []
         unit_types = {u["type"] for sample in samples for u in sample["own"]}
         for index, sample in enumerate(samples):
@@ -135,7 +163,7 @@ class Analyzer:
             seconds = (next_frame - sample["frame"]) / LOOPS
             if not 0 < next_frame - sample["frame"] <= self.config["sample_gap_loops"]:
                 seconds = 0
-            coverage["sampled_seconds"] += seconds
+            sampled_seconds += seconds
             units = sample["own"]
             counts = Counter(u["type"] for u in units)
             workers = [u for u in units if u["type"] in WORKERS]
@@ -144,6 +172,18 @@ class Analyzer:
                           workers=len(workers), idle_workers=sum(not u["orders"] for u in workers),
                           bases=sum(counts[t] for t in BASES),
                           supply_block_ratio=int(sample["supply_used"] >= sample["supply_cap"]))
+            score = sample.get("score")
+            if score is not None:
+                values.update({"score." + name: value for name, value in score.items()})
+                killed = score["killed_value_units"] + score["killed_value_structures"]
+                lost = sum(value for name, value in score.items() if name.startswith("lost_"))
+                values.update(combat_value=killed,
+                    trade_efficiency=killed / (killed + lost) if killed + lost else 0,
+                    army_value=score["used_minerals_army"] + score["used_vespene_army"],
+                    army_investment=score["total_used_minerals_army"] + score["total_used_vespene_army"])
+                if sample["frame"] > 0:
+                    values["resource_collection_rate"] = 60 * LOOPS * (
+                        score["collected_minerals"] + score["collected_vespene"]) / sample["frame"]
             values.update({f"unit_count.{name}": counts[name] for name in unit_types})
             army_supply, complete = 0, True
             for unit in units:
@@ -187,34 +227,71 @@ class Analyzer:
                                               source_refs=[]))
                     event["end"] = end_frame / LOOPS
                     event["source_refs"].append(sample["source_ref"])
+        return dict(metrics=series, events=events, sampled_seconds=sampled_seconds)
+
+    def _analyze_losses(self, rows):
+        """Attribute destruction to known units and detect worker/army loss bursts."""
+        known, losses = {}, defaultdict(list)
+        series, events = defaultdict(list), []
+        unattributed = 0
+        for row in rows:
+            if row["event"] == "state":
+                known.update({u["tag"]: u for u in row["own"]})
+            elif row["event"] == "unit_created":
+                known[row["tag"]] = dict(type=row["type"])
+            elif row["event"] == "unit_destroyed":
+                unit = known.pop(row["tag"], None)
+                if unit:
+                    category = self.catalog.get(unit["type"], {}).get("category", "").lower()
+                    kind = ("worker" if unit["type"] in WORKERS else
+                            "army" if category in {"unit", "combat unit", "army", "combat"} else "unknown")
+                    losses[kind].append(row)
+                else:
+                    unattributed += 1
         for kind, deaths in losses.items():
             for death in deaths:
                 series[f"{kind}_losses"].append(dict(time=death["frame"] / LOOPS, value=1,
                                                      source_refs=[death["source_ref"]]))
             if kind in {"worker", "army"}:
                 self._clusters(deaths, f"{kind}_loss_spike", self.config[f"{kind}_loss_count"], events)
+        return dict(metrics=series, events=events, unattributed_deaths=unattributed)
+
+    def _analyze_actions(self, rows, duration):
+        """Follow request lifecycles and summarize execution by module and block reason."""
+        calls, requests, modules = {}, defaultdict(list), defaultdict(Counter)
+        series, events = defaultdict(list), []
+        for row in rows:
+            if row["event"] == "module_call":
+                calls[row["call_id"]] = row
+                key = row["module_path"] + ":" + row["module_id"]
+                module = modules[key]
+                module["calls"] += 1
+                module[row["status"]] += 1
+            elif row["event"] == "action" and row.get("request_id"):
+                requests[row["request_id"]].append(row)
         blocked = []
         submitted = confirmed = 0
         for history in requests.values():
             first = history[0]
-            facts = {}
+            first_by_status = {}
             for row in history:
-                facts.setdefault(row["status"], row)
-            submitted += "submitted" in facts
-            confirmed += "observed" in facts or "completed" in facts
+                first_by_status.setdefault(row["status"], row)
+            submitted += "submitted" in first_by_status
+            confirmed += "observed" in first_by_status or "completed" in first_by_status
             call = calls.get(first["call_id"], {})
             key = call.get("module_path", "unknown") + ":" + call.get("module_id", first.get("source", ""))
-            modules[key]["requests"] += 1
+            module = modules[key]
+            module["requests"] += 1
             for status in ("submitted", "observed", "completed", "failed", "unknown"):
-                if status in facts:
-                    modules[key][status] += 1
+                if status in first_by_status:
+                    module[status] += 1
             refusal = next((r for r in history if r["status"] in {"rejected", "deferred"}), None)
             if refusal:
-                modules[key]["blocked:" + refusal["reason"]] += 1
+                module["blocked:" + refusal["reason"]] += 1
                 blocked.append(refusal)
             for status, metric in (("proposed", "requests"), ("submitted", "submitted_commands"),
                                    ("observed", "observed_actions"), ("completed", "completed_actions")):
-                fact = facts.get(status)
+                fact = first_by_status.get(status)
                 if fact:
                     series[metric].append(dict(time=fact["frame"] / LOOPS, value=1,
                                                source_refs=[fact["source_ref"]]))
@@ -225,18 +302,15 @@ class Analyzer:
             self._clusters(sorted((r for r in blocked if r["reason"] == reason), key=lambda r: r["frame"]),
                            "action_block_cluster", self.config["block_count"], events, reason=reason)
         proposals = len(requests)
+        blocked_by_reason = dict(Counter(row["reason"] for row in blocked))
         summary = dict(requests=proposals, submitted=submitted,
                        submitted_ratio=submitted / proposals if proposals else None,
                        bot_commands_per_minute=submitted * 60 * LOOPS / duration if duration else None,
                        confirmed=confirmed,
-                       blocked_by_reason=dict(Counter(r["reason"] for r in blocked)),
+                       blocked_by_reason=blocked_by_reason,
                        duplicate_requests=sum(r["reason"] == "duplicate_order" for r in blocked))
-        summary["blocked_ratio_by_reason"] = {reason: count / proposals for reason, count in
-                                               summary["blocked_by_reason"].items()} if proposals else {}
-        if duration:
-            coverage["sample_ratio"] = min(1, coverage["sampled_seconds"] * LOOPS / duration)
-        coverage["integrity"] = "partial" if problems else "complete"
-        coverage["missing_metrics"]["army_supply"] = "Omitted at samples with missing static supply; estimate excludes workers"
+        summary["blocked_ratio_by_reason"] = {
+            reason: count / proposals for reason, count in blocked_by_reason.items()} if proposals else {}
         module_stats = {}
         for key, counters in modules.items():
             item = {name: count for name, count in counters.items() if not name.startswith("blocked:")}
@@ -246,14 +320,7 @@ class Analyzer:
             item["blocked_by_reason"] = {name.removeprefix("blocked:"): count for name, count in counters.items()
                                          if name.startswith("blocked:")}
             module_stats[key] = item
-        report = dict(run_id=run_id, log_path=path_reference(directory / "trace.jsonl"),
-                      conditions={k: manifest.get(k) for k in ("map", "race", "difficulty", "seed")},
-                      environment={k: manifest.get(k) for k in ("map_sha256", "environment", "game_time_limit")},
-                      outcome=result, coverage=coverage, metrics=dict(series),
-                      events=sorted(events, key=lambda e: e["start"]),
-                      modules=module_stats, actions=summary)
-        write_json(directory / "analysis.json", report)
-        return report
+        return dict(metrics=series, events=events, modules=module_stats, actions=summary)
 
     def _clusters(self, rows, kind, threshold, events, **details):
         """Emit nonoverlapping threshold bursts within a configured time window."""
@@ -267,14 +334,12 @@ class Analyzer:
                                    source_refs=[r["source_ref"] for r in recent]))
                 recent = []
 
-    def add_batch(self, batch):
+    def add_batch(self, batch, *, persist=True):
         """Analyze an explicitly supplied batch; holdout remains outside development queries."""
         if batch["purpose"] == "holdout":
             raise ValueError("Holdout is unavailable to the development Analyzer")
-        reports = {run_id: self.analyze_run(path, run_id) for run_id, path in batch["runs"].items()}
+        reports = {run_id: self.analyze_run(path, run_id, persist=persist) for run_id, path in batch["runs"].items()}
         summary = dict(outcomes=dict(Counter(r["outcome"].get("outcome") or "unknown" for r in reports.values())),
-                       event_counts=dict(Counter(e["kind"] for r in reports.values() for e in r["events"])),
-                       metric_stats={name: {run_id: statistics(r["metrics"].get(name, [])) for run_id, r in reports.items()}
-                                     for name in set().union(*(r["metrics"] for r in reports.values()))})
+                       event_counts=dict(Counter(e["kind"] for r in reports.values() for e in r["events"])))
         return dict(batch_id=batch["batch_id"], version=batch["version"], purpose=batch["purpose"],
                     runs=reports, summary=summary)

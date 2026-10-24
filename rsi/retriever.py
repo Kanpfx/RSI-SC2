@@ -1,64 +1,15 @@
 """Unified bounded queries over static analysis, raw traces and frozen references."""
-import ast
-from collections import Counter
-import hashlib
 import importlib.util
 import json
-from pathlib import Path
 import shutil
+from collections import Counter
+from pathlib import Path
 
-from .tools.versions import project_path, source_paths, read_json, write_json
-
-from .analyzer import LOOPS, metric_statistics, metric_summary, read_records
-
-
-def make_tool(tool_name, description, function, input_type):
-    """Bind a read-only SDK tool to an ordinary function and its argument schema."""
-    from openhands.sdk.tool import Observation, ToolDefinition, ToolExecutor, ToolAnnotations
-
-    class Output(Observation):
-        pass
-
-    class Executor(ToolExecutor):
-        def __call__(self, action, conversation=None):
-            """Return input errors as observations so the model can correct its call."""
-            try:
-                value = function(**action.model_dump(exclude_none=True, by_alias=True,
-                                                     include=set(type(action).model_fields)))
-            except (ValueError, KeyError, TypeError, OSError) as exc:
-                value = dict(status="invalid_input", error=dict(code="invalid_input", message=str(exc)))
-            return Output.from_text(json.dumps(value, ensure_ascii=False))
-
-    class Definition(ToolDefinition):
-        @classmethod
-        def create(cls, conv_state=None, **params):
-            """Construct the bound SDK-native tool definition."""
-            return [cls(description=description, action_type=input_type, observation_type=Output,
-                        executor=Executor(), annotations=ToolAnnotations(
-                            readOnlyHint=True, destructiveHint=False, openWorldHint=False))]
-
-    tool = type("Rsi" + tool_name.title().replace("_", ""), (Definition,), {"name": tool_name})
-    return tool.create()[0]
+from .analyzer import LOOPS, metric_summary, read_records
+from .tools.artifacts import project_path, read_json
 
 
-def reference_tool(function):
-    """Share the same read_reference schema and implementation across both agents."""
-    from pydantic import ConfigDict
-    from openhands.sdk.tool import Action
-
-    class ReferenceInput(Action):
-        model_config = ConfigDict(extra="forbid")
-        path: str
-        lines: list[int] | None = None
-        key: str | None = None
-
-    return make_tool("read_reference", "Read indexed source/API/knowledge. Paths begin source/ (relative to bot/), "
-        "api/ or knowledge/. Text: lines=[start,end], 1-based; defaults to [1,120], at most 120 lines per read. "
-        "JSON: key selects an entry with dot-separated keys; omit key to list entry names. "
-        "Use lines for text and key for JSON. Read-only.", function, ReferenceInput)
-
-
-def freeze_context(project, directory, experiences):
+def freeze_context(project, directory):
     """Freeze reference inputs once so later queries retain stable provenance."""
     directory = Path(directory)
     shutil.copytree(Path(project) / "knowledge", directory / "knowledge")
@@ -69,13 +20,13 @@ def freeze_context(project, directory, experiences):
             target = directory / "api" / path.relative_to(api_root)
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(path, target)
-    write_json(directory / "memory.json", experiences)
 
 
 class Retriever:
-    def __init__(self, version, context, max_chars=16000, *, analyses=(), max_items=40):
+    def __init__(self, version, context, max_chars=16000, *, analyses=(), max_items=40, memory_path=None):
         """Bind static batch reports and one parent snapshot with frozen references."""
         self.context, self.max_chars = project_path(context), max_chars
+        self.memory_path = project_path(memory_path) if memory_path is not None else None
         self.roots = dict(source=project_path(version["source_root"]) / "bot",
                           knowledge=self.context / "knowledge", api=self.context / "api")
         self.max_items = max_items
@@ -83,12 +34,6 @@ class Retriever:
         if any(batch["purpose"] == "holdout" for batch in analyses):
             raise ValueError("Holdout is unavailable to the development Retriever")
         self.records = {}
-
-    def index(self):
-        """Expose names only; reference catalogues are retrieved on demand."""
-        return dict({kind: sorted(f"{kind}/{path.relative_to(root).as_posix()}" for path in source_paths(root))
-                     for kind, root in self.roots.items()},
-                    memory_count=len(read_json(self.context / "memory.json")))
 
     def _records(self, report):
         """Load original records lazily; static analysis queries need no raw-log cache."""
@@ -114,89 +59,128 @@ class Retriever:
         window = filters.get("time", [0, float("inf")])
         if len(window) != 2 or not all(isinstance(n, (int, float)) for n in window) or window[0] > window[1]:
             raise ValueError("time must be [start_second, end_second]")
-        coverage = {i: batch["runs"][i]["coverage"] for i in ids}
+        reports = [(run_id, batch["runs"][run_id]) for run_id in ids]
+        coverage = {run_id: self._coverage(report) for run_id, report in reports}
         if kind == "compare":
             reference = self.batches[filters["reference_batch"]]
-            coverage.update({rid: r["coverage"] for rid, r in reference["runs"].items()})
+            coverage.update({rid: self._coverage(r) for rid, r in reference["runs"].items()})
+            compared = [(batch_id, run_id, report) for run_id, report in reports]
+            compared.extend((reference["batch_id"], rid, report) for rid, report in reference["runs"].items())
+            items = self._compare(compared, window, filters)
+        else:
+            items = self._log_items(kind, reports, filters)
 
-        def items():
-            """Yield matching rows without copying an entire raw result before pagination."""
-            for run_id in ids:
-                report = batch["runs"][run_id]
-                if kind == "overview":
-                    records = self._records(report)
-                    names = list(report["metrics"]) if detail == "raw" else [
-                        "minerals", "vespene", "workers", "idle_workers", "supply_left", "supply_block_ratio", "army_supply"]
-                    yield run_id, dict(conditions=report["conditions"], outcome=report["outcome"],
-                        metrics={n: metric_summary(n, report["metrics"].get(n, []), window) for n in names},
-                        metric_names=sorted(report["metrics"]),
-                        modules=report["modules"] if detail == "raw" else dict(
-                            count=len(report["modules"]), exceptions=sum(m["exceptions"] for m in report["modules"].values())),
-                        actions=report["actions"],
-                        events=report["events"][:10] if detail == "raw" else dict(Counter(
-                            e["kind"] for e in report["events"] if e["start"] <= window[1] and e["end"] >= window[0])),
-                        source_refs=([records[0]["source_ref"], records[-1]["source_ref"]]
-                                     if records else []))
-                elif kind == "metrics":
-                    names = filters.get("names", list(report["metrics"]))
-                    for name in names:
-                        rows = [r for r in report["metrics"].get(name, []) if window[0] <= r["time"] <= window[1]]
-                        yield run_id, dict(name=name, statistics=metric_summary(name, rows),
-                            allowed_statistics=metric_statistics(name),
-                            source_refs=[ref for row in rows for ref in row.get("source_refs", [])],
-                            missing_reason=None if rows else "Metric unavailable or no samples in window")
-                    if detail == "raw":
-                        for name in names:
-                            for row in report["metrics"].get(name, []):
-                                if window[0] <= row["time"] <= window[1]:
-                                    yield run_id, dict(row, name=name)
-                elif kind == "events":
-                    for event in report["events"]:
-                        if (event["start"] <= window[1] and event["end"] >= window[0]
-                                and (not filters.get("types") or event["kind"] in filters["types"])):
-                            yield run_id, event
-                elif kind == "trace":
-                    for row in self._trace(report, window, filters):
-                        yield run_id, row
-                elif kind == "compare":
-                    names = filters.get("names", list(report["metrics"]))
-                    yield run_id, dict(conditions=report["conditions"],
-                        metrics={n: metric_summary(n, report["metrics"].get(n, []), window) for n in names},
-                        modules=report["modules"], events=dict(Counter(e["kind"] for e in report["events"])),
-                        reference={rid: dict(conditions=r["conditions"],
-                            metrics={n: metric_summary(n, r["metrics"].get(n, []), window) for n in names},
-                            modules=r["modules"], events=dict(Counter(e["kind"] for e in r["events"])))
-                            for rid, r in reference["runs"].items()},
-                        source_refs=[row["source_ref"] for row in self._records(report) if row["event"] == "state"] +
-                                    [row["source_ref"] for rid in reference["runs"] for row in self._records(reference["runs"][rid])
-                                     if row["event"] == "state"])
         offset = filters.get("offset", 0)
         if not isinstance(offset, int) or offset < 0:
             raise ValueError("offset must be nonnegative")
-        kept, chars, truncated = [], 0, False
-        for index, (run_id, row) in enumerate(items()):
+        return self._paginate(items, coverage, offset)
+
+    def _coverage(self, report):
+        """Keep whole-run coverage and explicit integrity warnings, not repeated boilerplate."""
+        coverage = report["coverage"]
+        result = {key: coverage[key] for key in ("duration_seconds", "integrity", "sample_ratio")}
+        for key in ("problems", "unattributed_deaths"):
+            if coverage.get(key):
+                result[key] = coverage[key]
+        return result
+
+    def _log_items(self, kind, reports, filters):
+        """Dispatch fixed query kinds and attach each row's run identity lazily."""
+        window = filters.get("time", [0, float("inf")])
+        detail = filters.get("detail", "summary")
+        for run_id, report in reports:
+            if kind == "overview":
+                rows = self._overview(report, window, detail)
+            elif kind == "metrics":
+                names = filters.get("names", list(report["metrics"]))
+                rows = self._metrics(report, window, names, detail)
+            elif kind == "events":
+                rows = self._events(report, window, filters.get("types"))
+            elif kind == "trace":
+                rows = self._trace(report, window, filters)
+            for row in rows:
+                yield dict(row, run_id=run_id)
+
+    def _paginate(self, items, coverage, offset):
+        """Bound query output without materializing all matching raw records."""
+        kept, chars, has_more = [], 0, False
+        for index, row in enumerate(items):
             if index < offset:
                 continue
             if len(kept) == self.max_items:
-                truncated = True
+                has_more = True
                 break
-            item = compact_refs(dict(row, run_id=run_id))
+            item = compact_refs(row)
             size = len(json.dumps(item, ensure_ascii=False))
             if size > self.max_chars:
                 item = {key: item[key] for key in ("run_id", "event", "frame", "kind", "start", "end",
-                                                  "name", "call_id", "request_id", "status", "source_ref", "source_refs")
+                                                  "name", "batch_id", "call_id", "request_id", "status", "source_ref", "source_refs",
+                                                  "source_ref_count")
                         if key in item}
-                item.update(detail_omitted=True, hint="Narrow time/runs/names or retrieve the source record")
+                item.update(detail_omitted=True, hint="Narrow runs/time or use kind-specific filters to request less data")
                 size = len(json.dumps(item, ensure_ascii=False))
             if chars + size > self.max_chars:
-                truncated = True
+                has_more = True
                 break
             kept.append(item)
             chars += size
-        return dict(items=kept, source_refs=sorted(set(refs(kept))), coverage=coverage,
-                    truncated=truncated or any(i.get("detail_omitted") for i in kept),
-                    missing_reason=None if kept else "No matching data or item exceeds output budget",
-                    next_offset=offset + len(kept) if truncated and kept else None)
+        result = dict(items=kept, coverage=coverage)
+        if has_more and kept:
+            result["next_offset"] = offset + len(kept)
+        if any(i.get("detail_omitted") for i in kept) or (has_more and not kept):
+            result["truncated"] = True
+        if not kept:
+            result["reason"] = "Result exceeds output limit; narrow the query" if has_more else "No matching data"
+        return result
+
+    def _overview(self, report, window, detail):
+        """Yield overview rows within the requested scope."""
+        names = list(report["metrics"]) if detail == "raw" else [
+            "minerals", "vespene", "workers", "idle_workers", "supply_left", "supply_block_ratio", "army_supply"]
+        item = dict(**report["conditions"],
+            outcome=report["outcome"].get("outcome"), termination=report["outcome"].get("termination"),
+            execution_status=report["outcome"].get("execution_status"),
+            metrics={n: metric_summary(n, report["metrics"].get(n, []), window) for n in names},
+            metric_names=sorted(report["metrics"]),
+            module_exceptions=sum(m["exceptions"] for m in report["modules"].values()),
+            events=dict(Counter(e["kind"] for e in report["events"] if e["start"] <= window[1] and e["end"] >= window[0])))
+        if detail == "raw":
+            item.update(modules=report["modules"], actions=report["actions"], result=report["outcome"])
+        yield item
+
+    def _metrics(self, report, window, names, detail):
+        """Yield metrics rows within the requested scope."""
+        for name in names:
+            rows = [r for r in report["metrics"].get(name, []) if window[0] <= r["time"] <= window[1]]
+            item = dict(name=name, statistics=metric_summary(name, rows),
+                        source_refs=[ref for row in rows for ref in row.get("source_refs", [])])
+            if not rows:
+                item["reason"] = report["coverage"]["missing_metrics"].get(name, "Metric unavailable or no samples in window")
+            yield item
+        if detail == "raw":
+            for name in names:
+                for row in report["metrics"].get(name, []):
+                    if window[0] <= row["time"] <= window[1]:
+                        yield dict(row, name=name)
+
+    def _events(self, report, window, types):
+        """Yield events rows within the requested scope."""
+        for event in report["events"]:
+            if (event["start"] <= window[1] and event["end"] >= window[0]
+                    and (not types or event["kind"] in types)):
+                yield event
+
+    def _compare(self, reports, window, filters):
+        """Return each side once, with explicit batch identity and no assumed run pairing."""
+        names = filters.get("names", sorted({name for _, _, report in reports for name in report["metrics"]}))
+        for batch_id, run_id, report in reports:
+            item = dict(batch_id=batch_id, run_id=run_id, **report["conditions"],
+                metrics={name: metric_summary(name, report["metrics"].get(name, []), window) for name in names},
+                events=dict(Counter(e["kind"] for e in report["events"])),
+                module_exceptions=sum(m["exceptions"] for m in report["modules"].values()))
+            if filters.get("detail") == "raw":
+                item["modules"] = report["modules"]
+            yield item
 
     def _trace(self, report, window, filters):
         """Follow native call ancestry and request histories, including later confirmations."""
@@ -242,21 +226,27 @@ class Retriever:
         target = (root / relative).resolve()
         if not target.is_relative_to(root) or not target.is_file() or target.suffix not in {".py", ".md", ".json"}:
             raise ValueError("Reference path exceeds scope or is unavailable")
-        raw = target.read_bytes()
-        ref = f"{kind}:{hashlib.sha256(raw).hexdigest()}:{relative}"
         if target.suffix == ".json":
             if lines is not None:
                 raise ValueError("Use key for JSON entries; lines is for text files")
-            value = json.loads(raw)
-            if key is None:
-                item = dict(path=path, keys=list(value), source_ref=ref)
-            else:
-                for part in key.split("."):
-                    value = value[part]
-                item = dict(path=path, key=key, value=value, source_ref=ref + ":" + key)
-            return self._reference_result([item])
+            return self._read_json_reference(path, target.read_bytes(), key)
         if key is not None:
             raise ValueError("Use lines for text files; key is for JSON entries")
+        return self._read_text_reference(path, target, lines)
+
+    def _read_json_reference(self, path, raw, key):
+        """List JSON entry names or read one dot-separated entry."""
+        value = json.loads(raw)
+        if key is None:
+            item = dict(path=path, keys=list(value))
+        else:
+            for part in key.split("."):
+                value = value[part]
+            item = dict(path=path, key=key, value=value)
+        return self._reference_result(item)
+
+    def _read_text_reference(self, path, target, lines):
+        """Read at most 120 lines with the SDK file reader."""
         lines = [1, 120] if lines is None else lines
         if len(lines) != 2 or not all(isinstance(n, int) for n in lines) or not 1 <= lines[0] <= lines[1]:
             raise ValueError("lines must be [start_line, end_line], starting at 1")
@@ -270,39 +260,36 @@ class Retriever:
         count = end - start + 1
         clipped = len(source) > count
         if not source:
-            return self._reference_result([])
+            return dict(path=path, reason="No text in the requested line range")
         end = start + min(len(source), count) - 1
-        item = dict(path=path, start_line=start, end_line=end,
-                    source="\n".join(source[:count]), source_ref=f"{ref}:{start}-{end}")
-        return self._reference_result([item], clipped)
+        item = dict(path=path, start_line=start, end_line=end, source="\n".join(source[:count]))
+        if clipped:
+            item["next_line"] = end + 1
+        return self._reference_result(item)
 
     def query_memory(self, text=""):
         """Match text against the experiences frozen for this investigation."""
-        values = read_json(self.context / "memory.json")
-        return self._reference_result([dict(v, source_ref=f"memory:{v['iteration_id']}") for v in values
-            if not text or text.casefold() in json.dumps(v, ensure_ascii=False).casefold()])
-
-    def _reference_result(self, items, clipped=False):
-        """Bound reference output and retain its source locations."""
+        if self.memory_path is None:
+            raise ValueError("Memory requires an explicit frozen iteration path")
         kept, size = [], 0
-        for item in items:
-            length = len(json.dumps(item, ensure_ascii=False))
+        for value in read_json(self.memory_path):
+            serialized = json.dumps(value, ensure_ascii=False)
+            if text and text.casefold() not in serialized.casefold():
+                continue
+            length = len(serialized)
             if size + length > self.max_chars:
-                break
-            kept.append(item)
+                return dict(items=kept, truncated=True, reason="Matching experiences exceed output limit; narrow text, e.g. by iteration_id")
+            kept.append(value)
             size += length
-        return dict(items=kept, source_refs=[i["source_ref"] for i in kept],
-                    coverage={"scope": "frozen references, not match observations"},
-                    truncated=clipped or len(kept) < len(items), missing_reason=None if kept else "No match or item exceeds budget")
+        return dict(items=kept) if kept else dict(items=[], reason="No matching experiences")
 
-
-def symbols(node, prefix=""):
-    """Yield qualified Python class/function names without importing candidate code."""
-    for child in getattr(node, "body", []):
-        if isinstance(child, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
-            name = prefix + child.name
-            yield name, child
-            yield from symbols(child, name + ".")
+    def _reference_result(self, item):
+        """Keep a readable location when reference content exceeds the response limit."""
+        if len(json.dumps(item, ensure_ascii=False)) <= self.max_chars:
+            return item
+        result = {key: item[key] for key in ("path", "key", "start_line", "end_line") if key in item}
+        result.update(truncated=True, reason="Content exceeds output limit; request fewer lines or a smaller JSON key")
+        return result
 
 
 def compact_refs(value):
@@ -318,20 +305,3 @@ def compact_refs(value):
         if len(references) > 3:
             result["source_ref_count"] = len(references)
     return result
-
-
-
-def refs(value):
-    """Extract only source references actually present in a returned object."""
-    if isinstance(value, dict):
-        for key, item in value.items():
-            if key == "source_ref":
-                yield item
-            elif key == "source_refs":
-                yield from item
-            else:
-                yield from refs(item)
-    elif isinstance(value, list):
-        for item in value:
-            yield from refs(item)
-

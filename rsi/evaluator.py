@@ -1,154 +1,98 @@
-"""Fixed parent/candidate gate with textual verification and optional explanatory checks."""
+"""Compare one candidate batch with the retained parent batch."""
 import json
-from math import sqrt
-from statistics import NormalDist, mean
+from statistics import mean
 
-from .analyzer import EVENT_KINDS, metric_statistics, statistics
-
-
-def specialist_job(diagnosis, diff, max_checks):
-    """Request optional supplementary checks before any candidate outcomes are available."""
-    return dict(role="evaluation_plan", prompt="""Return ONLY a JSON array of supplementary checks for this patch.
-No evaluation games have been run. Use the natural-language verification advice to suggest measurable checks; do not change acceptance thresholds.
-Use only existing Analyzer metrics/events; no shell or arbitrary code execution is available.
-Each check: {kind:metric/event,name,statistic:mean/min/max/first/last/count/first_time/duration,
-time:[start,end] seconds,direction:increase/decrease/stable,role:improvement/regression,
-where:{optional event detail keys such as type/facility/reason}}. Return [] if unnecessary.
-These checks explain effects; the fixed win-rate gate alone decides promotion.
-""" + json.dumps(dict(proposal=diagnosis["conclusion"], diff=diff[:20000], max_checks=max_checks), ensure_ascii=False))
+from .analyzer import metric_summary
 
 
-def parse_specialist(value, maximum):
-    """Validate optional pre-run checks; never let a model replace the fixed evaluation plan."""
-    if value.startswith("```"):
-        value = "\n".join(value.splitlines()[1:-1])
-    checks = json.loads(value)
-    if not isinstance(checks, list) or len(checks) > maximum:
-        raise ValueError("Invalid specialist check list")
-    for check in checks:
-        validate_effect(check)
-    return checks
+MIN_COVERAGE = 0.95
+MIN_METRIC_IMPROVEMENT = 0.05
+MIN_IMPROVED_FRACTION = 0.6
+METRICS = (
+    dict(name="combat_value", statistic="last"),
+    dict(name="trade_efficiency", statistic="last"),
+    dict(name="army_value", statistic="mean"),
+    dict(name="army_investment", statistic="last"),
+    dict(name="resource_collection_rate", statistic="last"),
+)
 
 
-def freeze_plan(config, diagnosis, supplementary=None):
-    """Freeze fixed rules, textual verification advice and optional quantitative checks."""
-    return dict(rules=config, verification=diagnosis["conclusion"]["verification"],
-                supplementary=supplementary or [],
-                note="Supplementary checks are explanatory; promotion rules remain fixed.")
+def _condition_key(run):
+    """Use the same condition ordering for validation and metric comparison."""
+    return json.dumps(run["conditions"], sort_keys=True)
 
 
-def effect_value(report, effect):
-    """Calculate one declared statistic; insufficient temporal coverage yields null."""
-    window = effect["time"]
-    coverage = report["coverage"]
-    if coverage["integrity"] != "complete" or coverage["duration_seconds"] + 2 < window[1]:
-        return None
-    if effect["kind"] == "metric":
-        if effect["statistic"] not in metric_statistics(effect["name"]):
-            return None
-        rows = [r for r in report["metrics"].get(effect["name"], []) if window[0] <= r["time"] <= window[1]]
-        if not rows and effect["statistic"] == "count" and report["metrics"].get(effect["name"]):
-            return 0
-        return statistics(rows).get(effect["statistic"]) if rows else None
-    if effect["name"] not in EVENT_KINDS:
-        return None
-    events = [e for e in report["events"] if e["kind"] == effect["name"]
-              and e["start"] <= window[1] and e["end"] >= window[0]
-              and all(e["details"].get(k) == v for k, v in effect.get("where", {}).items())]
-    if effect["statistic"] == "count":
-        return len(events)
-    if effect["statistic"] == "duration":
-        return sum(max(0, min(window[1], e["end"]) - max(window[0], e["start"])) for e in events)
-    return min((e["start"] for e in events), default=None)
+def evidence_problem(parent, candidate):
+    """Require complete outcomes under the same conditions, independent of run order."""
+    parent_runs, candidate_runs = list(parent["runs"].values()), list(candidate["runs"].values())
+    if not parent_runs or len(parent_runs) != len(candidate_runs):
+        return "Incomplete match set"
+    if (len({_condition_key(run) for run in parent_runs}) != len(parent_runs)
+            or len({_condition_key(run) for run in candidate_runs}) != len(candidate_runs)):
+        return "Duplicate match conditions"
+    for parent_run, candidate_run in zip(sorted(parent_runs, key=_condition_key),
+                                         sorted(candidate_runs, key=_condition_key)):
+        if parent_run["conditions"] != candidate_run["conditions"]:
+            return "Parent/candidate conditions differ"
+        if parent_run["environment"] != candidate_run["environment"]:
+            return "Map data, environment or game-time limit changed between versions"
+    for runs, allow_bot_error in ((parent_runs, False), (candidate_runs, True)):
+        for run in runs:
+            if allow_bot_error and run["outcome"].get("execution_status") == "bot_error":
+                continue
+            if run["outcome"].get("execution_status") != "normal" or run["coverage"]["integrity"] != "complete":
+                return "Execution or log integrity is incomplete"
+            if run["outcome"].get("outcome") not in {"win", "loss", "draw"}:
+                return "Match outcome is unavailable"
+            if (run["coverage"]["sample_ratio"] or 0) < MIN_COVERAGE:
+                return "Sampling coverage is below the fixed minimum"
+    if any(run["outcome"].get("execution_status") == "bot_error" for run in candidate_runs):
+        return "Candidate Bot execution failed"
+    return None
 
 
-def check_effects(parent, candidate, effects):
-    """Compare declared effects over paired runs; retain missing observations and per-run values."""
-    output = []
-    for effect in effects:
-        p = [effect_value(r, effect) for r in parent["runs"].values()]
-        c = [effect_value(r, effect) for r in candidate["runs"].values()]
-        delta = mean(c) - mean(p) if p and len(p) == len(c) and all(v is not None for v in p + c) else None
-        if delta is None:
-            result = "missing"
-        elif effect["direction"] == "stable":
-            result = "met" if delta == 0 else "not_met"
-        else:
-            signed = delta if effect["direction"] == "increase" else -delta
-            result = "met" if (signed > 0 if effect["role"] == "improvement" else signed >= 0) else "not_met"
-        output.append(dict(effect=effect, parent=p, candidate=c, difference=delta, result=result))
-    return output
-
-
-def wilson(successes, total, alpha):
-    """Compute a binomial Wilson interval without assuming identical paired trajectories."""
-    z = NormalDist().inv_cdf(1 - alpha / 2)
-    p, divisor = successes / total, 1 + z * z / total
-    center = (p + z * z / (2 * total)) / divisor
-    radius = z * sqrt(p * (1 - p) / total + z * z / (4 * total * total)) / divisor
-    return max(0, center - radius), min(1, center + radius)
-
-
-def evaluate(parent, candidate, plan):
-    """Decide accept/reject/inconclusive using only the frozen plan and complete fixed data."""
-    rules = plan["rules"]
-    p, c = list(parent["runs"].values()), list(candidate["runs"].values())
-    report = dict(decision="inconclusive", reason="Insufficient fixed evidence", verification=plan["verification"],
-                  supplementary=check_effects(parent, candidate, plan["supplementary"]),
+def evaluate(parent, candidate):
+    """Accept a win-rate gain, or enough percentage improvements at equal win rate."""
+    report = dict(decision="reject", reason="No configured improvement", comparable=False,
+                  rules=dict(min_coverage=MIN_COVERAGE, min_metric_improvement=MIN_METRIC_IMPROVEMENT,
+                             min_improved_fraction=MIN_IMPROVED_FRACTION, metrics=METRICS),
                   parent_batch=parent["batch_id"], candidate_batch=candidate["batch_id"])
-    if any(r["outcome"].get("execution_status") == "bot_error" for r in c):
-        return dict(report, decision="reject", reason="Candidate Bot execution failed")
-    if len(p) != len(c) or len(p) != len(rules["matches"]) or not p:
-        return dict(report, reason="Incomplete fixed match set")
-    if any(a["conditions"] != b["conditions"] for a, b in zip(p, c)):
-        return dict(report, reason="Parent/candidate conditions are not paired")
-    if any(a["environment"] != b["environment"] for a, b in zip(p, c)):
-        return dict(report, reason="Map data, environment or game-time limit changed between versions")
-    for run in p + c:
-        if run["outcome"].get("execution_status") != "normal" or run["coverage"]["integrity"] != "complete":
-            return dict(report, reason="Execution or log integrity is incomplete")
-        if (run["coverage"]["sample_ratio"] or 0) < rules["min_coverage"]:
-            return dict(report, reason="Sampling coverage is below the fixed minimum")
-        if rules["time_limit_score"] == "exclude" and run["outcome"]["termination"] == "time_limit":
-            return dict(report, reason="Excluded time-limit run leaves the fixed set incomplete")
-    n = len(p)
-    wins_p = sum(r["outcome"].get("outcome") == "win" for r in p)
-    wins_c = sum(r["outcome"].get("outcome") == "win" for r in c)
-    pl, pu = wilson(wins_p, n, rules["alpha"] / 2)
-    cl, cu = wilson(wins_c, n, rules["alpha"] / 2)
-    report["comparison"] = dict(n_per_version=n, parent_win_fraction=wins_p / n,
-        candidate_win_fraction=wins_c / n, difference=(wins_c - wins_p) / n,
-        difference_interval=[cl - pu, cu - pl], method="Bonferroni-adjusted Wilson difference; conservative approximation",
-        draw_policy="nonwin", time_limit_policy=rules["time_limit_score"])
-    if not rules["formal"] or n < rules["min_samples"]:
-        return dict(report, reason="Functional comparison or fewer than the predeclared minimum samples")
-    if cu - pl < 0:
-        return dict(report, decision="reject", reason="Fixed comparison indicates overall regression")
-    if cl - pu > rules["min_improvement"]:
-        return dict(report, decision="accept", reason="Overall improvement satisfies the fixed gate")
+    problem = evidence_problem(parent, candidate)
+    if problem:
+        return dict(report, reason=problem)
+    report["comparable"] = True
+    parent_runs, candidate_runs = [sorted(batch["runs"].values(), key=_condition_key)
+                                   for batch in (parent, candidate)]
+    shared_ends = [min(parent_run["coverage"]["duration_seconds"], candidate_run["coverage"]["duration_seconds"])
+                   for parent_run, candidate_run in zip(parent_runs, candidate_runs)]
+    parent_win_rate, candidate_win_rate = [
+        mean(run["outcome"]["outcome"] == "win" and run["outcome"].get("termination") != "time_limit"
+             for run in runs)
+        for runs in (parent_runs, candidate_runs)]
+    report["comparison"] = dict(n_per_version=len(parent_runs), parent_win_fraction=parent_win_rate,
+                                candidate_win_fraction=candidate_win_rate,
+                                difference=candidate_win_rate - parent_win_rate, draw_policy="nonwin")
+    metrics = []
+    for rule in METRICS:
+        values = [[_metric_value(run, rule, end) for run, end in zip(runs, shared_ends)]
+                  for runs in (parent_runs, candidate_runs)]
+        parent_value, candidate_value = [mean(samples) if all(value is not None for value in samples) else None
+                                         for samples in values]
+        gain = None if parent_value is None or candidate_value is None else candidate_value - parent_value
+        ratio = gain / abs(parent_value) if gain is not None and parent_value else None
+        metrics.append(dict(rule=rule, parent=parent_value, candidate=candidate_value, improvement_ratio=ratio,
+            improved=gain is not None and gain > 0 and (parent_value == 0 or ratio + 1e-12 >= MIN_METRIC_IMPROVEMENT)))
+    report["metrics"] = metrics
+    report["improved_fraction"] = sum(m["improved"] for m in metrics) / len(metrics) if metrics else 0
+    if candidate_win_rate > parent_win_rate:
+        return dict(report, decision="accept", reason="Win rate improved")
+    if candidate_win_rate == parent_win_rate and report["improved_fraction"] + 1e-12 >= MIN_IMPROVED_FRACTION:
+        return dict(report, decision="accept", reason="Win rate unchanged; configured core metrics improved")
     return report
 
 
-def validate_effect(effect):
-    """Require an executable metric/event expectation and an explicit time window."""
-    if effect.get("kind") not in {"metric", "event"} or not effect.get("name"):
-        raise ValueError("Effect requires kind=metric/event and name")
-    if effect["kind"] == "event" and effect["name"] not in EVENT_KINDS:
-        raise ValueError("Unsupported effect event name")
-    if effect.get("statistic") not in {"mean", "min", "max", "first", "last", "count", "first_time", "duration"}:
-        raise ValueError("Unsupported effect statistic")
-    if effect["kind"] == "event" and effect["statistic"] not in {"count", "first_time", "duration"}:
-        raise ValueError("Event effects support count, first_time and duration")
-    if effect["kind"] == "metric" and effect["statistic"] == "duration":
-        raise ValueError("Metric effects do not support duration")
-    if effect["kind"] == "metric" and effect["statistic"] not in metric_statistics(effect["name"]):
-        raise ValueError(f"Unsupported statistic for {effect['name']}; allowed: {metric_statistics(effect['name'])}")
-    window = effect.get("time", [])
-    if len(window) != 2 or not all(isinstance(t, (int, float)) for t in window) or not 0 <= window[0] < window[1]:
-        raise ValueError("Effect time must be [start, end] in seconds")
-    if effect.get("direction") not in {"increase", "decrease", "stable"}:
-        raise ValueError("Effect direction must be increase/decrease/stable")
-    if effect.get("role") not in {"improvement", "regression"}:
-        raise ValueError("Effect role must be improvement/regression")
-    if not isinstance(effect.get("where", {}), dict):
-        raise ValueError("Effect where must be a dictionary of event details")
+def _metric_value(run, rule, end):
+    """Read a statistic over the shared game-time window, clipping boundary weights."""
+    rows = [dict(row, seconds=min(row.get("seconds", 0), end - row["time"]))
+            for row in run["metrics"].get(rule["name"], []) if row["time"] <= end]
+    return metric_summary(rule["name"], rows).get(rule["statistic"]) if rows else None

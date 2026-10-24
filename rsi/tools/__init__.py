@@ -1,1 +1,1 @@
-"""Deterministic execution, retrieval and version-management tools."""
+"""External execution, SDK adapters, candidate checks and Bot version management."""

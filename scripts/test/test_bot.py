@@ -12,6 +12,8 @@ from sc2.ids.ability_id import AbilityId as A
 from sc2.ids.unit_typeid import UnitTypeId as U
 from sc2.ids.upgrade_id import UpgradeId
 from sc2.position import Point2
+from sc2.score import ScoreDetails
+from s2clientprotocol import score_pb2
 
 from bot.core.actions import Actions
 from bot.core.frame import Frame
@@ -90,7 +92,7 @@ class Unit(NS):
 
 def make_frame(*own, minerals=150, gas=300, supply=12):
     """Build offline game/services with real enums and commands but mocked engine queries."""
-    game = NS(state=NS(game_loop=0, action_errors=[]), minerals=minerals, vespene=gas,
+    game = NS(state=NS(game_loop=0, action_errors=[], score=ScoreDetails(score_pb2.Score())), minerals=minerals, vespene=gas,
               supply_left=supply, supply_used=15-supply, supply_cap=15)
     game.units = Units(u for u in own if not u.is_structure)
     game.structures = Units(u for u in own if u.is_structure)
@@ -347,6 +349,11 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
         commands = []
         for enabled in (True, False):
             frame = make_frame(Unit(1))
+            score = score_pb2.Score()
+            score.score_details.killed_value_units = 500
+            score.score_details.killed_value_structures = 150
+            score.score_details.lost_minerals.army = 100
+            frame.game.state.score = ScoreDetails(score)
             with TemporaryDirectory() as directory:
                 logger = Logger(directory if enabled else None)
                 await frame.run(Request(1, target=Point2((20, 20))))
@@ -356,6 +363,10 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
                 if enabled:
                     rows = [json.loads(line) for line in (Path(directory)/"trace.jsonl").read_text().splitlines()]
                     call = next(row for row in rows if row["event"] == "module_call")
+                    state = next(row for row in rows if row["event"] == "state")
+                    self.assertEqual(state["score"]["killed_value_units"], 500)
+                    self.assertEqual(state["score"]["killed_value_structures"], 150)
+                    self.assertEqual(state["score"]["lost_minerals_army"], 100)
                     self.assertTrue(all(row["call_id"] == call["call_id"] for row in rows if row["event"] == "action"))
             commands.append([(c.ability, c.target) for c in frame.game.commands])
         self.assertEqual(commands[0], commands[1])
