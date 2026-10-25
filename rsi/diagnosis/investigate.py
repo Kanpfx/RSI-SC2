@@ -3,8 +3,8 @@ import ast
 
 from ..retriever import Retriever
 from ..analyzer import load_batch_analysis
-from ..tools.artifacts import project_path, write_json
-from ..tools.versions import editable
+from runner.artifacts import project_path, write_json
+from ..tools.validate import editable
 
 
 class Investigation:
@@ -12,7 +12,7 @@ class Investigation:
         """Load fixed evidence inputs; the conversation owns its research judgments."""
         self.job, self.directory = job, directory
         self.options = job["diagnosis"]
-        self.retriever = Retriever(job["parent"], job["context"], max_chars=24000,
+        self.retriever = Retriever(job["parent"]["source_root"], job["context"], max_chars=24000,
             analyses=[load_batch_analysis(path) for path in job["analyses"]], max_items=60,
             memory_path=job["memory"])
         self.state = dict(issue=None, hypotheses=[], queries=[], conclusion=None)
@@ -27,18 +27,18 @@ class Investigation:
         self._ensure_open()
         if issue is not None:
             if not issue.get("problem") or not issue.get("evidence"):
-                raise ValueError("Issue requires problem and evidence descriptions")
+                raise ValueError("Provide issue.problem and nonempty issue.evidence")
             if self.state["queries"] and self.state["issue"] and issue["problem"] != self.state["issue"]["problem"]:
                 raise ValueError("Problem is fixed after the first query")
             self.state["issue"] = issue
         if hypotheses:
             existing = {hypothesis["id"]: hypothesis for hypothesis in self.state["hypotheses"]}
             if existing and not reason:
-                raise ValueError("Hypothesis revisions require a reason")
+                raise ValueError("Provide reason when adding or revising hypotheses")
             ids = {hypothesis["id"] for hypothesis in hypotheses}
             minimum = 2 if self.options["competing_hypotheses"] else 1
             if len(existing.keys() | ids) < minimum or len(ids) != len(hypotheses):
-                raise ValueError("Insufficient or duplicate hypotheses")
+                raise ValueError(f"Provide at least {minimum} hypotheses with unique IDs")
             for hypothesis in hypotheses:
                 if not all(hypothesis.get(key) for key in ("id", "explanation")) or not all(
                         hypothesis.get("predictions", {}).get(key) for key in ("support", "refute")):
@@ -62,11 +62,11 @@ class Investigation:
         """Apply one shared budget and record every log, reference or memory query."""
         self._ensure_open()
         if not self.state["issue"] or not self.state["hypotheses"]:
-            raise ValueError("Select an issue and predictions first")
+            raise ValueError("Call select_issue with an issue and hypotheses before querying")
         if self.options["query_policy"] == "fixed":
             raise ValueError("Fixed policy uses only the predeclared evidence pack")
         if tool == "query_logs" and not arguments.get("purpose"):
-            raise ValueError("Explain what the query should distinguish or clarify")
+            raise ValueError("Provide purpose: what should this query clarify?")
         if len(self.state["queries"]) >= self.options["max_queries"]:
             return dict(error=dict(code="query_budget_exhausted", message="Shared query budget exhausted; finish with conclude."))
         try:
@@ -98,13 +98,20 @@ class Investigation:
             self.state["reason"] = reason or "No actionable change proposed"
         else:
             if not self.state["issue"] or not self.state["hypotheses"]:
-                raise ValueError("Missing investigation")
+                raise ValueError("Call select_issue with an issue and hypotheses before concluding")
             if not all(conclusion.get(key) for key in ("change", "preserve", "verification", "code_targets")):
                 raise ValueError("Conclusion requires change, preserve, verification and code_targets")
             validate_targets(conclusion["code_targets"], self.job["parent"])
             self.state["conclusion"] = conclusion
         self.save()
         return {key: self.state[key] for key in ("conclusion", "reason") if key in self.state}
+
+    def result(self):
+        """Return the saved handoff, preserving explicit abstention after an unfinished investigation."""
+        if not self.state["conclusion"]:
+            self.state.setdefault("reason", "Session ended without an actionable conclusion")
+            self.save()
+        return self.state
 
     def save(self):
         """Persist the investigation after successful state transitions."""

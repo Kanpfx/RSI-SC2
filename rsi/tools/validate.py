@@ -5,8 +5,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .artifacts import project_path
-from .versions import editable, inventory, write_diff
+from runner.artifacts import project_path
+from runner.versions import inventory, write_diff
+
+
+def editable(name):
+    """Allow only Python business components; reject ambiguous relative paths."""
+    return (name.startswith(tuple(f"bot/components/{part}/" for part in
+                                 ("behaviors", "tasks", "tactics")))
+            and name.endswith(".py") and ".." not in name.split("/") and "\\" not in name)
 
 
 def validate(parent, candidate, timeout=30, *, patch_path=None):

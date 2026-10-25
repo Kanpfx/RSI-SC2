@@ -4,14 +4,14 @@ import math
 import os
 import subprocess
 import sys
-import time
 import traceback
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .artifacts import path_reference, project_path, read_json, write_json
-from .console import tool_progress, write_console
-from .matches import stop_process
+from runner.artifacts import path_reference, project_path, read_json, write_json
+from runner.console import write_console
+from .console import tool_progress
+from runner.processes import stop_process, wait_process
 
 
 def load_settings(project, settings):
@@ -65,21 +65,12 @@ def call_session(project, job, directory):
                                    env=dict(os.environ, PYTHONIOENCODING="utf-8"))
         try:
             # Relay only worker stdout; SDK diagnostics remain in stderr.txt.
-            deadline = time.monotonic() + job["model"]["wall_timeout"]
             with (directory / "stdout.txt").open(encoding="utf-8", errors="replace") as stream:
-                while True:
+                def relay():
+                    """Forward newly written progress while retaining the worker log."""
                     for line in stream:
                         write_console(line, end="")
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        raise subprocess.TimeoutExpired(process.args, job["model"]["wall_timeout"])
-                    try:
-                        process.wait(timeout=min(0.25, remaining))
-                        break
-                    except subprocess.TimeoutExpired:
-                        pass
-                for line in stream:
-                    write_console(line, end="")
+                wait_process(process, job["model"]["wall_timeout"], on_poll=relay)
         except subprocess.TimeoutExpired:
             stop_process(process)
             response = dict(status="error", reason="model_session_wall_timeout",
@@ -140,24 +131,14 @@ def _session_tools(job, investigation):
         from ..diagnosis.session import investigation_tools
         definitions = investigation_tools(investigation)
     elif job["role"] == "editor":
-        from openhands.tools.terminal import TerminalTool
-        from ..editor import candidate_editor
-        definitions = [candidate_editor(job["workspace"])]
-        if job.get("context"):
-            from ..retriever import Retriever
-            from .sdk import reference_tool
-            references = Retriever(dict(source_root=job["workspace"]), job["context"])
-            definitions.append(reference_tool(references.read_reference))
+        from ..editor import editor_tools
+        return editor_tools(job)
     else:
         definitions = []
     selected = []
     for definition in definitions:
         register_tool(definition.name, definition)
         selected.append(Tool(name=definition.name))
-    if job["role"] == "editor":
-        selected.append(Tool(name=TerminalTool.name, params=dict(env=dict(
-            PATH=str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", ""),
-            PYTHONPATH=str(Path(job["workspace"]).resolve()), PYTHONDONTWRITEBYTECODE="1"))))
     return selected
 
 
@@ -184,18 +165,6 @@ def _save_usage(llm, directory):
     return value
 
 
-def _session_value(conversation, investigation):
-    """Collect a structured diagnosis or the final reply of another session role."""
-    if investigation is None:
-        from openhands.sdk.conversation.response_utils import get_agent_final_response
-        return get_agent_final_response(list(conversation.state.events)).strip()
-    value = investigation.state
-    if not value["conclusion"]:
-        value.setdefault("reason", "Session ended without an actionable conclusion")
-        investigation.save()
-    return value
-
-
 def execute(job_path, llm_factory=None):
     """Worker entry; model transport can be injected for offline SDK verification."""
     os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
@@ -211,18 +180,13 @@ def execute(job_path, llm_factory=None):
         from openhands.sdk.conversation import ConversationExecutionStatus, LocalConversation
         from openhands.sdk.event.conversation_error import ConversationErrorEvent
         settings = job["model"]
-        prompt = job["prompt"]
+        parts = [job["prompt"]]
         if "task" in job:
-            prompt += "\nTask data (JSON):\n" + json.dumps(job["task"], ensure_ascii=False, indent=2)
+            parts.append("Task data (JSON):\n" + json.dumps(job["task"], ensure_ascii=False, separators=(",", ":")))
+        prompt = "\n\n".join(parts)
         if job["role"] == "diagnosis":
-            from ..diagnosis.investigate import Investigation
-            investigation = Investigation(job, directory)
-            if job["diagnosis"]["query_policy"] == "fixed":
-                from ..experiments import fixed_pack
-                pack = fixed_pack(investigation.retriever, job["batches"], job["diagnosis"]["max_queries"])
-                investigation.state["queries"].extend(pack)
-                investigation.save()
-                prompt += "\n\nPredeclared evidence pack (JSON query records):\n" + json.dumps(pack, ensure_ascii=False, indent=2)
+            from ..diagnosis.session import prepare_session
+            investigation, prompt = prepare_session(job, directory, prompt)
         selected = _session_tools(job, investigation)
         llm = llm_factory() if llm_factory else _create_llm(job)
         write_json(directory / "llm.json", llm.model_dump(mode="json", include={
@@ -255,7 +219,11 @@ def execute(job_path, llm_factory=None):
             raise RuntimeError(f"{conversation.state.execution_status.value}: {reason}")
         if (usage["tokens"] or 0) >= settings["max_total_tokens"]:
             raise ValueError("Model session token budget reached")
-        value = _session_value(conversation, investigation)
+        if investigation:
+            value = investigation.result()
+        else:
+            from openhands.sdk.conversation.response_utils import get_agent_final_response
+            value = get_agent_final_response(list(conversation.state.events)).strip()
         response = dict(status="ok", value=value, usage=usage)
     except Exception:
         response = dict(status="error", reason=traceback.format_exc(),

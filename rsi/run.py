@@ -3,33 +3,41 @@ import argparse
 import copy
 import json
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from .analyzer import Analyzer, metric_summary, save_batch_analysis
+from .analyzer import Analyzer, analyze_evidence, metric_summary
 from .diagnosis.session import make_job as diagnosis_job
 from .editor import make_job as editor_job
-from .evaluator import evaluate, evidence_problem
+from .evaluator import evaluate, batch_problem
 from .memory import record, search
-from .retriever import freeze_context
-from .tools.artifacts import path_reference, project_path, read_json, write_json
-from .tools.config import load_config, validate_config
-from .tools.console import error_summary, progress
+from .references import freeze_context
+from runner.artifacts import path_reference, project_path, read_json, write_json
+from .tools.config import load_config, role_settings, validate_config
+from runner.console import error_summary, progress
 from .tools.llm import call_session, load_settings, preflight
-from .tools.matches import MATCH_START_INTERVAL, run_batch
+from runner.matches import run_batch
 from .tools.validate import validate
-from .tools.versions import Versions
+from runner.versions import Versions
 
 
 def _load_models(project, config):
     """Resolve and preflight both roles once before collecting experiment evidence."""
-    shared = {k: v for k, v in config["model"].items() if k not in {"diagnosis", "editor"}}
-    settings = {role: load_settings(project, dict(shared, **config["model"][role]))
+    settings = {role: load_settings(project, role_settings(config["model"], role))
                 for role in ("diagnosis", "editor")}
     for model in settings.values():
         preflight(model)
     return settings
+
+
+@dataclass
+class IterationResult:
+    """A round report and the evidence needed to continue its version chain."""
+    report: dict
+    baseline: dict | None = None
+    candidate: dict | None = None
 
 
 class Run:
@@ -40,12 +48,12 @@ class Run:
         validate_config(self.config)
         self.root = Path(root) if root is not None else self.project / "runtime/rsi"
         self.versions = Versions(self.project, self.project / "runtime/rsi")
-        self.parent_data = self.candidate_data = None
         self.analyzer, self.model_settings = analyzer, model_settings
         self.started = time.monotonic()
         self.directory = self.root / "iterations" / (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ_") + uuid4().hex[:8])
         self.report = dict(iteration_id=self.directory.name, status="running", stage="prepare",
                            config=self.config, costs=dict(matches=0, sessions=[], wall_seconds=0), artifacts={})
+        self.outcome = IterationResult(self.report)
 
     def save(self, name, value):
         """Persist a stage artifact and update the small iteration report."""
@@ -90,22 +98,17 @@ class Run:
             raise RuntimeError("Match budget exhausted")
         self.report["costs"]["matches"] += count
         remaining = self.remaining()
-        remaining -= MATCH_START_INTERVAL * (count - 1)
-        if remaining < 1:
-            raise RuntimeError("Insufficient wall budget for staggered match starts")
-        conditions = [dict(self.config["matches"], seed=seed,
-                           wall_timeout=min(self.config["matches"]["wall_timeout"], int(remaining)))
-                      for seed in range(1, count + 1)]
+        conditions = [dict(self.config["matches"], seed=seed) for seed in range(1, count + 1)]
         name = purpose + "_" + uuid4().hex[:8]
         directory = self.directory / "batches" / name
         self.report["artifacts"][name] = path_reference(directory / "batch.json")
         self.checkpoint(name)
         progress(purpose, f"Starting {count} matches; parallel={count}")
         batch = run_batch(self.project, version, conditions, directory,
-                          purpose, self.config["parallel_matches"])
+                          purpose, self.config["parallel_matches"], wall_budget=remaining)
         progress(purpose, "Matches finished; analyzing logs")
-        analysis = self.analyzer.add_batch(batch, persist=False)
-        save_batch_analysis(directory / "analysis.json", analysis)
+        evidence = analyze_evidence(self.analyzer, batch, directory / "batch.json", directory / "analysis.json")
+        analysis = evidence["analysis"]
         self.report["artifacts"][name + "_analysis"] = path_reference(directory / "analysis.json")
         self.checkpoint(name + "_analysis")
         summary = analysis["summary"]
@@ -113,7 +116,7 @@ class Run:
         events = sorted(summary["event_counts"].items(), key=lambda item: item[1], reverse=True)[:3]
         progress(purpose, f"Outcomes: {outcomes}; main events: " +
                  (", ".join(f"{name}={count}" for name, count in events) or "none"))
-        return batch, analysis
+        return evidence
 
     def model(self, name, job):
         """Allocate remaining shared model budget and charge every completed/failed session."""
@@ -135,13 +138,13 @@ class Run:
         if job["role"] == "diagnosis":
             self.report["artifacts"]["diagnosis"] = path_reference(directory / "investigation.json")
         self.checkpoint(name)
-        progress(name, f"Model session started; timeout={settings['wall_timeout']:.0f}s")
+        progress(name, f"Session started; timeout={settings['wall_timeout']:.0f}s")
         response = call_session(self.project, job, directory)
         usage = response.get("usage", {})
         sessions.append(dict(name=name, **usage))
         self.checkpoint(name)
-        progress(name, f"Model session finished: status={response['status']} "
-                      f"tokens={usage.get('tokens')} cost={usage.get('cost')}")
+        progress(name, f"Session finished: status={response['status']}; "
+                      f"tokens={usage.get('tokens')}; cost={usage.get('cost')}")
         # Unknown usage after a failed worker cannot safely be treated as free.
         if response["status"] != "ok":
             raise RuntimeError(response["reason"])
@@ -159,7 +162,7 @@ class Run:
         self.checkpoint("finished")
         progress("iteration", f"Finished: {status}; {error_summary(reason)}; elapsed={time.monotonic() - self.started:.1f}s")
         progress("iteration", f"Report: {path_reference(self.directory / 'iteration.json')}")
-        return self.report
+        return self.outcome
 
     def _overview(self, analyses):
         """Save the same compact task data used by the diagnosis conversation."""
@@ -203,7 +206,7 @@ class Run:
         self.report["conditions"] = conditions[0] if conditions and all(c == conditions[0] for c in conditions) else {}
         context = self.root / "context"
         experiences = search(self.root, self.report["conditions"]) if self.config["diagnosis"]["use_memory"] else []
-        progress("diagnosis", f"Preparing inputs; memory_items={len(experiences)}")
+        progress("diagnosis", f"Preparing inputs; memory={len(experiences)}")
         memory_path = self.directory / "memory.json"
         write_json(memory_path, experiences)
         self.report["artifacts"]["memory"] = path_reference(memory_path)
@@ -258,17 +261,14 @@ class Run:
             self.checkpoint("prepare")
             progress("prepare", f"Parent: {parent['version'][:12]}")
             if baseline is None:
-                batch, analysis = self.batch(parent, "parent")
-                baseline = dict(batch=batch, analysis=analysis,
-                                analysis_path=self.report["artifacts"][batch["batch_id"] + "_analysis"],
-                                batch_path=path_reference(self.directory / "batches" / batch["batch_id"] / "batch.json"))
+                baseline = self.batch(parent, "parent")
             if baseline["batch"]["version"] != parent["version"]:
                 raise ValueError("Parent batch version mismatch")
-            self.parent_data = baseline
+            self.outcome.baseline = baseline
             batch, analysis = baseline["batch"], baseline["analysis"]
-            problem = evidence_problem(analysis, analysis)
+            problem = batch_problem(analysis)
             if problem:
-                return self.finish("error", "Parent batch unavailable: " + problem)
+                return self.finish("error", "Parent batch unavailable: " + problem["reason"])
             self.report["parent_batch"] = baseline["batch_path"]
             self.report["artifacts"][batch["batch_id"] + "_analysis"] = baseline["analysis_path"]
             overview = self._overview([analysis])
@@ -279,16 +279,15 @@ class Run:
             if not validation["passed"]:
                 return self.finish("reject", "Candidate static validation failed")
             self.report["candidate"] = child
-            candidate_batch, candidate_analysis = self.batch(child, "candidate")
-            self.candidate_data = dict(batch=candidate_batch, analysis=candidate_analysis,
-                analysis_path=self.report["artifacts"][candidate_batch["batch_id"] + "_analysis"],
-                batch_path=path_reference(self.directory / "batches" / candidate_batch["batch_id"] / "batch.json"))
-            self.report["candidate_batch"] = path_reference(self.directory / "batches" / candidate_batch["batch_id"] / "batch.json")
+            evidence = self.batch(child, "candidate")
+            self.outcome.candidate = evidence
+            self.report["candidate_batch"] = evidence["batch_path"]
+            candidate_analysis = evidence["analysis"]
             evaluation = evaluate(analysis, candidate_analysis)
             self.report["evaluation"] = evaluation
             self.save("evaluation", evaluation)
             progress("evaluation", f"Decision: {evaluation['decision']}; reason={evaluation['reason']}")
-            if not evaluation["comparable"] and evaluation["reason"] != "Candidate Bot execution failed":
+            if not evaluation["comparable"] and evaluation.get("code") != "candidate_bot_error":
                 return self.finish("error", evaluation["reason"])
             return self.finish(evaluation["decision"], evaluation["reason"])
         except KeyboardInterrupt:
@@ -342,23 +341,21 @@ def run_experiment(project, config, *, parent=None, rounds=1):
             context = root / "context"
             freeze_context(project, context)
             analyzer = Analyzer(context)
-            analysis = analyzer.add_batch(batch, persist=False)
             analysis_path = root / "batches" / batch["batch_id"] / "analysis.json"
-            save_batch_analysis(analysis_path, analysis)
-            baseline = dict(batch=batch, analysis=analysis, analysis_path=path_reference(analysis_path),
-                            batch_path=path_reference(path))
+            baseline = analyze_evidence(analyzer, batch, path, analysis_path)
         for number in range(1, rounds + 1):
             progress("experiment", f"Round {number}/{rounds}")
             run = Run(project, config, root=root, analyzer=analyzer, model_settings=model_settings)
-            result = run.execute(current, baseline)
+            outcome = run.execute(current, baseline)
+            result = outcome.report
             analyzer, model_settings = run.analyzer, run.model_settings
-            baseline = run.parent_data or baseline
+            baseline = outcome.baseline or baseline
             report["iterations"].append(dict(round=number, iteration_id=result["iteration_id"],
                 status=result["status"], reason=result["reason"], parent=result.get("parent"),
                 candidate=result.get("candidate"), costs=result["costs"],
                 report=path_reference(run.directory / "iteration.json")))
             if result["status"] == "accept":
-                current, baseline = result["candidate"], run.candidate_data
+                current, baseline = result["candidate"], outcome.candidate
             report["current_parent"] = current
             report["current_batch"] = baseline.get("batch_path") if baseline else None
             report["status"] = result["status"] if result["status"] in {"error", "interrupted"} else "running"

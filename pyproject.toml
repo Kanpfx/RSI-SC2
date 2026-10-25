@@ -16,4 +16,4 @@ dependencies = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["bot*", "rsi*"]
+include = ["bot*", "rsi*", "runner*"]

@@ -1,11 +1,15 @@
 """Short SC2 environment smoke; this is not the project strategy Bot."""
 import json
 import os
+import sys
 from pathlib import Path
 from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parents[2]
-CONFIG = json.loads((ROOT / "environment.json").read_text(encoding="utf-8"))
+sys.path.insert(0, str(ROOT))
+from runner.environment import load_environment
+
+CONFIG = load_environment(ROOT)
 os.environ["SC2PATH"] = CONFIG["sc2_path"]
 
 from sc2 import maps

@@ -10,7 +10,10 @@ import sys
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = json.loads((ROOT / "environment.json").read_text(encoding="utf-8"))
+sys.path.insert(0, str(ROOT))
+from runner.environment import load_environment
+
+CONFIG = load_environment(ROOT)
 
 
 def inspect_environment():

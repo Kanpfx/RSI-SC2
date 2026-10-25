@@ -1,34 +1,18 @@
 """Unified bounded queries over static analysis, raw traces and frozen references."""
-import importlib.util
 import json
-import shutil
 from collections import Counter
-from pathlib import Path
 
 from .analyzer import LOOPS, metric_summary, read_records
-from .tools.artifacts import project_path, read_json
-
-
-def freeze_context(project, directory):
-    """Freeze reference inputs once so later queries retain stable provenance."""
-    directory = Path(directory)
-    shutil.copytree(Path(project) / "knowledge", directory / "knowledge")
-    spec = importlib.util.find_spec("sc2")
-    if spec and spec.origin:
-        api_root = Path(spec.origin).parent
-        for path in api_root.rglob("*.py"):
-            target = directory / "api" / path.relative_to(api_root)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(path, target)
+from .references import References
+from runner.artifacts import project_path, read_json
 
 
 class Retriever:
-    def __init__(self, version, context, max_chars=16000, *, analyses=(), max_items=40, memory_path=None):
+    def __init__(self, source_root, context, max_chars=16000, *, analyses=(), max_items=40, memory_path=None):
         """Bind static batch reports and one parent snapshot with frozen references."""
         self.context, self.max_chars = project_path(context), max_chars
         self.memory_path = project_path(memory_path) if memory_path is not None else None
-        self.roots = dict(source=project_path(version["source_root"]) / "bot",
-                          knowledge=self.context / "knowledge", api=self.context / "api")
+        self.references = References(source_root, context, max_chars=max_chars)
         self.max_items = max_items
         self.batches = {batch["batch_id"]: batch for batch in analyses}
         if any(batch["purpose"] == "holdout" for batch in analyses):
@@ -55,10 +39,10 @@ class Retriever:
         batch = self.batches[batch_id]
         ids = list(batch["runs"]) if runs == "all" else runs
         if not isinstance(ids, list) or not set(ids) <= batch["runs"].keys():
-            raise ValueError("Invalid run scope")
+            raise ValueError('runs must be "all" or a list of known run IDs')
         window = filters.get("time", [0, float("inf")])
         if len(window) != 2 or not all(isinstance(n, (int, float)) for n in window) or window[0] > window[1]:
-            raise ValueError("time must be [start_second, end_second]")
+            raise ValueError("time must be [start_second, end_second] with start <= end")
         reports = [(run_id, batch["runs"][run_id]) for run_id in ids]
         coverage = {run_id: self._coverage(report) for run_id, report in reports}
         if kind == "compare":
@@ -72,7 +56,7 @@ class Retriever:
 
         offset = filters.get("offset", 0)
         if not isinstance(offset, int) or offset < 0:
-            raise ValueError("offset must be nonnegative")
+            raise ValueError("offset must be a nonnegative integer")
         return self._paginate(items, coverage, offset)
 
     def _coverage(self, report):
@@ -218,54 +202,9 @@ class Retriever:
                 yield row
 
     def read_reference(self, path, lines=None, key=None):
-        """Read frozen text through the SDK or retrieve a JSON entry by key."""
-        kind, _, relative = path.partition("/")
-        if kind not in self.roots:
-            raise ValueError("Reference paths start with source/, api/ or knowledge/")
-        root = self.roots[kind].resolve()
-        target = (root / relative).resolve()
-        if not target.is_relative_to(root) or not target.is_file() or target.suffix not in {".py", ".md", ".json"}:
-            raise ValueError("Reference path exceeds scope or is unavailable")
-        if target.suffix == ".json":
-            if lines is not None:
-                raise ValueError("Use key for JSON entries; lines is for text files")
-            return self._read_json_reference(path, target.read_bytes(), key)
-        if key is not None:
-            raise ValueError("Use lines for text files; key is for JSON entries")
-        return self._read_text_reference(path, target, lines)
-
-    def _read_json_reference(self, path, raw, key):
-        """List JSON entry names or read one dot-separated entry."""
-        value = json.loads(raw)
-        if key is None:
-            item = dict(path=path, keys=list(value))
-        else:
-            for part in key.split("."):
-                value = value[part]
-            item = dict(path=path, key=key, value=value)
-        return self._reference_result(item)
-
-    def _read_text_reference(self, path, target, lines):
-        """Read at most 120 lines with the SDK file reader."""
-        lines = [1, 120] if lines is None else lines
-        if len(lines) != 2 or not all(isinstance(n, int) for n in lines) or not 1 <= lines[0] <= lines[1]:
-            raise ValueError("lines must be [start_line, end_line], starting at 1")
-        start, end = lines[0], min(lines[1], lines[0] + 119)
-        from openhands.tools.file_editor.editor import FileEditor
-        from openhands.tools.file_editor.exceptions import ToolError
-        try:
-            source = FileEditor().read_file(target, start_line=start, end_line=end + 1).splitlines()
-        except ToolError as exc:
-            raise ValueError(str(exc)) from exc
-        count = end - start + 1
-        clipped = len(source) > count
-        if not source:
-            return dict(path=path, reason="No text in the requested line range")
-        end = start + min(len(source), count) - 1
-        item = dict(path=path, start_line=start, end_line=end, source="\n".join(source[:count]))
-        if clipped:
-            item["next_line"] = end + 1
-        return self._reference_result(item)
+        """Route reference queries through the shared reader with this query's output limit."""
+        self.references.max_chars = self.max_chars
+        return self.references.read_reference(path, lines=lines, key=key)
 
     def query_memory(self, text=""):
         """Match text against the experiences frozen for this investigation."""
@@ -283,13 +222,6 @@ class Retriever:
             size += length
         return dict(items=kept) if kept else dict(items=[], reason="No matching experiences")
 
-    def _reference_result(self, item):
-        """Keep a readable location when reference content exceeds the response limit."""
-        if len(json.dumps(item, ensure_ascii=False)) <= self.max_chars:
-            return item
-        result = {key: item[key] for key in ("path", "key", "start_line", "end_line") if key in item}
-        result.update(truncated=True, reason="Content exceeds output limit; request fewer lines or a smaller JSON key")
-        return result
 
 
 def compact_refs(value):

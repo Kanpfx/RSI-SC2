@@ -16,6 +16,7 @@ bot/                          # 模块化规则 Bot
   core/                       # 调用、单位归属与动作仲裁
   spatial/                    # 地图、路径与选址
   telemetry/                  # 原始游戏日志
+runner/                       # Bot/RSI 共用的单局、批次、版本、进程与产物工具
 rsi/
   run.py                      # 顺序执行、预算和阶段产物
   analyzer.py                 # 日志指标、事件与静态分析结果
@@ -74,6 +75,35 @@ Copy-Item .env.example .env
 
 项目依赖统一写在 `pyproject.toml`，直接依赖固定版本；传递依赖由安装器解析。`.env`、编辑器设置、缓存和实验产物均由 `.gitignore` 排除。
 
+## RSI 执行流程
+
+一次实验按指定轮数顺序执行。初始 parent 对局只采集一批，也可通过 `parent_batch` 复用已有批次；后续各轮使用当前 parent 已保存的分析与对局结果。
+
+```mermaid
+flowchart TD
+    A["run_iteration.py → run_experiment"] --> B["校验配置、冻结初始 Bot、创建实验"]
+    B --> C["准备初始 parent 批次：新运行或复用历史批次，并生成分析"]
+    C --> D["读取当前 parent 分析、生成诊断概览、冻结本轮 Memory"]
+    D --> E["Diagnosis：选择问题、竞争假说、查询证据、形成结论"]
+    E -->|有结论| F0["复制 parent，创建 candidate"]
+    F0 --> F["Editor 修改 candidate"]
+    E -->|无结论| U["unresolved，保留 parent"]
+    F --> G["修改范围、语法、隔离导入检查"]
+    G -->|失败且还有修复次数| F
+    G -->|失败且次数耗尽| R["reject，保留 parent"]
+    G -->|通过| H["冻结 candidate，运行候选批次并生成分析"]
+    H --> I["Evaluator：与当前 parent 对照评估"]
+    I -->|accept| J["继承 candidate 代码及已有批次"]
+    I -->|reject| R
+    J --> K{"还有下一轮？"}
+    R --> K
+    U --> K
+    K -->|是| D
+    K -->|否| L["保存实验汇总，结束"]
+```
+
+静态检查失败时在同一个 candidate 目录中修复；检查通过后每轮只运行一个候选批次。接受后直接复用 candidate 的结果作为下一轮 parent，拒绝或无结论时继续使用原 parent。基础设施故障、日志不完整、模型会话失败或用户中断会保存状态并停止实验，不进入图中的下一轮；candidate 的 Bot 执行错误则按拒绝处理。
+
 ## 运行
 
 ```powershell
@@ -97,6 +127,8 @@ python -B -m bot.run --time-limit 150
 # 离线检查，不启动游戏或付费模型
 python -B -m unittest discover -s scripts/test -v
 ```
+
+独立 Bot 与 RSI 共用 `runner.matches.run_match`，每局在独立进程中运行，统一保存 manifest、标准结果和 Replay。独立入口可用 `--wall-timeout` 设置现实时间上限（默认 600 秒），`--no-log` 只关闭遥测。基础 API 和产物字段见 [Runner](runner/README.md)。
 
 - RSI 只有完整进化流程；入口参数为 `--parent`、`--rounds`（默认 1）、`--config`。默认从当前仓库冻结初始 Bot，不读取历史全局版本指针。接受后继承 candidate；拒绝后保留 parent，轮数表示尝试次数。
 - `--config PATH` 指定实验配置；模型读取 `.env` 中的 `LLM_MODEL`、`LLM_BASE_URL`、`LLM_API_KEY`，不把密钥写入产物。

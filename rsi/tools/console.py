@@ -1,41 +1,7 @@
 """Concise console progress; complete evidence and SDK output stay in artifacts."""
 import json
-import time
 from pathlib import Path
-
-
-def brief(value, limit=320):
-    """Keep one console entry on one bounded line."""
-    text = " ".join(str(value).split())
-    return text if len(text) <= limit else text[:limit - 3] + "..."
-
-
-def write_console(message, end="\n"):
-    """Keep console write failures outside the research execution path."""
-    try:
-        print(message, end=end, flush=True)
-    except Exception:
-        pass  # Display is optional; artifacts and research execution must continue.
-
-
-def progress_line(component, message):
-    """Format a progress line without changing its content or output policy."""
-    return f"[{time.strftime('%H:%M:%S')}] [{component}] {message}"
-
-
-def progress(component, message):
-    """Flush useful progress immediately, including from model workers."""
-    write_console(progress_line(component, brief(message)))
-
-
-def error_summary(reason):
-    """Prefer the underlying exception to traceback and SDK help boilerplate."""
-    for line in str(reason).splitlines():
-        if "Traceback" in line:
-            continue
-        if line == line.lstrip() and line.split(":", 1)[0].endswith(("Error", "Exception")):
-            return brief(line)
-    return brief(reason)
+from runner.console import brief, progress
 
 
 def tool_progress(event, role, workspace=None):
@@ -76,14 +42,17 @@ def _action_progress(role, name, action, workspace):
             target = params.get("names") or params.get("types") or ""
             if isinstance(target, (list, tuple)):
                 target = ", ".join(map(str, target))
-            progress(role, f"Query {action['kind']} {brief(target, 110)}; purpose: {brief(action['purpose'], 180)}")
+            query = " ".join(part for part in (f"Query {action['kind']}", brief(target, 110)) if part)
+            progress(role, f"{query}; purpose: {brief(action['purpose'], 180)}")
         case ("diagnosis" | "editor"), "read_reference":
-            progress(role, "Read " + brief(action["path"], 140) +
-                     ("; key: " + brief(action["key"], 80) if action.get("key") else ""))
+            parts = ["Read " + brief(action["path"], 140)]
+            if action.get("key"):
+                parts.append("key: " + brief(action["key"], 80))
+            progress(role, "; ".join(parts))
         case "diagnosis", "query_memory":
-            progress(role, "Query memory: " + brief(action.get("text") or "all available experiences", 140))
+            progress(role, "Query memory: " + brief(action.get("text") or "all", 140))
         case "diagnosis", "conclude":
-            progress(role, "Submitting conclusion" if action.get("conclusion") else "Ending without a proposal: " + action.get("reason", ""))
+            progress(role, "Submitting conclusion" if action.get("conclusion") else "No proposal: " + action.get("reason", ""))
         case "editor", "file_editor":
             path = Path(action["path"])
             if path.is_absolute() and workspace and path.is_relative_to(workspace):
@@ -102,10 +71,14 @@ def _observation_progress(role, name, observation):
                 progress(role, "Tool rejected: " + value["error"]["message"])
             elif name in {"query_logs", "read_reference", "query_memory"}:
                 count = len(value["items"]) if "items" in value else int("source" in value or "value" in value or "keys" in value)
-                progress(role, f"Evidence returned: {count} items" +
-                         (" (more pages available)" if "next_offset" in value else "") +
-                         (" (content omitted)" if value.get("truncated") else "") +
-                         ("; " + brief(value["reason"]) if value.get("reason") else ""))
+                parts = [f"Results: {count}"]
+                if "next_offset" in value:
+                    parts.append(f"next_offset={value['next_offset']}")
+                if value.get("truncated"):
+                    parts.append("truncated")
+                if value.get("reason"):
+                    parts.append(brief(value["reason"]))
+                progress(role, "; ".join(parts))
             elif name == "conclude" and value.get("conclusion"):
                 conclusion = value["conclusion"]
                 progress(role, "Conclusion validated: " + conclusion["change"])
@@ -113,8 +86,10 @@ def _observation_progress(role, name, observation):
                 progress(role, "Unresolved: " + value.get("reason", "No proposal"))
         case "editor", "terminal":
             code = observation.exit_code
-            progress(role, f"Command result: exit_code={code}" +
-                     ("; " + brief(observation.text[-600:]) if code not in (0, None) else ""))
+            parts = [f"Command result: exit_code={code}"]
+            if code not in (0, None):
+                parts.append(brief(observation.text[-600:]))
+            progress(role, "; ".join(parts))
         case "editor", _:
             if observation.is_error:
                 progress(role, "Tool failed: " + brief(observation.text[-600:]))

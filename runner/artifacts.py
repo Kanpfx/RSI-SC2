@@ -3,18 +3,18 @@ import json
 from pathlib import Path
 
 
-PROJECT = Path(__file__).resolve().parents[2]
+PROJECT = Path(__file__).resolve().parents[1]
 
 
-def project_path(path):
+def project_path(path, *, root=PROJECT):
     """Resolve stored project-relative paths independently of the working directory."""
-    return (PROJECT / path).resolve()
+    return (Path(root) / path).resolve()
 
 
-def path_reference(path):
+def path_reference(path, *, root=PROJECT):
     """Store project files as relative POSIX paths; retain external absolute paths."""
-    path = Path(path).resolve()
-    return path.relative_to(PROJECT).as_posix() if path.is_relative_to(PROJECT) else path.as_posix()
+    path, root = Path(path).resolve(), Path(root).resolve()
+    return path.relative_to(root).as_posix() if path.is_relative_to(root) else path.as_posix()
 
 
 def read_json(path):

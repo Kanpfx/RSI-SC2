@@ -2,14 +2,18 @@
 
 
 def diagnosis_prompt(prompt, options):
-    """Apply the configured diagnosis ablations to the standard task prompt."""
-    if not options["competing_hypotheses"]:
-        prompt = prompt.replace("at least two competing hypotheses", "one hypothesis")
+    """Append explicit experiment rules without depending on the base prompt's wording."""
+    hypotheses = "at least two competing hypotheses" if options["competing_hypotheses"] else "one hypothesis"
+    rules = [f"Start with select_issue: record one issue and {hypotheses}."]
     if options["query_policy"] == "fixed":
-        prompt = prompt.replace(
-            "Use the query tools to test the hypotheses; revise them with select_issue when evidence changes.",
-            "Use only the predeclared evidence pack; do not call query_logs, read_reference or query_memory.")
-    return prompt
+        rules.append("Use only the predeclared evidence pack; do not call query_logs, read_reference or query_memory.")
+    else:
+        rules.extend((
+            "Query evidence to test hypotheses; revise them with select_issue as evidence changes.",
+            "Log, reference and memory queries share max_queries; keep reads focused.",
+        ))
+    rules.append("After the first query, keep the problem fixed; evidence descriptions may be refined.")
+    return "\n\n".join((prompt.rstrip(), "\n".join(rules)))
 
 
 def fixed_pack(retriever, batches, max_queries):

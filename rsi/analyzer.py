@@ -4,7 +4,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from statistics import mean
 
-from .tools.artifacts import path_reference, project_path, read_json, write_json
+from runner.artifacts import path_reference, project_path, read_json, write_json
+from runner.environment import LOOPS_PER_SECOND as LOOPS
 
 
 def save_batch_analysis(path, analysis):
@@ -25,7 +26,6 @@ def load_batch_analysis(path):
                         for run_id, report in analysis["runs"].items()}
     return analysis
 
-LOOPS = 22.4
 WORKERS = {"SCV", "DRONE", "PROBE", "MULE"}
 BASES = {"COMMANDCENTER", "ORBITALCOMMAND", "PLANETARYFORTRESS", "NEXUS", "HATCHERY", "LAIR", "HIVE"}
 PRODUCERS = BASES | {"BARRACKS", "FACTORY", "STARPORT", "GATEWAY", "WARPGATE", "STARGATE", "ROBOTICSFACILITY"}
@@ -96,13 +96,15 @@ class Analyzer:
         for path in (self.project / "knowledge/units").glob("*.json"):
             self.catalog.update(read_json(path))
 
-    def analyze_run(self, directory, run_id, *, persist=True):
-        """Read one run and optionally persist its static report beside the logs."""
+    def analyze_run(self, directory, run_id):
+        """Read one run and return its static report without writing to the input directory."""
         directory = project_path(directory)
         manifest = read_json(directory / "manifest.json")
         result = read_json(directory / "result.json")
         rows, problems = read_records(directory, run_id)
-        duration = result.get("duration_loops", max((r["frame"] for r in rows), default=0))
+        duration = result.get("duration_loops")
+        if duration is None:
+            duration = max((r["frame"] for r in rows), default=0)
         for event in ("game_started", "game_ended"):
             if not any(row["event"] == event for row in rows):
                 problems.append("missing_" + event)
@@ -135,8 +137,6 @@ class Analyzer:
                       outcome=result, coverage=coverage, metrics=dict(series),
                       events=sorted(events, key=lambda e: e["start"]),
                       modules=actions["modules"], actions=actions["actions"])
-        if persist:
-            write_json(directory / "analysis.json", report)
         return report
 
     def _coverage(self, duration, problems, sampled_seconds):
@@ -334,12 +334,20 @@ class Analyzer:
                                    source_refs=[r["source_ref"] for r in recent]))
                 recent = []
 
-    def add_batch(self, batch, *, persist=True):
+    def analyze_batch(self, batch):
         """Analyze an explicitly supplied batch; holdout remains outside development queries."""
         if batch["purpose"] == "holdout":
             raise ValueError("Holdout is unavailable to the development Analyzer")
-        reports = {run_id: self.analyze_run(path, run_id, persist=persist) for run_id, path in batch["runs"].items()}
+        reports = {run_id: self.analyze_run(path, run_id) for run_id, path in batch["runs"].items()}
         summary = dict(outcomes=dict(Counter(r["outcome"].get("outcome") or "unknown" for r in reports.values())),
                        event_counts=dict(Counter(e["kind"] for r in reports.values() for e in r["events"])))
         return dict(batch_id=batch["batch_id"], version=batch["version"], purpose=batch["purpose"],
                     runs=reports, summary=summary)
+
+
+def analyze_evidence(analyzer, batch, batch_path, analysis_path):
+    """Analyze and persist one batch in the selected output directory, including reused evidence."""
+    analysis = analyzer.analyze_batch(batch)
+    save_batch_analysis(analysis_path, analysis)
+    return dict(batch=batch, analysis=analysis, batch_path=path_reference(batch_path),
+                analysis_path=path_reference(analysis_path))

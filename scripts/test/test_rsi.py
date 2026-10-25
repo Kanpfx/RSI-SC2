@@ -21,16 +21,17 @@ from rsi.memory import record, search
 from rsi.run import Run, run_experiment
 from rsi.tools.llm import budgeted_llm_type, call_session, execute
 from rsi.tools.config import validate_config
-from rsi.tools.matches import run_batch, run_match
-from rsi.retriever import Retriever, freeze_context
+from runner.matches import run_batch, run_match
+from rsi.retriever import Retriever
+from rsi.references import References, freeze_context
 from rsi.tools.validate import validate
-from rsi.tools.artifacts import path_reference, project_path, read_json, write_json
-from rsi.tools.versions import Versions, inventory
+from runner.artifacts import path_reference, project_path, read_json, write_json
+from runner.versions import Versions, inventory
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def fixture_batch(project, version, conditions, directory, purpose, parallel=3):
+def fixture_batch(project, version, conditions, directory, purpose, parallel=3, *, wall_budget=None):
     """Produce native-shaped Bot logs for a fixed batch without launching SC2."""
     directory = Path(directory)
     directory.mkdir(parents=True)
@@ -103,8 +104,8 @@ class PipelineTests(unittest.TestCase):
 
     def test_facts_trace_and_holdout_boundary(self):
         analyzer = Analyzer(ROOT)
-        report = analyzer.add_batch(self.batch)
-        retriever = Retriever(self.parent, ROOT, analyses=[report])
+        report = analyzer.analyze_batch(self.batch)
+        retriever = Retriever(self.parent["source_root"], ROOT, analyses=[report])
         run = next(iter(report["runs"].values()))
         self.assertEqual(run["coverage"]["integrity"], "complete")
         self.assertIn("mineral_income", run["coverage"]["missing_metrics"])
@@ -114,7 +115,7 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue(any(r.get("status") == "observed" for r in result["items"]))
         self.assertTrue(any(i.get("source_ref") or i.get("source_refs") for i in result["items"]))
         with self.assertRaises(ValueError):
-            analyzer.add_batch(dict(self.batch, purpose="holdout"))
+            analyzer.analyze_batch(dict(self.batch, purpose="holdout"))
         retriever.max_chars = 10
         result = retriever.query_logs("overview", batch_id=self.batch["batch_id"])
         self.assertTrue(result["truncated"])
@@ -127,16 +128,19 @@ class PipelineTests(unittest.TestCase):
             result = dict(execution_status="normal", outcome="win", version=self.parent["version"])
             if with_id:
                 result["run_id"] = directory.name
-            with self.subTest(with_id=with_id), patch("rsi.tools.matches.subprocess.Popen") as process:
+            with self.subTest(with_id=with_id), patch("runner.matches.subprocess.Popen") as process:
                 process.return_value.wait.side_effect = lambda **kwargs: write_json(directory / "result.json", result)
                 merged = run_match(ROOT, self.parent, conditions, directory, "parent", "batch")
-            self.assertEqual(merged, dict(result, run_id=directory.name, directory=path_reference(directory)))
+            self.assertEqual(merged, read_json(directory / "result.json"))
+            self.assertEqual(merged["run_id"], directory.name)
+            self.assertEqual(merged["outcome"], "win")
+            self.assertEqual(merged["version"], self.parent["version"])
 
     def test_batch_staggers_three_submissions(self):
         events = []
         conditions = [dict(self.config["matches"], seed=seed) for seed in (1, 2, 3)]
-        with patch("rsi.tools.matches.ThreadPoolExecutor") as executor, \
-                patch("rsi.tools.matches.time.sleep", side_effect=lambda seconds: events.append(("sleep", seconds))):
+        with patch("runner.matches.ThreadPoolExecutor") as executor, \
+                patch("runner.matches.time.sleep", side_effect=lambda seconds: events.append(("sleep", seconds))):
             pool = executor.return_value.__enter__.return_value
             def submit(function, project, version, condition, *args, **kwargs):
                 events.append(("submit", condition["seed"]))
@@ -166,8 +170,8 @@ class PipelineTests(unittest.TestCase):
                     cancel.set()
                     raise subprocess.TimeoutExpired("offline worker", kwargs["timeout"])
 
-                with patch("rsi.tools.matches.subprocess.Popen") as process, \
-                        patch("rsi.tools.matches.stop_process") as stop:
+                with patch("runner.matches.subprocess.Popen") as process, \
+                        patch("runner.matches.stop_process") as stop:
                     process.return_value.wait.side_effect = wait
                     result = run_match(ROOT, self.parent, conditions, directory, "parent", "batch", cancel=cancel)
                 stop.assert_called_once_with(process.return_value)
@@ -208,8 +212,8 @@ class PipelineTests(unittest.TestCase):
             else:
                 raise KeyboardInterrupt
 
-        with patch("rsi.tools.matches.run_match", side_effect=match), \
-                patch("rsi.tools.matches.time.sleep", side_effect=delay):
+        with patch("runner.matches.run_match", side_effect=match), \
+                patch("runner.matches.time.sleep", side_effect=delay):
             with self.assertRaises(KeyboardInterrupt):
                 run_batch(ROOT, self.parent, conditions, directory, "parent", parallel=1)
         batch = read_json(directory / "batch.json")
@@ -220,8 +224,8 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(batch["results"][0]["outcome"], "win")
 
     def test_analyzer_summaries_and_large_evidence_are_retrievable(self):
-        batch = Analyzer(ROOT).add_batch(self.batch)
-        retriever = Retriever(self.parent, ROOT, analyses=[batch], max_items=60, max_chars=24000)
+        batch = Analyzer(ROOT).analyze_batch(self.batch)
+        retriever = Retriever(self.parent["source_root"], ROOT, analyses=[batch], max_items=60, max_chars=24000)
         result = retriever.query_logs("metrics", batch_id=self.batch["batch_id"], names=["workers", "minerals"])
         self.assertEqual([i["name"] for i in result["items"]], ["workers", "minerals"])
         self.assertNotIn("source_refs", result)
@@ -252,8 +256,8 @@ class PipelineTests(unittest.TestCase):
             "trace", batch_id=self.batch["batch_id"], call_id="c1", detail="raw")["items"]))
 
     def test_raw_pagination_preserves_results_and_stops_at_page_limit(self):
-        batch = Analyzer(ROOT).add_batch(self.batch)
-        retriever = Retriever(self.parent, ROOT, analyses=[batch], max_items=1000, max_chars=1000000)
+        batch = Analyzer(ROOT).analyze_batch(self.batch)
+        retriever = Retriever(self.parent["source_root"], ROOT, analyses=[batch], max_items=1000, max_chars=1000000)
         run = next(iter(batch["runs"].values()))
         run["metrics"]["workers"][-2]["value"] = 100
         query = dict(names=["workers", "minerals"], detail="raw")
@@ -287,13 +291,13 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(page["next_offset"], 3)
 
     def test_compact_queries_keep_coverage_and_each_comparison_run(self):
-        batch = Analyzer(ROOT).add_batch(self.batch)
+        batch = Analyzer(ROOT).analyze_batch(self.batch)
         report = next(iter(batch["runs"].values()))
         report["coverage"].update(integrity="partial", problems=["corrupt_line:100"], unattributed_deaths=2)
         reference = copy.deepcopy(batch)
         reference["batch_id"] = "reference"
         reference["runs"] = {"reference_0": copy.deepcopy(report), "reference_1": copy.deepcopy(report)}
-        retriever = Retriever(self.parent, ROOT, analyses=[batch, reference], max_items=1)
+        retriever = Retriever(self.parent["source_root"], ROOT, analyses=[batch, reference], max_items=1)
         with patch("rsi.retriever.read_records", side_effect=AssertionError("Unexpected raw-log read")):
             collected, offset = [], 0
             while True:
@@ -328,7 +332,7 @@ class PipelineTests(unittest.TestCase):
         path.parent.mkdir()
         source = "".join(f"# line {i}\n" for i in range(1, 251))
         path.write_text(source, encoding="utf-8")
-        retriever = Retriever(self.parent, context)
+        retriever = Retriever(self.parent["source_root"], context)
         with patch.object(FileEditor, "read_file", autospec=True, side_effect=FileEditor.read_file) as read:
             result = retriever.read_reference("api/example.py", lines=[2, 4])
         read.assert_called_once()
@@ -368,8 +372,8 @@ class PipelineTests(unittest.TestCase):
         write_json(memory_path, values)
         write_json(context / "memory.json", [dict(iteration_id="stale_context")])
         with self.assertRaisesRegex(ValueError, "explicit frozen iteration path"):
-            Retriever(self.parent, context).query_memory()
-        retriever = Retriever(self.parent, context, memory_path=memory_path,
+            Retriever(self.parent["source_root"], context).query_memory()
+        retriever = Retriever(self.parent["source_root"], context, memory_path=memory_path,
                               max_chars=max(len(json.dumps(v)) for v in values) + 5)
         result = retriever.query_memory()
         self.assertEqual(result["items"], values[:1])
@@ -401,7 +405,7 @@ class PipelineTests(unittest.TestCase):
                 versions.verify(dict(parent, source_root=str(project_path(parent["source_root"]))))
                 candidate = versions.candidate(parent, directory / "candidate")
                 self.assertTrue((candidate / "bot/entry.py").is_file())
-                report = Analyzer(ROOT).add_batch(batch)
+                report = Analyzer(ROOT).analyze_batch(batch)
                 log_path = next(iter(report["runs"].values()))["log_path"]
                 self.assertFalse(Path(log_path).is_absolute())
                 self.assertTrue(project_path(log_path).is_file())
@@ -484,7 +488,7 @@ class PipelineTests(unittest.TestCase):
 
     def test_native_score_metrics_and_missing_legacy_data(self):
         analyzer = Analyzer(ROOT)
-        report = next(iter(analyzer.add_batch(self.batch)["runs"].values()))
+        report = next(iter(analyzer.analyze_batch(self.batch)["runs"].values()))
         expected = dict(combat_value=1200, trade_efficiency=1200 / 1350, army_value=700,
                         army_investment=1400, resource_collection_rate=1600)
         for name, value in expected.items():
@@ -496,7 +500,7 @@ class PipelineTests(unittest.TestCase):
         for row in rows:
             row.pop("score", None)
         path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
-        legacy = next(iter(analyzer.add_batch(self.batch, persist=False)["runs"].values()))
+        legacy = next(iter(analyzer.analyze_batch(self.batch)["runs"].values()))
         self.assertNotIn("combat_value", legacy["metrics"])
         self.assertIn("army_value", legacy["coverage"]["missing_metrics"])
 
@@ -508,7 +512,7 @@ class PipelineTests(unittest.TestCase):
         write_json(memory_path, [])
         options = dict(self.config["diagnosis"], query_policy=policy)
         analysis_path = context / "analysis.json"
-        save_batch_analysis(analysis_path, Analyzer(context).add_batch(self.batch, persist=False))
+        save_batch_analysis(analysis_path, Analyzer(context).analyze_batch(self.batch))
         job = dict(project=str(ROOT), context=str(context), parent=self.parent,
                    batches=[self.batch], diagnosis=options, analyses=[str(analysis_path)], memory=str(memory_path))
         return Investigation(job, self.root), job
@@ -535,10 +539,10 @@ class PipelineTests(unittest.TestCase):
         write_json(legacy_path, expected)
         self.assertEqual(load_batch_analysis(legacy_path), expected)
         with self.assertRaisesRegex(ValueError, "Holdout"):
-            Retriever(self.parent, ROOT, analyses=[dict(analysis, purpose="holdout")])
+            Retriever(self.parent["source_root"], ROOT, analyses=[dict(analysis, purpose="holdout")])
 
     def test_initial_batch_reuse_is_read_only_and_validated(self):
-        Analyzer(ROOT).add_batch(self.batch)
+        Analyzer(ROOT).analyze_batch(self.batch)
         history = {p: p.read_bytes() for p in (self.root / "parent").rglob("*") if p.is_file()}
         project = self.root / "reuse_project"
         shutil.copytree(ROOT / "bot", project / "bot", ignore=shutil.ignore_patterns("__pycache__"))
@@ -578,7 +582,7 @@ class PipelineTests(unittest.TestCase):
         self.assertNotIn("UNRELATED_WORKSPACE_GUIDE", job["prompt"])
 
     def test_diagnosis_overview_keeps_core_data_and_missing_metrics(self):
-        analysis = Analyzer(ROOT).add_batch(self.batch)
+        analysis = Analyzer(ROOT).analyze_batch(self.batch)
         second = copy.deepcopy(analysis)
         second["batch_id"] = "second"
         report = next(iter(second["runs"].values()))
@@ -746,7 +750,7 @@ class PipelineTests(unittest.TestCase):
         with patch("rsi.run.preflight"), patch("rsi.run.load_settings", return_value=config["model"]), \
                 patch("rsi.run.run_batch", side_effect=fixture_batch), \
                 patch.object(run, "model", return_value=diagnosis) as model:
-            result = run.execute()
+            result = run.execute().report
         self.assertEqual(result["status"], "unresolved", result.get("reason"))
         self.assertEqual(result["reason"], diagnosis["reason"])
         self.assertEqual(model.call_count, 1)
@@ -848,7 +852,7 @@ class PipelineTests(unittest.TestCase):
         initial_bytes = (project / "bot/components/tasks/economy.py").read_bytes()
         calls = []
 
-        def matches(project, version, conditions, directory, purpose, parallel):
+        def matches(project, version, conditions, directory, purpose, parallel, *, wall_budget=None):
             batch = fixture_batch(project, version, conditions, directory, purpose, parallel)
             calls.append((version, purpose, batch["batch_id"]))
             if len(calls) in (2, 4):
@@ -915,7 +919,7 @@ class PipelineTests(unittest.TestCase):
             job = read_json(project_path(iteration["artifacts"]["diagnosis_job"]))
             self.assertEqual(project_path(job["context"]), roots[0] / "context")
             self.assertEqual(project_path(job["memory"]), directory / "memory.json")
-            memory = Retriever(job["parent"], job["context"], memory_path=job["memory"]).query_memory()
+            memory = Retriever(job["parent"]["source_root"], job["context"], memory_path=job["memory"]).query_memory()
             self.assertEqual(len(memory["items"]), index)
             editor = read_json(project_path(iteration["artifacts"]["editor_0_job"]))
             evidence = project_path(editor["workspace"]) / editor["task"]["paths"]["evidence"]
@@ -927,7 +931,7 @@ class PipelineTests(unittest.TestCase):
         for status, expected in (("unknown", "error"), ("bot_error", "reject")):
             calls = []
 
-            def matches(project, version, conditions, directory, purpose, parallel):
+            def matches(project, version, conditions, directory, purpose, parallel, *, wall_budget=None):
                 batch = fixture_batch(project, version, conditions, directory, purpose, parallel)
                 calls.append(purpose)
                 if purpose == "candidate":
@@ -1004,7 +1008,7 @@ class PipelineTests(unittest.TestCase):
                 patch("rsi.run.run_batch", side_effect=fixture_batch) as matches, \
                 patch.object(run, "_diagnose", return_value=dict(conclusion=proposal())), \
                 patch.object(run, "_edit_and_validate", return_value=(self.parent, dict(passed=True, checks=[]))):
-            report = run.execute(self.parent)
+            report = run.execute(self.parent).report
         self.assertEqual(report["status"], "reject", report.get("reason"))
         self.assertEqual(matches.call_count, 2)
         for call in matches.call_args_list:
@@ -1354,7 +1358,7 @@ class PipelineTests(unittest.TestCase):
         write_json(directory / "job.json", job)
         observations = []
         reference_results = []
-        read_reference = Retriever.read_reference
+        read_reference = References.read_reference
         execute_terminal = TerminalExecutor.__call__
 
         def observe_reference(retriever, **arguments):
@@ -1372,7 +1376,7 @@ class PipelineTests(unittest.TestCase):
         output = StringIO()
         with patch("openhands.sdk.agent.base.has_vision_profile_available", return_value=False), redirect_stdout(output), \
                 patch.object(TerminalExecutor, "__call__", new=observe_terminal), \
-                patch.object(Retriever, "read_reference", new=observe_reference):
+                patch.object(References, "read_reference", new=observe_reference):
             result = execute(directory / "job.json", llm_factory=lambda: TestLLM.from_messages(messages))
         self.assertEqual(result["status"], "ok", result.get("reason"))
         self.assertEqual(len(observations), 3)

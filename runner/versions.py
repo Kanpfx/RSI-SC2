@@ -7,13 +7,6 @@ from pathlib import Path
 from .artifacts import path_reference, project_path
 
 
-def editable(name):
-    """Allow only Python business components; reject ambiguous relative paths."""
-    return (name.startswith(tuple(f"bot/components/{part}/" for part in
-                                 ("behaviors", "tasks", "tactics")))
-            and name.endswith(".py") and ".." not in name.split("/") and "\\" not in name)
-
-
 def source_paths(root):
     """Enumerate retained files without reading contents; reject links and caches."""
     for path in sorted(Path(root).rglob("*")):
@@ -30,8 +23,13 @@ def inventory(root):
 
 def source_hash(root):
     """Hash every retained snapshot file, including names and boundaries."""
+    return hash_files(inventory(root))
+
+
+def hash_files(files):
+    """Hash sorted relative paths and byte contents using the existing version format."""
     digest = hashlib.sha256()
-    for name, content in inventory(root).items():
+    for name, content in sorted(files.items()):
         digest.update(name.encode() + b"\0" + content + b"\0")
     return digest.hexdigest()
 
@@ -54,17 +52,12 @@ class Versions:
 
     def freeze(self, source):
         """Freeze Bot files without importing them; verify existing snapshots before reuse."""
-        files = inventory(Path(source) / "bot")
-        if "entry.py" not in files:
-            raise ValueError("Snapshot requires bot/entry.py")
-        digest = hashlib.sha256()
-        for name, data in files.items():
-            digest.update(("bot/" + name).encode() + b"\0" + data + b"\0")
-        version = digest.hexdigest()
+        files = bot_inventory(source)
+        version = hash_files(files)
         target = self.root / "versions" / version
         if not target.exists():
             for name, data in files.items():
-                path = target / "bot" / name
+                path = target / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(data)
         record = dict(version=version, source_root=path_reference(target))
@@ -73,11 +66,24 @@ class Versions:
 
     def verify(self, version):
         """Reject modified snapshots before reading, editing or running them."""
-        if source_hash(project_path(version["source_root"])) != version["version"]:
-            raise ValueError("Snapshot content does not match its version")
+        verify_version(version)
 
     def candidate(self, parent, directory):
         """Copy one verified parent into a fresh writable candidate directory."""
         self.verify(parent)
         shutil.copytree(project_path(parent["source_root"]), directory)
         return Path(directory)
+
+
+def bot_inventory(source):
+    """Collect the Bot tree with canonical project-relative names."""
+    files = inventory(Path(source) / "bot")
+    if "entry.py" not in files:
+        raise ValueError("Snapshot requires bot/entry.py")
+    return {"bot/" + name: data for name, data in files.items()}
+
+
+def verify_version(version):
+    """Verify all retained snapshot files against the declared content hash."""
+    if source_hash(project_path(version["source_root"])) != version["version"]:
+        raise ValueError("Snapshot content does not match its version")

@@ -1,12 +1,18 @@
 """Load and validate the fixed configuration for one RSI iteration."""
 from sc2.data import Difficulty
 
-from .artifacts import read_json
+from runner.artifacts import read_json
 
 
 def load_config(path):
     """Read the experiment configuration without hidden command-line overrides."""
     return read_json(path)
+
+
+def role_settings(model, role=None):
+    """Merge shared and role-specific settings without resolving environment defaults."""
+    shared = {k: v for k, v in model.items() if k not in {"diagnosis", "editor"}}
+    return dict(shared, **model[role]) if role else shared
 
 
 def validate_config(config):
@@ -26,9 +32,8 @@ def validate_config(config):
         if not isinstance(diagnosis[key], bool):
             raise ValueError(f"diagnosis.{key} must be bool")
     model = config["model"]
-    shared = {k: v for k, v in model.items() if k not in {"diagnosis", "editor"}}
     for role in (None, "diagnosis", "editor"):
-        settings = dict(shared, **model[role]) if role else shared
+        settings = role_settings(model, role)
         for key in ("max_total_tokens", "max_cost", "max_iterations", "max_output_tokens", "request_timeout", "wall_timeout"):
             if settings[key] <= 0:
                 raise ValueError(f"model.{role + '.' if role else ''}{key} must be positive")

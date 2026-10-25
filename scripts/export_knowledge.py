@@ -11,6 +11,9 @@ import sys
 from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from runner.environment import load_environment
+
 HEADER_URL = "https://raw.githubusercontent.com/Blizzard/s2client-api/master/include/sc2api/sc2_typeenums.h"
 PROTO_URL = "https://github.com/Blizzard/s2client-proto/blob/master/s2clientprotocol/data.proto"
 CACHE = ROOT / "runtime/cache/knowledge_sources"
@@ -170,7 +173,7 @@ def main():
             raise FileNotFoundError("Cached official header is missing; run a fresh export")
         with urlopen(HEADER_URL, timeout=30) as response:
             header_path.write_bytes(response.read())
-    config = json.loads((ROOT / "environment.json").read_text(encoding="utf-8"))
+    config = load_environment(ROOT)
     if args.from_cache:
         from s2clientprotocol import sc2api_pb2
         info = json.loads((CACHE / "client.json").read_text(encoding="utf-8"))

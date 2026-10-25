@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-from .tools.artifacts import read_json, write_json
+from runner.artifacts import read_json, write_json
 
 
 def record(root, report):

@@ -22,32 +22,45 @@ def _condition_key(run):
     return json.dumps(run["conditions"], sort_keys=True)
 
 
+def batch_problem(batch, *, allow_bot_error=False):
+    """Validate a single evidence batch without pretending to compare it with itself."""
+    runs = list(batch["runs"].values())
+    if not runs:
+        return dict(code="incomplete_match_set", reason="Incomplete match set")
+    if len({_condition_key(run) for run in runs}) != len(runs):
+        return dict(code="duplicate_conditions", reason="Duplicate match conditions")
+    for run in runs:
+        if allow_bot_error and run["outcome"].get("execution_status") == "bot_error":
+            continue
+        if run["outcome"].get("execution_status") != "normal" or run["coverage"]["integrity"] != "complete":
+            return dict(code="incomplete_execution", reason="Execution or log integrity is incomplete")
+        if run["outcome"].get("outcome") not in {"win", "loss", "draw"}:
+            return dict(code="missing_outcome", reason="Match outcome is unavailable")
+        if (run["coverage"]["sample_ratio"] or 0) < MIN_COVERAGE:
+            return dict(code="low_coverage", reason="Sampling coverage is below the fixed minimum")
+    return None
+
+
 def evidence_problem(parent, candidate):
     """Require complete outcomes under the same conditions, independent of run order."""
     parent_runs, candidate_runs = list(parent["runs"].values()), list(candidate["runs"].values())
     if not parent_runs or len(parent_runs) != len(candidate_runs):
-        return "Incomplete match set"
+        return dict(code="incomplete_match_set", reason="Incomplete match set")
     if (len({_condition_key(run) for run in parent_runs}) != len(parent_runs)
             or len({_condition_key(run) for run in candidate_runs}) != len(candidate_runs)):
-        return "Duplicate match conditions"
+        return dict(code="duplicate_conditions", reason="Duplicate match conditions")
     for parent_run, candidate_run in zip(sorted(parent_runs, key=_condition_key),
                                          sorted(candidate_runs, key=_condition_key)):
         if parent_run["conditions"] != candidate_run["conditions"]:
-            return "Parent/candidate conditions differ"
+            return dict(code="condition_mismatch", reason="Parent/candidate conditions differ")
         if parent_run["environment"] != candidate_run["environment"]:
-            return "Map data, environment or game-time limit changed between versions"
-    for runs, allow_bot_error in ((parent_runs, False), (candidate_runs, True)):
-        for run in runs:
-            if allow_bot_error and run["outcome"].get("execution_status") == "bot_error":
-                continue
-            if run["outcome"].get("execution_status") != "normal" or run["coverage"]["integrity"] != "complete":
-                return "Execution or log integrity is incomplete"
-            if run["outcome"].get("outcome") not in {"win", "loss", "draw"}:
-                return "Match outcome is unavailable"
-            if (run["coverage"]["sample_ratio"] or 0) < MIN_COVERAGE:
-                return "Sampling coverage is below the fixed minimum"
+            return dict(code="environment_mismatch", reason="Map data, environment or game-time limit changed between versions")
+    for batch, allow_bot_error in ((parent, False), (candidate, True)):
+        problem = batch_problem(batch, allow_bot_error=allow_bot_error)
+        if problem:
+            return problem
     if any(run["outcome"].get("execution_status") == "bot_error" for run in candidate_runs):
-        return "Candidate Bot execution failed"
+        return dict(code="candidate_bot_error", reason="Candidate Bot execution failed")
     return None
 
 
@@ -59,7 +72,7 @@ def evaluate(parent, candidate):
                   parent_batch=parent["batch_id"], candidate_batch=candidate["batch_id"])
     problem = evidence_problem(parent, candidate)
     if problem:
-        return dict(report, reason=problem)
+        return dict(report, **problem)
     report["comparable"] = True
     parent_runs, candidate_runs = [sorted(batch["runs"].values(), key=_condition_key)
                                    for batch in (parent, candidate)]
