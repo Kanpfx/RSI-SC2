@@ -8,7 +8,6 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
-from uuid import uuid4
 
 from .artifacts import path_reference, project_path, read_json, write_json
 from .console import error_summary, progress
@@ -22,25 +21,27 @@ MATCH_START_INTERVAL = 3
 def match_manifest(project, version, conditions, directory, purpose, batch_id, *, environment=None, log=True):
     """Build the same manifest for launched and cancelled matches."""
     directory = Path(directory)
-    return dict(conditions, **version, purpose=purpose, batch_id=batch_id,
-                run_id=directory.name, output_dir=path_reference(directory), log=log,
-                environment=environment if environment is not None else load_environment(project))
+    return dict(conditions, **version, schema_version=3, purpose=purpose, batch_id=batch_id,
+                run_id=directory.name, log=log,
+                recording=dict(state_every_iteration=1, state_phase="on_step_start", chunk_size=128),
+                environment=environment if environment is not None else load_environment(project), actual={})
 
 
 def save_result(directory, spec, result):
     """Persist and return the same complete single-match result contract."""
-    value = dict(execution_status="unknown", outcome=None, termination="worker_error",
-                 duration_loops=None, error=None, summary={}, replay_saved=False)
+    value = dict(schema_version=3, execution_status="unknown", outcome=None, termination="worker_error",
+                 last_frame=None, steps=0, phase=None, mean_step_ms=None, max_step_ms=None, error=None)
     value.update(result)
-    value.update(run_id=spec["run_id"], version=spec["version"], directory=path_reference(directory))
+    for key in ("run_id", "version", "directory", "replay_saved", "summary", "duration_loops"):
+        value.pop(key, None)
     write_json(Path(directory) / "result.json", value)
     return value
 
 
-def result_summary(result):
+def result_summary(result, directory):
     """Index a match without duplicating its Bot summary or detailed diagnostics."""
-    return {key: result[key] for key in ("run_id", "directory", "execution_status", "outcome", "termination")
-            if key in result}
+    return dict(run_id=Path(directory).name, directory=path_reference(directory),
+                **{key: result[key] for key in ("execution_status", "outcome", "termination") if key in result})
 
 
 def run_match(project, source, conditions, directory, purpose="standalone", batch_id=None, *,
@@ -72,10 +73,11 @@ def run_match(project, source, conditions, directory, purpose="standalone", batc
             if not wait_process(process, conditions["wall_timeout"], cancel=cancel):
                 stop_process(process)
                 if not (directory / "result.json").exists():
-                    save_result(directory, spec, dict(termination="cancelled", error="Batch cancelled"))
+                    save_result(directory, spec, dict(termination="cancelled"))
         except subprocess.TimeoutExpired:
             stop_process(process)
-            save_result(directory, spec, dict(termination="wall_timeout", error="Worker exceeded wall timeout"))
+            save_result(directory, spec, dict(termination="wall_timeout",
+                        error=dict(stage="worker", type="TimeoutExpired", message="Worker exceeded wall timeout")))
         except BaseException:
             stop_process(process)
             raise
@@ -85,7 +87,7 @@ def run_match(project, source, conditions, directory, purpose="standalone", batc
     result = save_result(directory, spec, read_json(result_path))
     progress(purpose, f"Match finished: seed={conditions['seed']}; outcome={result.get('outcome') or 'unknown'}; "
              f"status={result.get('execution_status')}; termination={result.get('termination')}; "
-             f"game={(result.get('duration_loops') or 0) / LOOPS_PER_SECOND:.1f}s; elapsed={time.monotonic() - started:.1f}s")
+             f"game={(result.get('last_frame') or 0) / LOOPS_PER_SECOND:.1f}s; elapsed={time.monotonic() - started:.1f}s")
     if result.get("error"):
         progress(purpose, "Match error: " + error_summary(result["error"]))
     return result
@@ -101,7 +103,7 @@ def run_batch(project, version, conditions, directory, purpose, parallel=3, *, w
                       for condition in conditions]
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=False)
-    jobs = [(condition, directory / uuid4().hex) for condition in conditions]
+    jobs = [(condition, directory / f"run_{index:02d}") for index, condition in enumerate(conditions, 1)]
     batch = dict(batch_id=directory.name, version=version["version"], purpose=purpose,
                  runs={path.name: path_reference(path) for _, path in jobs}, conditions=conditions)
     write_json(directory / "batch.json", batch)
@@ -134,11 +136,11 @@ def run_batch(project, version, conditions, directory, purpose, parallel=3, *, w
                 if not (path / "manifest.json").exists():
                     write_json(path / "manifest.json", spec)
                 result = save_result(path, spec, dict(termination="cancelled"))
-            results.append(result_summary(dict(result, run_id=path.name, directory=path_reference(path))))
+            results.append(result_summary(result, path))
         batch["results"] = results
         write_json(directory / "batch.json", batch)
         raise
-    batch["results"] = [result_summary(result) for result in results]
+    batch["results"] = [result_summary(result, path) for result, (_, path) in zip(results, jobs)]
     write_json(directory / "batch.json", batch)
     return batch
 
@@ -146,7 +148,7 @@ def run_batch(project, version, conditions, directory, purpose, parallel=3, *, w
 def worker(spec_path):
     """Load only the selected Bot source and reuse its native Logger."""
     spec = read_json(spec_path)
-    directory = project_path(spec["output_dir"])
+    directory = Path(spec_path).resolve().parent
     os.environ["SC2PATH"] = spec["environment"]["sc2_path"]
     sys.path.insert(0, str(project_path(spec["source_root"])))
     bot = logger = None
@@ -159,12 +161,11 @@ def worker(spec_path):
         from sc2.data import Race, Difficulty
         from sc2.main import run_game
         from sc2.player import Bot, Computer
-        logger = Logger(directory if spec.get("log", True) else None)
+        logger = Logger(directory if spec.get("log", True) else None, frame_step=GAME_STEP)
         bot = ResearchBot(logger=logger, sc2_build=spec["environment"]["sc2_build"])
         stage = "map"
         settings = maps.get(spec["map"])
-        spec["map_sha256"] = hashlib.sha256(settings.data).hexdigest()
-        spec["game_step"] = GAME_STEP
+        spec.setdefault("actual", {}).update(map_sha256=hashlib.sha256(settings.data).hexdigest(), game_step=GAME_STEP)
         write_json(spec_path, spec)
         stage = "game"
         run_game(settings, [Bot(Race.Terran, bot),
@@ -172,26 +173,33 @@ def worker(spec_path):
                  realtime=False, random_seed=spec["seed"], game_time_limit=spec["game_time_limit"],
                  save_replay_as=str(directory / "match.SC2Replay"))
         status, termination = "normal", "game_result"
-    except Exception:
-        error = traceback.format_exc()
+    except Exception as exc:
+        error = dict(stage=stage, type=type(exc).__name__, message=str(exc))
+        if logger and logger.error_ref:
+            error["ref"] = logger.error_ref
+        else:
+            error["traceback"] = traceback.format_exc()
         status = "bot_error" if stage == "import" or (bot and bot.runtime_error) else "infrastructure_error"
     finally:
         if logger:
-            logger.close()
+            try:
+                logger.close()
+            finally:
+                spec.setdefault("actual", {}).update(logger.actual)
+                write_json(spec_path, spec)
     summary = bot.summary() if bot else {}
-    loop = bot.state.game_loop if bot and bot.steps else 0
+    loop = bot.state.game_loop if bot and bot.steps else None
     outcome = {"Result.Victory": "win", "Result.Defeat": "loss", "Result.Tie": "draw"}.get(
         summary.get("result"))
     if summary.get("bot_runtime_error"):
         status, termination = "bot_error", "bot_error"
     elif status == "normal" and not outcome:
         status, termination = "unknown", "missing_game_result"
-    elif status == "normal" and loop / LOOPS_PER_SECOND >= spec["game_time_limit"]:
+    elif status == "normal" and loop is not None and loop / LOOPS_PER_SECOND >= spec["game_time_limit"]:
         termination = "time_limit"
-    save_result(directory, spec, dict(run_id=spec["run_id"], version=spec["version"],
-               execution_status=status, termination=termination, outcome=outcome,
-               duration_loops=loop, error=error, summary=summary,
-               replay_saved=(directory / "match.SC2Replay").exists()))
+    save_result(directory, spec, dict(execution_status=status, termination=termination, outcome=outcome,
+               last_frame=loop, error=error,
+               **{key: summary[key] for key in ("steps", "phase", "mean_step_ms", "max_step_ms") if key in summary}))
 
 
 if __name__ == "__main__":

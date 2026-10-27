@@ -2,7 +2,7 @@
 import json
 from collections import Counter
 
-from .analyzer import LOOPS, metric_summary, read_records
+from .analyzer import metric_statistics, metric_summary, read_records, execution_summary
 from .references import References
 from runner.artifacts import project_path, read_json
 
@@ -19,18 +19,21 @@ class Retriever:
             raise ValueError("Holdout is unavailable to the development Retriever")
         self.records = {}
 
-    def _records(self, report):
+    def _records(self, report, source="trace"):
         """Load original records lazily; static analysis queries need no raw-log cache."""
-        run_id = report["run_id"]
-        if run_id not in self.records:
-            self.records[run_id], _ = read_records(project_path(report["log_path"]).parent, run_id)
-        return self.records[run_id]
+        log_path = report["log_path"]
+        key = (log_path, source)
+        if key not in self.records:
+            # Old recordings mixed observations into trace, so state queries include both files.
+            files = ("trace", "state") if source == "state" else ("trace",)
+            self.records[key], _ = read_records(project_path(log_path).parent, report["run_id"], files=files)
+        return self.records[key]
 
     def query_logs(self, kind, batch_id, runs="all", **filters):
         """Return summaries by default; paginate explicit raw data with bounded references."""
         allowed = dict(overview=set(), metrics={"names"}, events={"types"},
-                       trace={"module", "call_id", "request_id", "status"}, compare={"names", "reference_batch"})
-        unknown = set(filters) - allowed[kind] - {"time", "offset", "detail"}
+                       trace={"module", "call_id", "request_id", "status"}, state=set(), compare={"names", "reference_batch"})
+        unknown = set(filters) - allowed[kind] - {"frame", "offset", "detail"}
         if unknown:
             raise ValueError(f"Unknown {kind} filters: {sorted(unknown)}")
         detail = filters.get("detail", "summary")
@@ -40,19 +43,20 @@ class Retriever:
         ids = list(batch["runs"]) if runs == "all" else runs
         if not isinstance(ids, list) or not set(ids) <= batch["runs"].keys():
             raise ValueError('runs must be "all" or a list of known run IDs')
-        window = filters.get("time", [0, float("inf")])
-        if len(window) != 2 or not all(isinstance(n, (int, float)) for n in window) or window[0] > window[1]:
-            raise ValueError("time must be [start_second, end_second] with start <= end")
+        window = filters.get("frame", [0, float("inf")])
+        if len(window) != 2 or not all(type(n) is int and n >= 0 for n in window) or window[0] > window[1]:
+            if "frame" in filters:
+                raise ValueError("frame must be [start_frame, end_frame] with nonnegative integers and start <= end")
         reports = [(run_id, batch["runs"][run_id]) for run_id in ids]
-        coverage = {run_id: self._coverage(report) for run_id, report in reports}
+        coverage = {batch_id: {run_id: self._coverage(report) for run_id, report in reports}}
         if kind == "compare":
             reference = self.batches[filters["reference_batch"]]
-            coverage.update({rid: self._coverage(r) for rid, r in reference["runs"].items()})
+            coverage[reference["batch_id"]] = {rid: self._coverage(r) for rid, r in reference["runs"].items()}
             compared = [(batch_id, run_id, report) for run_id, report in reports]
             compared.extend((reference["batch_id"], rid, report) for rid, report in reference["runs"].items())
             items = self._compare(compared, window, filters)
         else:
-            items = self._log_items(kind, reports, filters)
+            items = (dict(item, batch_id=batch_id) for item in self._log_items(kind, reports, filters))
 
         offset = filters.get("offset", 0)
         if not isinstance(offset, int) or offset < 0:
@@ -62,7 +66,7 @@ class Retriever:
     def _coverage(self, report):
         """Keep whole-run coverage and explicit integrity warnings, not repeated boilerplate."""
         coverage = report["coverage"]
-        result = {key: coverage[key] for key in ("duration_seconds", "integrity", "sample_ratio")}
+        result = {key: coverage[key] for key in ("last_frame", "integrity", "sample_ratio")}
         for key in ("problems", "unattributed_deaths"):
             if coverage.get(key):
                 result[key] = coverage[key]
@@ -70,7 +74,7 @@ class Retriever:
 
     def _log_items(self, kind, reports, filters):
         """Dispatch fixed query kinds and attach each row's run identity lazily."""
-        window = filters.get("time", [0, float("inf")])
+        window = filters.get("frame", [0, float("inf")])
         detail = filters.get("detail", "summary")
         for run_id, report in reports:
             if kind == "overview":
@@ -82,6 +86,10 @@ class Retriever:
                 rows = self._events(report, window, filters.get("types"))
             elif kind == "trace":
                 rows = self._trace(report, window, filters)
+            elif kind == "state":
+                rows = (dict(frame=row["frame"], kind="state", data={key: value for key, value in row.items()
+                        if key not in {"event", "frame", "source_ref"}}) for row in self._records(report, "state")
+                        if row["event"] == "state" and window[0] <= row["frame"] <= window[1])
             for row in rows:
                 yield dict(row, run_id=run_id)
 
@@ -97,18 +105,18 @@ class Retriever:
             item = compact_refs(row)
             size = len(json.dumps(item, ensure_ascii=False))
             if size > self.max_chars:
-                item = {key: item[key] for key in ("run_id", "event", "frame", "kind", "start", "end",
+                item = {key: item[key] for key in ("run_id", "event", "frame", "kind", "end_frame",
                                                   "name", "batch_id", "call_id", "request_id", "status", "source_ref", "source_refs",
                                                   "source_ref_count")
                         if key in item}
-                item.update(detail_omitted=True, hint="Narrow runs/time or use kind-specific filters to request less data")
+                item.update(detail_omitted=True, hint="Narrow runs/frame or use kind-specific filters to request less data")
                 size = len(json.dumps(item, ensure_ascii=False))
             if chars + size > self.max_chars:
                 has_more = True
                 break
             kept.append(item)
             chars += size
-        result = dict(items=kept, coverage=coverage)
+        result = dict(items=kept, quality=coverage)
         if has_more and kept:
             result["next_offset"] = offset + len(kept)
         if any(i.get("detail_omitted") for i in kept) or (has_more and not kept):
@@ -124,33 +132,39 @@ class Retriever:
         item = dict(**report["conditions"],
             outcome=report["outcome"].get("outcome"), termination=report["outcome"].get("termination"),
             execution_status=report["outcome"].get("execution_status"),
-            metrics={n: metric_summary(n, report["metrics"].get(n, []), window) for n in names},
-            metric_names=sorted(report["metrics"]),
-            module_exceptions=sum(m["exceptions"] for m in report["modules"].values()),
-            events=dict(Counter(e["kind"] for e in report["events"] if e["start"] <= window[1] and e["end"] >= window[0])))
+            frame=list(window) if window[1] != float("inf") else [window[0], report["coverage"]["last_frame"]],
+            metrics={n: metric_summary(n, report, window) for n in names},
+            metric_names=sorted(set(report["metrics"]) | set(report["counts"])),
+            module_exceptions=sum(window[0] <= frame <= window[1] for frame in report["counts"]["module_exceptions"]),
+            events=dict(Counter(e["kind"] for e in self._events(report, window, None))))
         if detail == "raw":
-            item.update(modules=report["modules"], actions=report["actions"], result=report["outcome"])
+            execution = self._execution(report, window)
+            item.update(modules=execution["modules"], actions=execution["actions"], result=report["outcome"])
         yield item
 
     def _metrics(self, report, window, names, detail):
         """Yield metrics rows within the requested scope."""
         for name in names:
-            rows = [r for r in report["metrics"].get(name, []) if window[0] <= r["time"] <= window[1]]
-            item = dict(name=name, statistics=metric_summary(name, rows),
-                        source_refs=[ref for row in rows for ref in row.get("source_refs", [])])
-            if not rows:
+            item = dict(name=name, statistics=metric_summary(name, report, window))
+            if name not in report["metrics"] and name not in report["counts"] and metric_statistics(name)[0] != "count":
                 item["reason"] = report["coverage"]["missing_metrics"].get(name, "Metric unavailable or no samples in window")
             yield item
-        if detail == "raw":
-            for name in names:
-                for row in report["metrics"].get(name, []):
-                    if window[0] <= row["time"] <= window[1]:
-                        yield dict(row, name=name)
+            if detail == "raw":
+                if name in report["counts"]:
+                    frames = [frame for frame in report["counts"][name] if window[0] <= frame <= window[1]]
+                    for start in range(0, len(frames), 128):
+                        yield dict(name=name, frame=frames[start:start + 128])
+                else:
+                    selected = [(frame, value) for frame, value in zip(report["frame"], report["metrics"].get(name, []))
+                                if window[0] <= frame <= window[1]]
+                    for start in range(0, len(selected), 128):
+                        points = selected[start:start + 128]
+                        yield dict(name=name, frame=[frame for frame, _ in points], values=[value for _, value in points])
 
     def _events(self, report, window, types):
         """Yield events rows within the requested scope."""
         for event in report["events"]:
-            if (event["start"] <= window[1] and event["end"] >= window[0]
+            if (event["frame"] <= window[1] and event.get("end_frame", event["frame"] + 1) > window[0]
                     and (not types or event["kind"] in types)):
                 yield event
 
@@ -159,18 +173,26 @@ class Retriever:
         names = filters.get("names", sorted({name for _, _, report in reports for name in report["metrics"]}))
         for batch_id, run_id, report in reports:
             item = dict(batch_id=batch_id, run_id=run_id, **report["conditions"],
-                metrics={name: metric_summary(name, report["metrics"].get(name, []), window) for name in names},
-                events=dict(Counter(e["kind"] for e in report["events"])),
-                module_exceptions=sum(m["exceptions"] for m in report["modules"].values()))
+                metrics={name: metric_summary(name, report, window) for name in names},
+                events=dict(Counter(e["kind"] for e in self._events(report, window, None))),
+                frame=[window[0], min(window[1], report["coverage"]["last_frame"])])
             if filters.get("detail") == "raw":
-                item["modules"] = report["modules"]
+                item["modules"] = self._execution(report, window)["modules"]
             yield item
+
+    def _execution(self, report, window):
+        if window[0] == 0 and window[1] >= report["coverage"]["last_frame"]:
+            return report
+        if not report["analysis"]["quality"]["trace"]["exact_calls"]:
+            raise ValueError("Historical v2 module totals are run-wide; query trace for the original window summaries")
+        return execution_summary(self._records(report), report["coverage"]["last_frame"],
+                                 report["analysis"]["config"], window)
 
     def _trace(self, report, window, filters):
         """Follow native call ancestry and request histories, including later confirmations."""
         rows = self._records(report)
         calls = {r["call_id"]: r for r in rows if r["event"] == "module_call"}
-        selected = {cid for cid, r in calls.items() if window[0] <= r["frame"] / LOOPS <= window[1]
+        selected = {cid for cid, r in calls.items() if window[0] <= r["frame"] <= window[1]
                     and (not filters.get("module") or filters["module"] in (r["module_id"], r["module_path"], r["path"]))
                     and (not filters.get("call_id") or cid == filters["call_id"])}
         if filters.get("status") in {"invoked_true", "invoked_false", "skipped", "exception"}:
@@ -192,14 +214,24 @@ class Retriever:
         request_ids = {r["request_id"] for r in rows if r["event"] == "action"
                        and r.get("request_id") and r.get("call_id") in descendants
                        and (not filters.get("request_id") or r["request_id"] == filters["request_id"])}
-        if filters.get("status"):
+        if filters.get("status") and filters["status"] not in {"invoked_true", "invoked_false", "skipped", "exception"}:
             request_ids &= {r.get("request_id") for r in rows if r.get("status") == filters["status"]}
         for row in rows:
+            if (row["event"] == "module_summary" and not filters.get("call_id") and not filters.get("request_id")
+                    and row["start_frame"] <= window[1] and row["frame"] >= window[0]):
+                for item in row["modules"]:
+                    if (not filters.get("module") or filters["module"] in (item["module_id"], item["module_path"], item["path"])) \
+                            and (not filters.get("status") or item.get(filters["status"], 0)):
+                        yield dict(kind="module_summary", frame=row["start_frame"], end_frame=row["frame"], data=item)
             if ((row["event"] == "module_call" and row["call_id"] in linked)
                     or (row["event"] == "action" and row.get("request_id") in request_ids)
-                    or (filters.get("detail") == "raw" and row["event"] == "state"
-                        and window[0] <= row["frame"] / LOOPS <= window[1])):
-                yield row
+                    or (row["event"] == "action" and not row.get("request_id")
+                        and window[0] <= row["frame"] <= window[1]
+                        and (not filters.get("status") or row.get("status") == filters["status"])
+                        and not any(filters.get(key)
+                        for key in ("module", "call_id", "request_id")))):
+                yield dict(frame=row["frame"], kind=row["event"], data={key: value for key, value in row.items()
+                           if key not in {"frame", "event", "source_ref"}})
 
     def read_reference(self, path, lines=None, key=None):
         """Route reference queries through the shared reader with this query's output limit."""

@@ -1,5 +1,6 @@
 """One issue, competing hypotheses and free-form evidence in a diagnosis session."""
 import ast
+import re
 
 from ..retriever import Retriever
 from ..analyzer import load_batch_analysis
@@ -28,8 +29,8 @@ class Investigation:
         if issue is not None:
             if not issue.get("problem") or not issue.get("evidence"):
                 raise ValueError("Provide issue.problem and nonempty issue.evidence")
-            if self.state["queries"] and self.state["issue"] and issue["problem"] != self.state["issue"]["problem"]:
-                raise ValueError("Problem is fixed after the first query")
+            if self.state["issue"] and issue["problem"] != self.state["issue"]["problem"] and not reason:
+                raise ValueError("Provide reason when revising the problem")
             self.state["issue"] = issue
         if hypotheses:
             existing = {hypothesis["id"]: hypothesis for hypothesis in self.state["hypotheses"]}
@@ -99,9 +100,21 @@ class Investigation:
         else:
             if not self.state["issue"] or not self.state["hypotheses"]:
                 raise ValueError("Call select_issue with an issue and hypotheses before concluding")
-            if not all(conclusion.get(key) for key in ("change", "preserve", "verification", "code_targets")):
-                raise ValueError("Conclusion requires change, preserve, verification and code_targets")
-            validate_targets(conclusion["code_targets"], self.job["parent"])
+            tasks = conclusion.get("tasks", [])
+            if not tasks or len(tasks) > self.options["max_tasks"]:
+                raise ValueError(f"Provide 1..{self.options['max_tasks']} tasks")
+            ids = [task.get("id", "") for task in tasks]
+            if len({key.casefold() for key in ids}) != len(ids) or any(
+                    not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,31}", key) for key in ids):
+                raise ValueError("Task IDs must be unique safe names, starting with a letter (max 32 characters)")
+            hypotheses = {hypothesis["id"] for hypothesis in self.state["hypotheses"]}
+            for task in tasks:
+                linked = task.get("hypothesis_ids", [])
+                if not linked or len(set(linked)) != len(linked) or not set(linked) <= hypotheses:
+                    raise ValueError("hypothesis_ids must reference distinct existing hypotheses")
+                if not all(task.get(key) for key in ("change", "preserve", "verification", "code_targets")):
+                    raise ValueError("Each task requires change, preserve, verification and code_targets")
+                validate_targets(task["code_targets"], self.job["parent"])
             self.state["conclusion"] = conclusion
         self.save()
         return {key: self.state[key] for key in ("conclusion", "reason") if key in self.state}
@@ -126,7 +139,7 @@ def validate_targets(targets, parent):
             path = path.replace(".", "/") + ".py"
         source = project_path(parent["source_root"]) / path
         if not editable(path) or not source.is_file():
-            raise ValueError(f"Code target exceeds editable scope or does not exist: {target}")
+            raise ValueError(f"Invalid code target: {target}; use an editable bot/... file or bot.* module, not source/...")
         if separator and not any(name == symbol for name, _ in symbols(ast.parse(source.read_text(encoding="utf-8")))):
             raise ValueError(f"Code target symbol unavailable: {target}")
 

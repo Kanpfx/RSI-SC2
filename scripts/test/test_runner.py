@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from runner.artifacts import path_reference, project_path, read_json, write_json
 from runner.matches import run_batch, run_match, worker
-from runner.versions import Versions, bot_inventory, hash_files, source_hash
+from runner.versions import Versions, bot_inventory, hash_files, source_hash, write_diff
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -48,6 +48,15 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(reference, "runtime/result.json")
         self.assertEqual(project_path(reference, root=self.source), path)
 
+    def test_diff_ignores_line_endings_and_writes_lf(self):
+        output = self.root / "patch.diff"
+        before = {"file.py": b"keep\nold\nend\n"}
+        write_diff(before, {"file.py": b"keep\r\nold\r\nend\r\n"}, ["file.py"], output)
+        self.assertEqual(output.read_bytes(), b"")
+        write_diff(before, {"file.py": b"keep\r\nnew\r\nend\r\n"}, ["file.py"], output)
+        self.assertEqual(output.read_bytes(),
+                         b"--- a/file.py\n+++ b/file.py\n@@ -1,3 +1,3 @@\n keep\n-old\n+new\n end\n")
+
     def test_source_and_snapshot_runs_share_the_result_contract(self):
         snapshot = Versions(self.source, self.root / "versions").freeze(self.source)
         for name, source in (("source", self.source), ("snapshot", snapshot)):
@@ -57,19 +66,21 @@ class RunnerTests(unittest.TestCase):
                 with patch("runner.matches.subprocess.Popen") as popen:
                     popen.return_value.wait.side_effect = lambda **kwargs: write_json(
                         output / "result.json", dict(execution_status="normal", outcome="win",
-                                                     termination="game_result", summary=dict(steps=3)))
+                                                     termination="game_result", steps=3))
                     result = run_match(self.source, source, self.conditions, output)
                 manifest = read_json(output / "manifest.json")
                 self.assertEqual(result, read_json(output / "result.json"))
-                self.assertEqual(result["version"], snapshot["version"])
-                self.assertEqual(result["run_id"], output.name)
-                self.assertEqual(result["summary"], dict(steps=3))
+                self.assertEqual(manifest["version"], snapshot["version"])
+                self.assertEqual(manifest["run_id"], output.name)
+                self.assertEqual(result["steps"], 3)
+                self.assertNotIn("version", result)
+                self.assertNotIn("output_dir", manifest)
                 self.assertEqual(manifest["environment"], self.environment)
                 self.assertEqual(popen.call_args.args[0][3], "runner.matches")
 
     def test_cancelled_and_timed_out_runs_keep_the_same_required_fields(self):
-        required = {"run_id", "version", "directory", "execution_status", "outcome", "termination",
-                    "duration_loops", "error", "summary", "replay_saved"}
+        required = {"schema_version", "execution_status", "outcome", "termination", "last_frame",
+                    "steps", "phase", "mean_step_ms", "max_step_ms", "error"}
         cancelled = Event()
         cancelled.set()
         output = self.root / "cancelled"
@@ -86,7 +97,7 @@ class RunnerTests(unittest.TestCase):
         stop.assert_called_once()
         self.assertEqual(set(result), required)
         self.assertEqual(result["termination"], "wall_timeout")
-        self.assertIsNone(result["duration_loops"])
+        self.assertIsNone(result["last_frame"])
 
     def test_standalone_cli_delegates_to_the_same_runner(self):
         from bot.run import main
@@ -115,6 +126,8 @@ class RunnerTests(unittest.TestCase):
         submitted = sorted((call.args[2] for call in run.call_args_list), key=lambda item: item["seed"])
         self.assertEqual(submitted, [dict(condition, wall_timeout=8) for condition in conditions])
         self.assertEqual([call.args for call in sleep.call_args_list], [(3,), (3,)])
+        self.assertEqual([Path(call.args[3]).name for call in sorted(run.call_args_list, key=lambda call: call.args[2]['seed'])],
+                         ['run_01', 'run_02', 'run_03'])
         output = self.root / "no_budget"
         with self.assertRaisesRegex(RuntimeError, "Insufficient wall budget"):
             run_batch(self.source, source, conditions, output, "parent", wall_budget=6)
@@ -128,7 +141,7 @@ class RunnerTests(unittest.TestCase):
         write_json(output / "manifest.json", spec)
         bot = SimpleNamespace(state=SimpleNamespace(game_loop=2240), steps=3, runtime_error=None,
                               summary=lambda: dict(result="Result.Victory", steps=3))
-        logger = SimpleNamespace(close=lambda: None)
+        logger = SimpleNamespace(close=lambda: None, actual={}, error_ref=None)
         with patch("sys.path", list(sys.path)), patch.dict("os.environ"), \
                 patch("bot.entry.ResearchBot", return_value=bot) as create_bot, \
                 patch("bot.telemetry.logger.Logger", return_value=logger) as create_logger, \
@@ -138,11 +151,11 @@ class RunnerTests(unittest.TestCase):
                 patch("sc2.main.run_game") as run_game:
             worker(output / "manifest.json")
         create_bot.assert_called_once_with(logger=logger, sc2_build=98370)
-        create_logger.assert_called_once_with(None)
+        create_logger.assert_called_once_with(None, frame_step=2)
         self.assertEqual(run_game.call_args.kwargs, dict(realtime=False, random_seed=1, game_time_limit=150,
                                                         save_replay_as=str(output / "match.SC2Replay")))
-        self.assertEqual(read_json(output / "manifest.json")["map_sha256"], hashlib.sha256(b"map").hexdigest())
+        self.assertEqual(read_json(output / "manifest.json")["actual"]["map_sha256"], hashlib.sha256(b"map").hexdigest())
         result = read_json(output / "result.json")
         self.assertEqual(result["outcome"], "win")
         self.assertEqual(result["execution_status"], "normal")
-        self.assertEqual(result["duration_loops"], 2240)
+        self.assertEqual(result["last_frame"], 2240)

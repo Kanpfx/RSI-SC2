@@ -34,12 +34,13 @@ class ResearchBot(BotAI):
         """Verify the native build, set game_step and construct shared frame services."""
         self.client.game_step = GAME_STEP
         ping = (await self.client.ping()).ping
+        self.logger.emit("game_started", 0, game_version=ping.game_version,
+                         sc2_build=ping.base_build, game_step=GAME_STEP)
         if ping.base_build != self.sc2_build:
             raise RuntimeError(f"Expected SC2 build {self.sc2_build}, got {ping.base_build}")
         units, spatial = UnitControl(), Spatial(self)
         actions = Actions(self, units, spatial.placement)
         self.frame = Frame(self, spatial, units, actions)
-        self.logger.emit("game_started", 0, game_version=ping.game_version, game_step=GAME_STEP)
 
     async def on_step(self, iteration):
         """Observe prior actions, run the root Tactics, arbitrate requests and flush telemetry.
@@ -49,6 +50,7 @@ class ResearchBot(BotAI):
         """
         start = perf_counter()
         try:
+            self.logger.observe(self)
             self.frame.actions.begin()
             self.frame.units.update(self)
             await self.frame.run(self.tactics)

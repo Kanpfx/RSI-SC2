@@ -9,10 +9,15 @@ from .artifacts import path_reference, project_path
 
 def source_paths(root):
     """Enumerate retained files without reading contents; reject links and caches."""
-    for path in sorted(Path(root).rglob("*")):
+    # iterdir propagates access errors; rglob can silently return an empty inventory.
+    for path in sorted(Path(root).iterdir()):
         if path.is_symlink():
             raise ValueError(f"Source links are unsupported: {path}")
-        if "__pycache__" not in path.parts and path.suffix not in {".pyc", ".pyo"} and path.is_file():
+        if path.name == "__pycache__" or path.suffix in {".pyc", ".pyo"}:
+            continue
+        if path.is_dir():
+            yield from source_paths(path)
+        elif path.is_file():
             yield path
 
 
@@ -38,11 +43,11 @@ def write_diff(before, after, changed, output):
     """Write a patch from the inventories already read for static validation."""
     lines = []
     for name in changed:
+        old, new = (files.get(name, b"").decode("utf-8", errors="replace")
+                    .replace("\r\n", "\n").replace("\r", "\n").splitlines(True) for files in (before, after))
         lines.extend(difflib.unified_diff(
-            before.get(name, b"").decode("utf-8", errors="replace").splitlines(True),
-            after.get(name, b"").decode("utf-8", errors="replace").splitlines(True),
-            fromfile="a/" + name, tofile="b/" + name))
-    Path(output).write_text("".join(lines), encoding="utf-8")
+            old, new, fromfile="a/" + name, tofile="b/" + name))
+    Path(output).write_text("".join(lines), encoding="utf-8", newline="\n")
 
 
 class Versions:

@@ -9,10 +9,10 @@ def diagnosis_prompt(prompt, options):
         rules.append("Use only the predeclared evidence pack; do not call query_logs, read_reference or query_memory.")
     else:
         rules.extend((
-            "Query evidence to test hypotheses; revise them with select_issue as evidence changes.",
+            "Query evidence to test hypotheses.",
             "Log, reference and memory queries share max_queries; keep reads focused.",
         ))
-    rules.append("After the first query, keep the problem fixed; evidence descriptions may be refined.")
+    rules.append("Revise the issue or hypotheses with select_issue as evidence changes; explain revisions in reason.")
     return "\n\n".join((prompt.rstrip(), "\n".join(rules)))
 
 

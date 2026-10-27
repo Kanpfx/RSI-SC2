@@ -19,7 +19,7 @@ class MessageTests(unittest.TestCase):
                     self.assertTrue(prompt.startswith(base + "\n\n"))
                     self.assertIn("at least two competing hypotheses" if competing else "one hypothesis", prompt)
                     self.assertNotIn("one hypothesis" if competing else "at least two competing hypotheses", prompt)
-                    self.assertIn("keep the problem fixed", prompt)
+                    self.assertIn("Revise the issue or hypotheses", prompt)
                     if policy == "fixed":
                         self.assertIn("do not call query_logs, read_reference or query_memory", prompt)
                         self.assertNotIn("Query evidence", prompt)

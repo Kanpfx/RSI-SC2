@@ -3,10 +3,8 @@ import argparse
 import copy
 import json
 import time
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from dataclasses import dataclass, field
 from pathlib import Path
-from uuid import uuid4
 
 from .analyzer import Analyzer, analyze_evidence, metric_summary
 from .diagnosis.session import make_job as diagnosis_job
@@ -14,10 +12,13 @@ from .editor import make_job as editor_job
 from .evaluator import evaluate, batch_problem
 from .memory import record, search
 from .references import freeze_context
+from .search import add_node, select_parent
+from .workspace import allocate, create_workspace, preflight_storage, remove_workspace
 from runner.artifacts import path_reference, project_path, read_json, write_json
 from .tools.config import load_config, role_settings, validate_config
 from runner.console import error_summary, progress
-from .tools.llm import call_session, load_settings, preflight
+from .tools.llm import ExperimentRuntime, call_session, load_settings, preflight
+from .tools.sandbox import preflight_editor
 from runner.matches import run_batch
 from .tools.validate import validate
 from runner.versions import Versions
@@ -25,6 +26,7 @@ from runner.versions import Versions
 
 def _load_models(project, config):
     """Resolve and preflight both roles once before collecting experiment evidence."""
+    preflight_editor(config.get("editor_execution", {"mode": "local"}))
     settings = {role: load_settings(project, role_settings(config["model"], role))
                 for role in ("diagnosis", "editor")}
     for model in settings.values():
@@ -38,10 +40,11 @@ class IterationResult:
     report: dict
     baseline: dict | None = None
     candidate: dict | None = None
+    children: list = field(default_factory=list)
 
 
 class Run:
-    def __init__(self, project, config, *, root=None, analyzer=None, model_settings=None):
+    def __init__(self, project, config, *, root=None, analyzer=None, model_settings=None, context=None, runtime=None):
         """Bind one iteration's fixed configuration; execution starts only in execute()."""
         self.project = Path(project).resolve()
         self.config = copy.deepcopy(config)
@@ -49,8 +52,10 @@ class Run:
         self.root = Path(root) if root is not None else self.project / "runtime/rsi"
         self.versions = Versions(self.project, self.project / "runtime/rsi")
         self.analyzer, self.model_settings = analyzer, model_settings
+        self.context = context
+        self.runtime = runtime
         self.started = time.monotonic()
-        self.directory = self.root / "iterations" / (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ_") + uuid4().hex[:8])
+        self.directory = allocate(self.root, "iterations")
         self.report = dict(iteration_id=self.directory.name, status="running", stage="prepare",
                            config=self.config, costs=dict(matches=0, sessions=[], wall_seconds=0), artifacts={})
         self.outcome = IterationResult(self.report)
@@ -74,7 +79,8 @@ class Run:
         summary.pop("config", None)
         if "diagnosis" in summary:
             diagnosis = summary["diagnosis"]
-            summary["diagnosis"] = dict(status="repair_ready" if diagnosis.get("conclusion") else "unresolved")
+            summary["diagnosis"] = dict(status="repair_ready" if diagnosis.get("conclusion") else "unresolved",
+                                        tasks=len((diagnosis.get("conclusion") or {}).get("tasks", [])))
         if "validation" in summary:
             validation = summary["validation"]
             summary["validation"] = dict(passed=validation["passed"], failed_checks=[
@@ -99,7 +105,7 @@ class Run:
         self.report["costs"]["matches"] += count
         remaining = self.remaining()
         conditions = [dict(self.config["matches"], seed=seed) for seed in range(1, count + 1)]
-        name = purpose + "_" + uuid4().hex[:8]
+        name = self.runtime.next_name("batch")
         directory = self.directory / "batches" / name
         self.report["artifacts"][name] = path_reference(directory / "batch.json")
         self.checkpoint(name)
@@ -119,27 +125,21 @@ class Run:
         return evidence
 
     def model(self, name, job):
-        """Allocate remaining shared model budget and charge every completed/failed session."""
+        """Give each session its role's full limits and record usage for reporting."""
         settings = dict(self.model_settings[job["role"]])
         sessions = self.report["costs"]["sessions"]
-        used_tokens = sum(session.get("tokens") or 0 for session in sessions)
-        settings["max_total_tokens"] = min(settings["max_total_tokens"],
-            self.config["model"]["max_total_tokens"] - used_tokens)
-        known_cost = sum(session.get("cost") or 0 for session in sessions)
-        settings["max_cost"] = min(settings["max_cost"],
-            self.config["model"]["max_cost"] - known_cost)
-        if settings["max_total_tokens"] <= 0 or settings["max_cost"] <= 0:
-            raise RuntimeError("Iteration model budget exhausted")
         settings["wall_timeout"] = min(settings["wall_timeout"], self.remaining())
-        job = dict(job, model=settings)
-        directory = self.directory / "sessions" / name
+        job = dict(job, model=settings, iteration=path_reference(self.directory / "iteration.json"))
+        if job["role"] == "editor":
+            job["execution"] = self.config.get("editor_execution", {"mode": "local"})
+        directory = self.runtime.root / "sessions" / self.runtime.next_name(job["role"])
         self.report["artifacts"][name + "_job"] = path_reference(directory / "job.json")
         self.report["artifacts"][name + "_response"] = path_reference(directory / "response.json")
         if job["role"] == "diagnosis":
             self.report["artifacts"]["diagnosis"] = path_reference(directory / "investigation.json")
         self.checkpoint(name)
         progress(name, f"Session started; timeout={settings['wall_timeout']:.0f}s")
-        response = call_session(self.project, job, directory)
+        response = call_session(self.project, job, directory, runtime=self.runtime)
         usage = response.get("usage", {})
         sessions.append(dict(name=name, **usage))
         self.checkpoint(name)
@@ -156,6 +156,12 @@ class Run:
         """Retain all outcomes and write memory only when diagnosis actually ran."""
         if status in {"error", "interrupted"}:
             self.report["failed_stage"] = self.report["stage"]
+            for branch in self.report.get("branches", []):
+                if branch["status"] in {"editing", "evaluating"}:
+                    branch.update(status=status, reason=reason)
+        if "champion_before" in self.report:
+            self.report["champion_after"] = (self.report.get("candidate") or {}).get(
+                "version", self.report["champion_before"])
         self.report.update(status=status, reason=reason)
         if "diagnosis" in self.report:
             record(self.root, self.report)
@@ -169,7 +175,7 @@ class Run:
         runs, events = [], []
         for batch in analyses:
             for run_id, report in batch["runs"].items():
-                metrics = {name: metric_summary(name, report["metrics"].get(name, []))
+                metrics = {name: metric_summary(name, report)
                            for name in ("workers", "minerals", "vespene", "supply_block_ratio", "army_supply")}
                 outcome, coverage = report["outcome"], report["coverage"]
                 workers, minerals, vespene = metrics["workers"], metrics["minerals"], metrics["vespene"]
@@ -182,7 +188,7 @@ class Run:
                 runs.append(dict(
                     batch_id=batch["batch_id"], run_id=run_id, **report["conditions"],
                     outcome=outcome.get("outcome"), termination=outcome.get("termination"),
-                    duration_seconds=coverage["duration_seconds"], execution_status=outcome.get("execution_status"),
+                    last_frame=coverage["last_frame"], execution_status=outcome.get("execution_status"),
                     integrity=coverage["integrity"], sample_ratio=coverage["sample_ratio"], metrics=run_metrics))
                 seen = set()
                 for event in report["events"]:
@@ -190,12 +196,12 @@ class Run:
                         continue
                     seen.add(event["kind"])
                     events.append(dict(batch_id=batch["batch_id"], run_id=run_id,
-                        **{key: event[key] for key in ("kind", "start", "end", "details")}))
+                        **event))
         options = self.config["diagnosis"]
         overview = dict(runs=runs, events=events,
             paths=dict(strategy="source/components/tactics/bc_rush.py", tasks="source/components/tasks/",
                        api="api/", knowledge="knowledge/"),
-            limits={key: options[key] for key in ("query_policy", "max_queries", "competing_hypotheses", "use_memory")})
+            limits={key: options[key] for key in ("query_policy", "max_queries", "max_tasks", "competing_hypotheses", "use_memory")})
         self.save("overview", overview)
         return overview
 
@@ -204,7 +210,7 @@ class Run:
         conditions = [{k: r["conditions"][k] for k in ("map", "race", "difficulty")}
                       for a in analyses for r in a["runs"].values()]
         self.report["conditions"] = conditions[0] if conditions and all(c == conditions[0] for c in conditions) else {}
-        context = self.root / "context"
+        context = self.context
         experiences = search(self.root, self.report["conditions"]) if self.config["diagnosis"]["use_memory"] else []
         progress("diagnosis", f"Preparing inputs; memory={len(experiences)}")
         memory_path = self.directory / "memory.json"
@@ -221,40 +227,64 @@ class Run:
             progress("diagnosis", f"{hypothesis['id']}: {hypothesis['explanation']}")
         return diagnosis
 
-    def _edit_and_validate(self, parent, diagnosis):
-        """Edit and validate a candidate, retrying only repairable Bot failures."""
-        context = self.root / "context"
-        candidate = self.versions.candidate(parent, self.directory / "candidate")
+    def _edit_and_validate(self, parent, diagnosis, task, branch):
+        """Edit one independent task, retaining the existing static-repair policy."""
+        context = self.context
+        slot = branch["slot"]
+        candidate = create_workspace(self.versions, parent, self.directory / "iteration.json", task["id"],
+                                     root=self.runtime.root, name=self.runtime.next_name("candidate"))
+        branch["workspace"] = dict(path=path_reference(candidate.parent), status="retained")
+        self.checkpoint("task_" + slot)
         feedback = None
         for attempt in range(self.config["max_repairs"] + 1):
             progress("editor", f"Attempt {attempt + 1}/{self.config['max_repairs'] + 1}")
-            self.model(f"editor_{attempt}", editor_job(candidate, diagnosis, feedback, context=context))
+            self.model(f"editor_{slot}_{attempt}", editor_job(candidate, diagnosis, task, feedback, context=context,
+                evidence_path=self.report["artifacts"]["diagnosis"]))
             self.versions.verify(parent)
             feedback = validate(parent, candidate, timeout=min(30, self.remaining()),
-                                patch_path=self.directory / "patch.diff")
+                                patch_path=self.directory / f"patch_{slot}.diff")
             changed = next((check["changed"] for check in feedback["checks"] if check["name"] == "scope"), [])
-            self.report["changed_files"] = changed
-            self.report["artifacts"]["patch"] = path_reference(self.directory / "patch.diff")
+            branch["changed_files"] = changed
+            branch["patch"] = path_reference(self.directory / f"patch_{slot}.diff")
             progress("editor", "Changed files: " + (", ".join(changed) or "none"))
             for check in feedback["checks"]:
                 progress("validation", f"{check['name']}: {'passed' if check['passed'] else 'failed'}")
-            self.report["validation"] = feedback
-            self.save(f"validation_{attempt}", feedback)
+            branch["validation_passed"] = feedback["passed"]
+            self.save(f"validation_{slot}_{attempt}", feedback)
             if feedback["passed"]:
-                return self.versions.freeze(candidate), feedback
+                child = self.versions.freeze(candidate)
+                remove_workspace(self.runtime.root, candidate.parent)
+                branch["workspace"]["status"] = "removed"
+                return child, feedback
         return None, feedback
 
-    def execute(self, parent=None, baseline=None):
-        """Reuse the parent batch; run only one candidate batch after static checks."""
+    def _branch_budget_problem(self):
+        """Skip unstarted branches when the shared round budget is exhausted."""
+        if self.report["costs"]["matches"] + self.config["parallel_matches"] > self.config["max_matches"]:
+            return "Match budget exhausted"
+        if time.monotonic() - self.started >= self.config["max_wall_seconds"]:
+            return "Iteration wall budget exhausted"
+        return None
+
+    def execute(self, parent=None, baseline=None, *, champion=None, evidence_cache=None):
+        """Expand independent tasks under shared budgets, retaining all valid evaluated children."""
+        owns_runtime = self.runtime is None
+        if owns_runtime:
+            self.runtime = ExperimentRuntime(self.project, allocate(self.versions.root, "runtimes"))
         try:
             progress("iteration", f"Started: {path_reference(self.directory)}")
             if self.model_settings is None:
+                preflight_storage(self.runtime.root)
+                retained = list(self.versions.root.glob("runtimes/*/work/*/workspace.json"))
+                retained.extend((self.versions.root / "work").glob("*/workspace.json"))
+                if retained:
+                    progress("prepare", f"Existing workspaces retained: {len(retained)}; inspect runtime/rsi")
                 self.model_settings = _load_models(self.project, self.config)
-            context = self.root / "context"
-            if not context.exists():
-                freeze_context(self.project, context)
+            if self.context is None:
+                self.context = freeze_context(self.project, self.versions.root / "refs", shared=True)
+            self.report["context"] = dict(id=self.context.name, source_root=path_reference(self.context))
             if self.analyzer is None:
-                self.analyzer = Analyzer(context)
+                self.analyzer = Analyzer(self.context)
             parent = parent or self.versions.freeze(self.project)
             self.versions.verify(parent)
             self.report["parent"] = parent
@@ -275,40 +305,95 @@ class Run:
             diagnosis = self._diagnose(parent, [batch], overview, [analysis])
             if not diagnosis.get("conclusion"):
                 return self.finish("unresolved", diagnosis.get("reason", "Diagnosis unresolved"))
-            child, validation = self._edit_and_validate(parent, diagnosis)
-            if not validation["passed"]:
-                return self.finish("reject", "Candidate static validation failed")
-            self.report["candidate"] = child
-            evidence = self.batch(child, "candidate")
-            self.outcome.candidate = evidence
-            self.report["candidate_batch"] = evidence["batch_path"]
-            candidate_analysis = evidence["analysis"]
-            evaluation = evaluate(analysis, candidate_analysis)
-            self.report["evaluation"] = evaluation
-            self.save("evaluation", evaluation)
-            progress("evaluation", f"Decision: {evaluation['decision']}; reason={evaluation['reason']}")
-            if not evaluation["comparable"] and evaluation.get("code") != "candidate_bot_error":
-                return self.finish("error", evaluation["reason"])
-            return self.finish(evaluation["decision"], evaluation["reason"])
+            incumbent = champion or baseline
+            cache = dict(evidence_cache or {})
+            cache[parent["version"]] = baseline
+            cache[incumbent["batch"]["version"]] = incumbent
+            self.report["champion_before"] = incumbent["batch"]["version"]
+            self.report["branches"] = []
+            for index, task in enumerate(diagnosis["conclusion"]["tasks"], 1):
+                slot = f"t{index:02d}"
+                branch = dict(task_id=task["id"], slot=slot, status="editing")
+                self.report["branches"].append(branch)
+                budget_problem = self._branch_budget_problem()
+                if budget_problem:
+                    branch.update(status="skipped", reason=budget_problem)
+                    self.checkpoint("budget")
+                    continue
+                self.checkpoint("task_" + task["id"])
+                child, validation = self._edit_and_validate(parent, diagnosis, task, branch)
+                if not validation["passed"]:
+                    branch.update(status="reject", reason="Candidate static validation failed")
+                    self.checkpoint("task_" + task["id"])
+                    continue
+                branch.update(candidate=child, status="evaluating")
+                self.checkpoint("task_" + task["id"])
+                evidence = cache.get(child["version"])
+                branch["reused_evidence"] = evidence is not None
+                if evidence is None:
+                    evidence = self.batch(child, "candidate_" + slot)
+                branch["batch"] = evidence["batch_path"]
+                evaluation = evaluate(analysis, evidence["analysis"])
+                name = "evaluation_" + slot
+                self.save(name, evaluation)
+                branch["evaluation"] = self.report["artifacts"][name]
+                branch.update(status=evaluation["decision"], reason=evaluation["reason"])
+                progress("evaluation", f"Task {task['id']}: {evaluation['decision']}; {evaluation['reason']}")
+                if not evaluation["comparable"]:
+                    if evaluation.get("code") == "candidate_bot_error":
+                        continue
+                    branch["status"] = "error"
+                    return self.finish("error", evaluation["reason"])
+                cache[child["version"]] = evidence
+                self.outcome.children.append(dict(version=child, evidence=evidence, task_id=task["id"],
+                                                  decision=evaluation["decision"]))
+                if incumbent["batch"]["version"] == parent["version"]:
+                    promotion = evaluation
+                    branch["promotion"] = branch["evaluation"]
+                else:
+                    promotion = evaluate(incumbent["analysis"], evidence["analysis"])
+                    self.save("promotion_" + slot, promotion)
+                    branch["promotion"] = self.report["artifacts"]["promotion_" + slot]
+                if not promotion["comparable"]:
+                    return self.finish("error", promotion["reason"])
+                branch["promoted"] = promotion["decision"] == "accept"
+                if branch["promoted"]:
+                    incumbent = evidence
+                    self.outcome.candidate = evidence
+                    self.report["candidate"] = child
+                    self.report["candidate_batch"] = evidence["batch_path"]
+                self.checkpoint("task_" + task["id"])
+            if self.outcome.candidate:
+                return self.finish("accept", "An evaluated child improved the experiment champion")
+            return self.finish("reject", "No child improved the experiment champion")
         except KeyboardInterrupt:
             return self.finish("interrupted", "Cancelled without automatic retry")
         except Exception as exc:
             return self.finish("error", f"{type(exc).__name__}: {exc}")
+        finally:
+            if owns_runtime:
+                self.runtime.close()
 
 
 def run_experiment(project, config, *, parent=None, rounds=1):
-    """Run one isolated chain, retaining accepted code and its already collected evidence."""
+    """Grow an isolated archive while retaining a separately evaluated champion."""
     validate_config(config)
     if not isinstance(rounds, int) or rounds < 1:
         raise ValueError("rounds must be a positive integer")
     project = Path(project).resolve()
     versions = Versions(project, project / "runtime/rsi")
     current = versions.freeze(Path(parent).resolve() if parent is not None else project)
-    root = project / "runtime/rsi/experiments" / (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ_") + uuid4().hex[:8])
+    root = allocate(versions.root, "experiments")
+    root.mkdir()
     report = dict(experiment_id=root.name, status="running", config=copy.deepcopy(config),
                   rounds=rounds, initial_parent=current, current_parent=current, iterations=[])
-    baseline = analyzer = model_settings = None
+    baseline = analyzer = model_settings = context = None
+    archive = dict(nodes={}, edges=[])
+    evidence_cache = {}
+    report["archive"] = path_reference(root / "archive.json")
     started = time.monotonic()
+    runtime = ExperimentRuntime(project, allocate(versions.root, "runtimes", name=root.name))
+    report["runtime"] = path_reference(runtime.root)
 
     def save_report():
         """Keep a compact round index; complete round details live in iteration.json."""
@@ -318,6 +403,7 @@ def run_experiment(project, config, *, parent=None, rounds=1):
                       for r in report["iterations"]]
         report["costs"] = dict(matches=sum(r["costs"]["matches"] for r in report["iterations"]),
                               wall_seconds=time.monotonic() - started)
+        write_json(root / "archive.json", archive)
         write_json(root / "experiment.json", dict(report, iterations=iterations))
 
     try:
@@ -338,23 +424,39 @@ def run_experiment(project, config, *, parent=None, rounds=1):
             signature = lambda items: sorted(json.dumps({k: r[k] for k in keys}, sort_keys=True) for r in items)
             if signature(actual) != signature(expected):
                 raise ValueError("parent_batch conditions differ from configured batch")
-            context = root / "context"
-            freeze_context(project, context)
+            context = freeze_context(project, versions.root / "refs", shared=True)
             analyzer = Analyzer(context)
             analysis_path = root / "batches" / batch["batch_id"] / "analysis.json"
             baseline = analyze_evidence(analyzer, batch, path, analysis_path)
         for number in range(1, rounds + 1):
             progress("experiment", f"Round {number}/{rounds}")
-            run = Run(project, config, root=root, analyzer=analyzer, model_settings=model_settings)
-            outcome = run.execute(current, baseline)
+            run = Run(project, config, root=root, analyzer=analyzer, model_settings=model_settings, context=context,
+                      runtime=runtime)
+            parent_key = select_parent(archive, current["version"], number) if archive["nodes"] else current["version"]
+            selected = dict(version=parent_key, source_root=archive["nodes"][parent_key]["source_root"]) if archive["nodes"] else current
+            selected_evidence = evidence_cache.get(parent_key, baseline)
+            outcome = run.execute(selected, selected_evidence, champion=baseline, evidence_cache=evidence_cache)
             result = outcome.report
             analyzer, model_settings = run.analyzer, run.model_settings
-            baseline = outcome.baseline or baseline
+            context = run.context
+            if context is not None:
+                report["context"] = dict(id=context.name, source_root=path_reference(context))
+            if outcome.baseline and batch_problem(outcome.baseline["analysis"]) is None:
+                add_node(archive, selected, outcome.baseline)
+                evidence_cache[parent_key] = outcome.baseline
+                archive["nodes"][parent_key]["expansions"] += 1
+                baseline = baseline or outcome.baseline
+            for child in outcome.children:
+                add_node(archive, child["version"], child["evidence"])
+                evidence_cache.setdefault(child["version"]["version"], child["evidence"])
+                archive["edges"].append(dict(parent=parent_key, child=child["version"]["version"],
+                    iteration_id=result["iteration_id"], task_id=child["task_id"], decision=child["decision"],
+                    report=path_reference(run.directory / "iteration.json")))
             report["iterations"].append(dict(round=number, iteration_id=result["iteration_id"],
                 status=result["status"], reason=result["reason"], parent=result.get("parent"),
                 candidate=result.get("candidate"), costs=result["costs"],
                 report=path_reference(run.directory / "iteration.json")))
-            if result["status"] == "accept":
+            if outcome.candidate is not None:
                 current, baseline = result["candidate"], outcome.candidate
             report["current_parent"] = current
             report["current_batch"] = baseline.get("batch_path") if baseline else None
@@ -370,6 +472,8 @@ def run_experiment(project, config, *, parent=None, rounds=1):
         report.update(status="interrupted", reason="Cancelled without automatic retry")
     except Exception as exc:
         report.update(status="error", reason=f"{type(exc).__name__}: {exc}")
+    finally:
+        runtime.close()
     save_report()
     progress("experiment", f"Finished: {report['status']}; report={path_reference(root / 'experiment.json')}")
     return report

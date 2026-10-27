@@ -2,22 +2,63 @@
 import importlib.util
 import json
 import shutil
+import sys
+from importlib.metadata import version
 from pathlib import Path
+from uuid import uuid4
 
 from runner.artifacts import project_path
+from runner.versions import hash_files, inventory
 
 
-def freeze_context(project, directory):
-    """Freeze reference inputs once so later queries retain stable provenance."""
+def freeze_context(project, directory, *, shared=False):
+    """Freeze references, optionally reusing a verified content-addressed snapshot."""
     directory = Path(directory)
-    shutil.copytree(Path(project) / "knowledge", directory / "knowledge")
+    files = {"knowledge/" + name: data for name, data in inventory(Path(project) / "knowledge").items()}
     spec = importlib.util.find_spec("sc2")
     if spec and spec.origin:
         api_root = Path(spec.origin).parent
         for path in api_root.rglob("*.py"):
-            target = directory / "api" / path.relative_to(api_root)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(path, target)
+            files["api/" + path.relative_to(api_root).as_posix()] = path.read_bytes()
+    files["reference.json"] = json.dumps(dict(burnysc2=version("burnysc2")), sort_keys=True).encode("utf-8")
+
+    def write(target):
+        """Write only the bytes included in the reference identity."""
+        for name, data in files.items():
+            path = target / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+
+    if not shared:
+        directory.mkdir(parents=True, exist_ok=False)
+        write(directory)
+        return directory
+    identity = hash_files(files)
+    target = directory / identity
+    directory.mkdir(parents=True, exist_ok=True)
+    if not target.exists():
+        staging = directory / (".ref-" + uuid4().hex)
+        # Shared snapshots must inherit project ACLs, not tempfile's owner-only ACL.
+        staging.mkdir()
+        try:
+            write(staging)
+            try:
+                staging.rename(target)
+            except FileExistsError:
+                pass  # Another experiment published the same immutable snapshot.
+        finally:
+            if staging.exists():
+                shutil.rmtree(staging)
+    stored = inventory(target)
+    actual = hash_files(stored)
+    if actual != identity:
+        missing = sorted(files.keys() - stored.keys())
+        extra = sorted(stored.keys() - files.keys())
+        changed = sorted(name for name in files.keys() & stored.keys() if files[name] != stored[name])
+        raise ValueError("Reference snapshot content does not match its identity; "
+                         f"path={target}; python={sys.executable}; expected={identity}; actual={actual}; "
+                         f"missing={missing}; extra={extra}; changed={changed}")
+    return target
 
 
 class References:

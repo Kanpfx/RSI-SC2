@@ -8,16 +8,18 @@ from .tools.validate import editable
 
 
 PROMPT = """You are the code editor for a rule-based SC2 Bot.
-Implement the supplied conclusion in the candidate workspace and verify it with offline checks.
+Implement only the assigned task in the candidate workspace and verify it with offline checks.
 Keep changes small. Preserve the diagnosis target, required behavior and verification advice.
 Use validator_feedback to repair the current candidate without broadening scope.
+Skip Git commands; Run generates the candidate patch.
 
 Read relevant code and the Bot notes before editing. Edit only Python files under
 bot/components/{behaviors,tasks,tactics}/; leave tests, core, spatial, telemetry, RSI and external files unchanged.
 Use frame.run and frame.actions; avoid native commands and duplicate tracking/logging.
 Add concise English docstrings to new or changed functions.
 
-Task data provides the issue, hypotheses, conclusion and paths. Read paths.evidence selectively through
+Task data provides the issue, related hypotheses, assigned task and paths. Do not implement sibling tasks.
+Read paths.evidence selectively through
 the terminal: it contains queries=[{tool, arguments, result}] and may lie outside the file editor's boundary.
 Do not print the full investigation. Use read_reference for API/Knowledge when available;
 its tool description defines reference roots, and the Knowledge notes explain entries and units.
@@ -35,10 +37,10 @@ Offline checks do not establish gameplay gains or acceptance.
 """
 
 
-def make_job(candidate, diagnosis, feedback=None, context=None):
+def make_job(candidate, diagnosis, task, feedback=None, context=None, *, evidence_path):
     """Keep one task object for both the saved job and the model's input."""
     candidate = project_path(candidate)
-    inputs = _task_inputs(candidate, diagnosis, feedback, context)
+    inputs = _task_inputs(candidate, diagnosis, task, feedback, context, evidence_path)
     parts = [PROMPT.rstrip()]
     guides = [candidate / "bot/README.md"]
     if context:
@@ -51,14 +53,16 @@ def make_job(candidate, diagnosis, feedback=None, context=None):
                 task=inputs, prompt=prompt)
 
 
-def _task_inputs(candidate, diagnosis, feedback, context):
+def _task_inputs(candidate, diagnosis, task, feedback, context, evidence_path):
     """Reference the original investigation and prepare compact editing inputs."""
-    evidence_path = candidate.parent / "sessions/diagnosis/investigation.json"
     failures = None if feedback is None else dict(passed=feedback["passed"], checks=[
         {k: (v[-4000:] if k == "output" else v) for k, v in check.items()}
         for check in feedback["checks"] if not check["passed"]])
     return dict(
-        issue=diagnosis.get("issue"), hypotheses=diagnosis.get("hypotheses", []), conclusion=diagnosis["conclusion"],
+        issue=diagnosis.get("issue"),
+        hypotheses=[{key: value for key, value in hypothesis.items() if key not in {"revisions", "introduced_reason"}}
+                    for hypothesis in diagnosis.get("hypotheses", []) if hypothesis["id"] in task["hypothesis_ids"]],
+        task=task,
         paths=dict(evidence=_workspace_path(candidate, evidence_path),
                    references=_workspace_path(candidate, context) if context else None,
                    tests=_workspace_path(candidate, Path(__file__).resolve().parents[1] / "scripts/test"),
@@ -124,5 +128,6 @@ def editor_tools(job):
         selected.append(Tool(name=definition.name))
     selected.append(Tool(name=TerminalTool.name, params=dict(env=dict(
         PATH=str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", ""),
-        PYTHONPATH=str(Path(job["workspace"]).resolve()), PYTHONDONTWRITEBYTECODE="1"))))
+        PYTHONPATH=os.pathsep.join((str(Path(job["workspace"]).resolve()), str(Path(__file__).resolve().parents[1]))),
+        PYTHONDONTWRITEBYTECODE="1"))))
     return selected

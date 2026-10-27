@@ -80,8 +80,8 @@ def _observation_progress(role, name, observation):
                     parts.append(brief(value["reason"]))
                 progress(role, "; ".join(parts))
             elif name == "conclude" and value.get("conclusion"):
-                conclusion = value["conclusion"]
-                progress(role, "Conclusion validated: " + conclusion["change"])
+                for task in value["conclusion"]["tasks"]:
+                    progress(role, f"Task {task['id']}: {task['change']}")
             elif name == "conclude":
                 progress(role, "Unresolved: " + value.get("reason", "No proposal"))
         case "editor", "terminal":

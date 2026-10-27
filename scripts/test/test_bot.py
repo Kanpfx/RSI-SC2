@@ -21,6 +21,7 @@ from bot.core.units import UnitControl
 from bot.spatial import Spatial
 from bot.spatial.placement import Placement
 from bot.telemetry.logger import Logger
+from rsi.logs import read_records
 from bot.components.behaviors.combat.attack_move import AttackMove
 from bot.components.behaviors.economy.mining import Mining
 from bot.components.behaviors.production.build_structure import BuildStructure
@@ -356,20 +357,104 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
             frame.game.state.score = ScoreDetails(score)
             with TemporaryDirectory() as directory:
                 logger = Logger(directory if enabled else None)
+                logger.observe(frame.game)
                 await frame.run(Request(1, target=Point2((20, 20))))
                 await frame.actions.resolve()
                 logger.consume(frame)
                 logger.close()
                 if enabled:
-                    rows = [json.loads(line) for line in (Path(directory)/"trace.jsonl").read_text().splitlines()]
+                    rows, problems = read_records(directory, "run_01")
+                    self.assertFalse(problems)
                     call = next(row for row in rows if row["event"] == "module_call")
                     state = next(row for row in rows if row["event"] == "state")
+                    raw = (Path(directory)/"trace.jsonl").read_text()
+                    self.assertNotIn("module_summary", raw)
+                    self.assertNotIn("minerals", raw)
                     self.assertEqual(state["score"]["killed_value_units"], 500)
                     self.assertEqual(state["score"]["killed_value_structures"], 150)
                     self.assertEqual(state["score"]["lost_minerals_army"], 100)
                     self.assertTrue(all(row["call_id"] == call["call_id"] for row in rows if row["event"] == "action"))
             commands.append([(c.ability, c.target) for c in frame.game.commands])
         self.assertEqual(commands[0], commands[1])
+
+    async def test_logger_keeps_every_quiet_call_and_flushes_partial_chunk(self):
+        """Quiet/skipped calls keep exact frames and the final observation chunk survives close."""
+        class Waiting:
+            async def execute(self, frame):
+                return False
+
+        frame = make_frame()
+        module = Waiting()
+        with TemporaryDirectory() as directory:
+            logger = Logger(directory)
+            for loop in range(0, 224, 2):
+                frame.game.state.game_loop = loop
+                logger.observe(frame.game)
+                await frame.run(module)
+                await frame.run(module, enabled=False, skip_reason='phase_inactive')
+                logger.consume(frame)
+            logger.close()
+            logger.close()
+            rows, problems = read_records(directory, 'run_01')
+            chunks = [json.loads(line) for line in (Path(directory) / 'state.jsonl').read_text().splitlines()][1:]
+            raw = (Path(directory) / 'trace.jsonl').read_text()
+        self.assertFalse(problems)
+        self.assertNotIn('module_summary', raw)
+        calls = [row for row in rows if row['event'] == 'module_call']
+        self.assertEqual(len(calls), 224)
+        self.assertEqual(sum(row['status'] == 'invoked_false' for row in calls), 112)
+        self.assertEqual(sum(row.get('skip_reason') == 'phase_inactive' for row in calls), 112)
+        self.assertEqual([row['frame'] for row in calls], [frame for frame in range(0, 224, 2) for _ in range(2)])
+        self.assertEqual(sum(len(chunk['minerals']) for chunk in chunks), 112)
+        self.assertEqual(chunks[-1]['start_frame'] + (len(chunks[-1]['minerals']) - 1) * 2, 222)
+
+    async def test_logger_keeps_action_ancestry_and_later_confirmation(self):
+        """An action's original call remains available when confirmation arrives in a later frame."""
+        unit = Unit(1)
+        frame = make_frame(unit)
+        child = Request(1, target=Point2((20, 20)))
+
+        class Parent:
+            async def execute(self, frame):
+                return await frame.run(child)
+
+        with TemporaryDirectory() as directory:
+            logger = Logger(directory)
+            await frame.run(Parent())
+            await frame.actions.resolve()
+            logger.consume(frame)
+            frame.game.state.game_loop = 16
+            unit.orders = [NS(ability=NS(id=A.MOVE), target=Point2((20, 20)), progress=0)]
+            frame.actions.begin()
+            logger.consume(frame)
+            logger.close()
+            rows, problems = read_records(directory, 'run_01')
+            self.assertFalse(problems)
+        calls = {row['call_id']: row for row in rows if row['event'] == 'module_call'}
+        actions = [row for row in rows if row['event'] == 'action']
+        observed = next(row for row in actions if row['status'] == 'observed')
+        self.assertIn(observed['call_id'], calls)
+        self.assertIn(calls[observed['call_id']]['parent_id'], calls)
+        self.assertEqual({row['status'] for row in actions}, {'proposed', 'submitted', 'observed'})
+
+    async def test_logger_keeps_exception_details_without_actions(self):
+        """Exceptions are never discarded as quiet calls or moved into native observations."""
+        class Broken:
+            async def execute(self, frame):
+                raise RuntimeError('telemetry exception fixture')
+
+        frame = make_frame()
+        with TemporaryDirectory() as directory:
+            logger = Logger(directory)
+            with self.assertRaises(RuntimeError):
+                await frame.run(Broken())
+            logger.consume(frame)
+            logger.close()
+            rows, problems = read_records(directory, 'run_01')
+            self.assertFalse(problems)
+        call = next(row for row in rows if row['event'] == 'module_call')
+        self.assertEqual(call['status'], 'exception')
+        self.assertIn('telemetry exception fixture', call['exception'])
 
     async def test_full_tactics_graph_and_mining_respect_existing_occupancy(self):
         """Verify the three-layer graph executes and mining excludes an accepted builder."""

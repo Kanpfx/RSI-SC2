@@ -76,7 +76,7 @@ def evaluate(parent, candidate):
     report["comparable"] = True
     parent_runs, candidate_runs = [sorted(batch["runs"].values(), key=_condition_key)
                                    for batch in (parent, candidate)]
-    shared_ends = [min(parent_run["coverage"]["duration_seconds"], candidate_run["coverage"]["duration_seconds"])
+    shared_ends = [min(parent_run["coverage"]["last_frame"], candidate_run["coverage"]["last_frame"])
                    for parent_run, candidate_run in zip(parent_runs, candidate_runs)]
     parent_win_rate, candidate_win_rate = [
         mean(run["outcome"]["outcome"] == "win" and run["outcome"].get("termination") != "time_limit"
@@ -105,7 +105,5 @@ def evaluate(parent, candidate):
 
 
 def _metric_value(run, rule, end):
-    """Read a statistic over the shared game-time window, clipping boundary weights."""
-    rows = [dict(row, seconds=min(row.get("seconds", 0), end - row["time"]))
-            for row in run["metrics"].get(rule["name"], []) if row["time"] <= end]
-    return metric_summary(rule["name"], rows).get(rule["statistic"]) if rows else None
+    """Read the same evaluation statistic over the shared native-frame window."""
+    return metric_summary(rule["name"], run, (0, end)).get(rule["statistic"])

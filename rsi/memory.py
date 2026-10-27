@@ -18,8 +18,18 @@ def record(root, report):
     validation, evaluation = report.get("validation", {}), report.get("evaluation", {})
     item["validation"] = dict(passed=validation.get("passed"))
     item["evaluation"] = {key: evaluation.get(key) for key in ("decision", "reason")}
+    if "branches" in report:
+        item["branches"] = [{key: branch[key] for key in
+                             ("task_id", "status", "reason", "validation_passed", "promoted", "patch", "evaluation", "promotion")
+                             if key in branch}
+                            for branch in report["branches"]]
+        item.pop("validation")
+        item.pop("evaluation")
+        item["changed_files"] = sorted({name for branch in report["branches"]
+                                         for name in branch.get("changed_files", [])})
     item["artifacts"] = {key: value for key, value in report.get("artifacts", {}).items()
-                         if key in {"diagnosis", "patch", "evaluation"} or key.startswith("validation_")}
+                         if key in {"diagnosis", "patch", "evaluation"}
+                         or key.startswith(("validation_", "evaluation_", "promotion_"))}
     write_json(Path(root) / "memory" / f"{report['iteration_id']}.json", item)
 
 

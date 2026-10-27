@@ -3,6 +3,9 @@
   "max_wall_seconds": 7200,
   "parallel_matches": 5,
   "max_repairs": 2,
+  "editor_execution": {
+    "mode": "local"
+  },
   "model": {
     "api_key_env": "LLM_API_KEY",
     "reasoning_effort": "high",
@@ -19,7 +22,8 @@
     "query_policy": "active",
     "competing_hypotheses": true,
     "use_memory": true,
-    "max_queries": 32
+    "max_queries": 32,
+    "max_tasks": 3
   },
   "matches": {
     "map": "AbyssalReefLE",

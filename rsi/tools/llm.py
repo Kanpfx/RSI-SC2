@@ -4,14 +4,18 @@ import math
 import os
 import subprocess
 import sys
+import time
 import traceback
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from runner.artifacts import path_reference, project_path, read_json, write_json
 from runner.console import write_console
 from .console import tool_progress
-from runner.processes import stop_process, wait_process
+from runner.processes import stop_process
+from ..workspace import allocate
+from .sandbox import editor_container, prepare_editor_job
 
 
 def load_settings(project, settings):
@@ -51,46 +55,121 @@ def _read_usage(directory):
     return read_json(path) if path.exists() else {}
 
 
-def call_session(project, job, directory):
-    """Run one model conversation in a bounded worker and retain its complete artifacts."""
-    directory = Path(directory)
-    directory.mkdir(parents=True, exist_ok=False)
-    write_json(directory / "job.json", job)
-    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-    with (directory / "stdout.txt").open("w", encoding="utf-8") as out, \
-            (directory / "stderr.txt").open("w", encoding="utf-8") as err:
-        process = subprocess.Popen([sys.executable, "-B", "-m", "rsi.tools.llm",
-                                    str(directory / "job.json")], cwd=project,
-                                   stdout=out, stderr=err, creationflags=flags,
-                                   env=dict(os.environ, PYTHONIOENCODING="utf-8"))
+class ExperimentRuntime:
+    """Own sequential SDK workers and the optional Editor container for one experiment."""
+
+    def __init__(self, project, root):
+        self.project, self.root = Path(project).resolve(), Path(root).resolve()
+        self.workers = {}
+        self.counters = {}
+        self.resources = ExitStack()
+        self.closed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    def close(self):
+        """Stop workers before removing containers and closing their log files."""
+        if not self.closed:
+            self.closed = True
+            self.resources.close()
+
+    def next_name(self, prefix):
+        """Keep experiment-wide numbering even after temporary candidates are removed."""
+        self.counters[prefix] = self.counters.get(prefix, 0) + 1
+        return f"{prefix}_{self.counters[prefix]:02d}"
+
+    @staticmethod
+    def _stop(process):
+        """Allow an idle worker to exit on EOF, then enforce process-tree cleanup."""
         try:
-            # Relay only worker stdout; SDK diagnostics remain in stderr.txt.
+            process.stdin.close()
+            process.wait(timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            stop_process(process)
+
+    def _worker(self, job):
+        """Start at most one host worker and one Docker Editor worker, without retries."""
+        mode = job.get("execution", {}).get("mode", "local")
+        if mode not in self.workers:
+            self.root.mkdir(parents=True, exist_ok=True)
+            command = [sys.executable, "-u", "-B", "-m", "rsi.tools.llm", "--worker"]
+            if mode == "docker":
+                command = self.resources.enter_context(editor_container(self.project, job, self.root))
+            out = self.resources.enter_context((self.root / f"{mode}.stdout.txt").open("w", encoding="utf-8"))
+            err = self.resources.enter_context((self.root / f"{mode}.stderr.txt").open("w", encoding="utf-8"))
+            process = subprocess.Popen(command, cwd=self.project, stdin=subprocess.PIPE,
+                stdout=out, stderr=err, text=True, encoding="utf-8",
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                env=dict(os.environ, PYTHONIOENCODING="utf-8"))
+            self.resources.callback(self._stop, process)
+            self.workers[mode] = process
+        return self.workers[mode]
+
+    def call_session(self, job, directory):
+        """Submit one independent conversation and enforce its existing wall deadline."""
+        if self.closed:
+            raise RuntimeError("Experiment runtime is closed")
+        directory = Path(directory).resolve()
+        directory.mkdir(parents=True, exist_ok=False)
+        write_json(directory / "job.json", job)
+        (directory / "stdout.txt").touch()
+        (directory / "stderr.txt").touch()
+        path = directory / "response.json"
+        deadline = time.monotonic() + job["model"]["wall_timeout"]
+        process = None
+        try:
+            job_path = directory / "job.json"
+            if job.get("execution", {}).get("mode") == "docker":
+                job_path = prepare_editor_job(job, self.root, directory)
+            process = self._worker(job)
+            if process.poll() is not None:
+                raise RuntimeError("Model worker exited before submission")
+            process.stdin.write(json.dumps(str(job_path)) + "\n")
+            process.stdin.flush()
             with (directory / "stdout.txt").open(encoding="utf-8", errors="replace") as stream:
-                def relay():
-                    """Forward newly written progress while retaining the worker log."""
+                while True:
                     for line in stream:
                         write_console(line, end="")
-                wait_process(process, job["model"]["wall_timeout"], on_poll=relay)
-        except subprocess.TimeoutExpired:
-            stop_process(process)
-            response = dict(status="error", reason="model_session_wall_timeout",
-                            usage=_read_usage(directory))
-            write_json(directory / "response.json", response)
-            return response
+                    if (directory / "done").exists():
+                        for line in stream:
+                            write_console(line, end="")
+                        break
+                    if process.poll() is not None:
+                        raise RuntimeError("Model worker exited without a response")
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise subprocess.TimeoutExpired(process.args, job["model"]["wall_timeout"])
+                    try:
+                        process.wait(timeout=min(0.25, remaining))
+                    except subprocess.TimeoutExpired:
+                        pass
         except BaseException as exc:
-            stop_process(process)
-            write_json(directory / "response.json", dict(
-                status="interrupted" if isinstance(exc, KeyboardInterrupt) else "error",
-                reason="model_session_interrupted" if isinstance(exc, KeyboardInterrupt) else "model_worker_error",
-                usage=_read_usage(directory)))
-            raise
-    path = directory / "response.json"
-    if not path.exists():
-        write_json(path, dict(status="error", reason="model_worker_missing_response", usage={}))
-    response = read_json(path)
-    if "result_path" in response:
-        response["value"] = read_json(project_path(response["result_path"]))
-    return response
+            if process is not None and process.poll() is None:
+                stop_process(process)
+            response = dict(status="interrupted" if isinstance(exc, KeyboardInterrupt) else "error",
+                reason="model_session_interrupted" if isinstance(exc, KeyboardInterrupt) else
+                       "model_session_wall_timeout" if isinstance(exc, subprocess.TimeoutExpired) else
+                       "model_worker_error: " + str(exc), usage=_read_usage(directory))
+            write_json(path, response)
+            if not isinstance(exc, Exception):
+                raise
+        response = read_json(path)
+        if "result_path" in response:
+            response["value"] = read_json(project_path(response["result_path"]))
+        return response
+
+
+def call_session(project, job, directory, *, runtime=None):
+    """Use the experiment's worker, or own one worker for a standalone call."""
+    if runtime is not None:
+        return runtime.call_session(job, directory)
+    root = allocate(Path(project) / "runtime/rsi", "runtimes")
+    with ExperimentRuntime(project, root) as runtime:
+        return runtime.call_session(job, directory)
 
 
 def budgeted_llm_type(settings):
@@ -235,6 +314,7 @@ def execute(job_path, llm_factory=None):
                 conversation.close()
             except Exception as exc:
                 response["cleanup_error"] = str(exc)
+                response.update(status="error", reason="model_session_cleanup_failed")
         saved = dict(response)
         if investigation and "value" in saved:
             saved.pop("value")
@@ -243,5 +323,42 @@ def execute(job_path, llm_factory=None):
     return response
 
 
+@contextmanager
+def session_output(directory):
+    """Route Python, SDK logging and native output to this session's own files."""
+    sys.stdout.flush()
+    sys.stderr.flush()
+    saved = [os.dup(fd) for fd in (1, 2)]
+    try:
+        with (directory / "stdout.txt").open("a", encoding="utf-8") as out, \
+                (directory / "stderr.txt").open("a", encoding="utf-8") as err:
+            os.dup2(out.fileno(), 1)
+            os.dup2(err.fileno(), 2)
+            try:
+                yield
+            finally:
+                sys.stdout.flush()
+                sys.stderr.flush()
+    finally:
+        for fd, original in zip((1, 2), saved):
+            os.dup2(original, fd)
+            os.close(original)
+
+
+def serve():
+    """Execute job paths from stdin in order, retaining imports but no live conversation."""
+    for line in sys.stdin:
+        job_path = Path(json.loads(line))
+        with session_output(job_path.parent):
+            write_json(job_path.parent / "worker.json", dict(pid=os.getpid()))
+            response = execute(job_path)
+        (job_path.parent / "done").touch()
+        if response["status"] != "ok":
+            return
+
+
 if __name__ == "__main__":
-    execute(Path(sys.argv[1]))
+    if sys.argv[1] == "--worker":
+        serve()
+    else:
+        execute(Path(sys.argv[1]))

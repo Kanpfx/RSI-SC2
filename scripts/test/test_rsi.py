@@ -11,7 +11,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from rsi.analyzer import Analyzer, load_batch_analysis, save_batch_analysis
+from rsi.analyzer import Analyzer, load_batch_analysis, save_batch_analysis, run_view
 from rsi.diagnosis.investigate import Investigation
 from rsi.diagnosis.session import investigation_tools, make_job as diagnosis_job
 from rsi.evaluator import METRICS, evaluate
@@ -82,6 +82,16 @@ def proposal():
                 code_targets=["bot/components/tasks/economy.py"])
 
 
+def task(task_id="T1", hypothesis_id="0", **changes):
+    """Return one independent intervention linked to an existing hypothesis."""
+    return dict(id=task_id, hypothesis_ids=[hypothesis_id], **dict(proposal(), **changes))
+
+
+def plan():
+    """Return the diagnosis task plan."""
+    return dict(tasks=[task()])
+
+
 def sdk_messages(calls):
     from openhands.sdk.llm import Message, MessageToolCall, TextContent
     return [Message(role="assistant", content=[TextContent(text="Offline fixture")], tool_calls=[
@@ -111,9 +121,9 @@ class PipelineTests(unittest.TestCase):
         self.assertIn("mineral_income", run["coverage"]["missing_metrics"])
         self.assertEqual(run["actions"]["submitted_ratio"], 1)
         self.assertTrue(any(e["kind"] == "supply_block" for e in run["events"]))
-        result = retriever.query_logs("trace", batch_id=self.batch["batch_id"], call_id="c1", time=[0, 1])
-        self.assertTrue(any(r.get("status") == "observed" for r in result["items"]))
-        self.assertTrue(any(i.get("source_ref") or i.get("source_refs") for i in result["items"]))
+        result = retriever.query_logs("trace", batch_id=self.batch["batch_id"], call_id="c1", frame=[0, 22])
+        self.assertTrue(any(r.get("data", {}).get("status") == "observed" for r in result["items"]))
+        self.assertTrue(all("run_id" in i and "batch_id" in i for i in result["items"]))
         with self.assertRaises(ValueError):
             analyzer.analyze_batch(dict(self.batch, purpose="holdout"))
         retriever.max_chars = 10
@@ -132,9 +142,9 @@ class PipelineTests(unittest.TestCase):
                 process.return_value.wait.side_effect = lambda **kwargs: write_json(directory / "result.json", result)
                 merged = run_match(ROOT, self.parent, conditions, directory, "parent", "batch")
             self.assertEqual(merged, read_json(directory / "result.json"))
-            self.assertEqual(merged["run_id"], directory.name)
+            self.assertNotIn("run_id", merged)
             self.assertEqual(merged["outcome"], "win")
-            self.assertEqual(merged["version"], self.parent["version"])
+            self.assertNotIn("version", merged)
 
     def test_batch_staggers_three_submissions(self):
         events = []
@@ -232,38 +242,38 @@ class PipelineTests(unittest.TestCase):
         self.assertNotIn("allowed_statistics", result["items"][0])
         self.assertNotIn("reason", result["items"][0])
         self.assertNotIn("truncated", result)
-        self.assertTrue(any(i.get("source_ref") or i.get("source_refs") for i in result["items"]))
+        self.assertTrue(all("run_id" in i and "batch_id" in i for i in result["items"]))
         raw = retriever.query_logs("metrics", batch_id=self.batch["batch_id"], names=["workers"], detail="raw")
         self.assertNotIn("truncated", raw)
-        self.assertIsNotNone(raw["next_offset"])
+        self.assertTrue(any("values" in item and "frame" in item for item in raw["items"]))
         run = next(iter(batch["runs"].values()))
-        run["events"] = [dict(kind="production_idle", start=0, end=150, details=dict(facility="STARPORT"),
+        run["events"] = [dict(kind="production_idle", frame=0, end_frame=3360, data=dict(facility="STARPORT"),
                               source_refs=[f"run:L{i}" for i in range(3000)])]
         event = retriever.query_logs("events", batch_id=self.batch["batch_id"])["items"][0]
         self.assertEqual(event["source_ref_count"], 3000)
         self.assertTrue(event["source_refs"])
         self.assertLess(len(event["source_refs"]), 3000)
         self.assertEqual(len(run["events"][0]["source_refs"]), 3000)
-        run["events"][0]["details"]["large"] = "x" * 30000
+        run["events"][0]["data"]["large"] = "x" * 30000
         oversized = retriever.query_logs("events", batch_id=self.batch["batch_id"])
         self.assertTrue(oversized["items"][0]["detail_omitted"])
         self.assertTrue(oversized["truncated"])
         self.assertNotIn("next_offset", oversized)
         self.assertEqual(oversized["items"][0]["kind"], "production_idle")
         trace = retriever.query_logs("trace", batch_id=self.batch["batch_id"], call_id="c1")
-        self.assertFalse(any(r["event"] == "state" for r in trace["items"]))
-        self.assertTrue(any(r["event"] == "state" for r in retriever.query_logs(
-            "trace", batch_id=self.batch["batch_id"], call_id="c1", detail="raw")["items"]))
+        self.assertFalse(any(r["kind"] == "state" for r in trace["items"]))
+        self.assertTrue(any(r["kind"] == "state" for r in retriever.query_logs(
+            "state", batch_id=self.batch["batch_id"])["items"]))
 
     def test_raw_pagination_preserves_results_and_stops_at_page_limit(self):
         batch = Analyzer(ROOT).analyze_batch(self.batch)
         retriever = Retriever(self.parent["source_root"], ROOT, analyses=[batch], max_items=1000, max_chars=1000000)
         run = next(iter(batch["runs"].values()))
-        run["metrics"]["workers"][-2]["value"] = 100
+        run["metrics"]["workers"][-2] = 100
         query = dict(names=["workers", "minerals"], detail="raw")
         complete = retriever.query_logs("metrics", batch_id=self.batch["batch_id"], **query)["items"]
         retriever.max_items = 3
-        for max_chars in (1000000, 600):
+        for max_chars in (1000000, 6000):
             with self.subTest(max_chars=max_chars):
                 retriever.max_chars = max_chars
                 collected, offset = [], 0
@@ -280,7 +290,7 @@ class PipelineTests(unittest.TestCase):
         def events():
             """Fail if pagination consumes beyond its single lookahead row."""
             for i in range(4):
-                yield dict(kind="unit_created", start=i, end=i, details={}, source_refs=[f"run:L{i}"])
+                yield dict(kind="unit_created", frame=i, data={}, source_refs=[f"run:L{i}"])
             raise AssertionError("Read past the requested page")
 
         retriever.max_chars = 24000
@@ -313,15 +323,74 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual([(r["batch_id"], r["run_id"]) for r in collected],
                          [("parent", "parent_0"), ("reference", "reference_0"), ("reference", "reference_1")])
         self.assertTrue(all("reference" not in row for row in collected))
-        coverage = missing["coverage"]["parent_0"]
+        coverage = missing["quality"]["parent"]["parent_0"]
         self.assertEqual(coverage["problems"], ["corrupt_line:100"])
         self.assertEqual(coverage["unattributed_deaths"], 2)
-        self.assertEqual(coverage["duration_seconds"], 150)
+        self.assertEqual(coverage["last_frame"], 3360)
         self.assertNotIn("missing_metrics", coverage)
         self.assertEqual(missing["items"][0]["reason"], report["coverage"]["missing_metrics"]["mineral_income"])
         self.assertNotIn("actions", overview["items"][0])
         self.assertEqual(raw["items"][0]["actions"], report["actions"])
         self.assertEqual(raw["items"][0]["modules"], report["modules"])
+
+    def test_raw_log_cache_separates_batches_with_the_same_run_name(self):
+        """run_01 in two batches must retain each batch's original trace."""
+        retriever = Retriever(self.parent['source_root'], ROOT)
+        first = dict(run_id='run_01', log_path=str(self.root / 'batch_01/run_01/trace.jsonl'))
+        second = dict(run_id='run_01', log_path=str(self.root / 'batch_02/run_01/trace.jsonl'))
+        with patch('rsi.retriever.read_records', side_effect=[([dict(value=1)], []), ([dict(value=2)], [])]) as read:
+            self.assertEqual(retriever._records(first), [dict(value=1)])
+            self.assertEqual(retriever._records(second), [dict(value=2)])
+            self.assertEqual(retriever._records(first), [dict(value=1)])
+        self.assertEqual(read.call_count, 2)
+
+    def test_compact_trace_preserves_metrics_actions_and_module_totals(self):
+        """Separating native data and summarizing quiet calls must preserve evaluation inputs."""
+        from itertools import groupby
+        from bot.telemetry.logger import Logger
+        from rsi.analyzer import read_records
+
+        original = Path(next(iter(self.batch['runs'].values())))
+        compact = self.root / 'compact/run_01'
+        compact.mkdir(parents=True)
+        for name in ('manifest.json', 'result.json'):
+            (compact / name).write_bytes((original / name).read_bytes())
+        rows = [json.loads(line) for line in (original / 'trace.jsonl').read_text().splitlines()]
+        logger = Logger(compact)
+        for loop, group in groupby(rows, key=lambda row: row['frame']):
+            group = list(group)
+            calls = [{key: value for key, value in row.items() if key != 'event'}
+                     for row in group if row['event'] == 'module_call']
+            actions = [{key: value for key, value in row.items() if key != 'event'}
+                       for row in group if row['event'] == 'action']
+            logger._execution(loop, calls, actions)
+            for row in group:
+                if row['event'] not in {'module_call', 'action'}:
+                    logger.emit(**row)
+        logger.close()
+
+        def without_refs(value):
+            if isinstance(value, list):
+                return [without_refs(item) for item in value]
+            if isinstance(value, dict):
+                return {key: without_refs(item) for key, item in value.items()
+                        if key not in {'source_ref', 'source_refs'}}
+            return value
+
+        analyzer = Analyzer(ROOT, dict(sample_gap_frames=16))
+        before = run_view(original, 'run_01', analyzer.analyze_run(original, 'run_01'))
+        after = run_view(compact, 'run_01', analyzer.analyze_run(compact, 'run_01'))
+        for key in ('metrics', 'events', 'actions', 'modules'):
+            self.assertEqual(without_refs(before[key]), without_refs(after[key]), key)
+        records, problems = read_records(compact, 'run_01')
+        self.assertFalse(problems)
+        self.assertTrue(all(row['source_ref'].startswith('run_01:state:L') for row in records if row['event'] == 'state'))
+        report = dict(batch_id='compact', purpose='parent', runs={'run_01': after})
+        retriever = Retriever(self.parent['source_root'], ROOT, analyses=[report])
+        trace = retriever.query_logs('trace', batch_id='compact', module='Economy')
+        self.assertTrue(any(row['kind'] == 'module_call' for row in trace['items']))
+        (compact / 'state.jsonl').unlink()
+        self.assertIn('missing_state', read_records(compact, 'run_01')[1])
 
 
     def test_reference_reads_use_sdk_and_json_keys(self):
@@ -413,7 +482,7 @@ class PipelineTests(unittest.TestCase):
     def test_iteration_summary_keeps_details_in_stage_artifacts(self):
         run = Run(ROOT, self.config)
         run.directory = self.root / "summary"
-        diagnosis = dict(conclusion=proposal(), queries=[dict(payload="x" * 10000)])
+        diagnosis = dict(conclusion=plan(), queries=[dict(payload="x" * 10000)])
         validation = dict(passed=False, checks=[dict(name="import", passed=False, output="x" * 10000)])
         evaluation = dict(decision="inconclusive", reason="fixture", supplementary=[dict(payload="x" * 10000)])
         diagnosis_path = run.directory / "sessions/diagnosis/investigation.json"
@@ -427,7 +496,7 @@ class PipelineTests(unittest.TestCase):
         self.assertNotIn("config", summary)
         self.assertFalse((run.directory / "final.json").exists())
         self.assertFalse((run.directory / "diagnosis.json").exists())
-        self.assertEqual(summary["diagnosis"], dict(status="repair_ready"))
+        self.assertEqual(summary["diagnosis"], dict(status="repair_ready", tasks=1))
         self.assertEqual(summary["validation"], dict(passed=False, failed_checks=["import"]))
         self.assertEqual(summary["evaluation"], dict(decision="inconclusive", reason="fixture"))
         for name, value in (("diagnosis", diagnosis), ("validation_0", validation), ("evaluation", evaluation)):
@@ -441,8 +510,9 @@ class PipelineTests(unittest.TestCase):
         def batch(name, wins, values=(100, 0.4, 100, 100, 100)):
             return dict(batch_id=name, runs={str(i): dict(conditions=dict(seed=i), environment={},
                 outcome=dict(execution_status="normal", termination="game_result", outcome="win" if i < wins else "loss"),
-                coverage=dict(integrity="complete", sample_ratio=1, duration_seconds=150),
-                metrics={rule["name"]: [dict(time=0, value=value, seconds=150)]
+                coverage=dict(integrity="complete", sample_ratio=1, last_frame=3360),
+                frame=[0, 2016, 3136, 3360], counts={}, analysis=dict(config=dict(sample_gap_frames=3360)),
+                metrics={rule["name"]: [value] * 4
                          for rule, value in zip(METRICS, values)}) for i in range(3)})
         parent = batch("parent", 0)
         for values, expected in (((100, 0.4, 100, 100, 100), "reject"),
@@ -478,10 +548,10 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(evaluate(parent, reordered)["decision"], "accept")
         candidate = batch("candidate", 0)
         for run in candidate["runs"].values():
-            run["coverage"]["duration_seconds"] = 100
+            run["coverage"]["last_frame"] = 2240
         for run in parent["runs"].values():
-            run["metrics"]["combat_value"].append(dict(time=140, value=1000))
-            run["metrics"]["army_value"] = [dict(time=0, value=100, seconds=90), dict(time=90, value=200, seconds=60)]
+            run["metrics"]["combat_value"][2:] = [1000, 1000]
+            run["metrics"]["army_value"] = [100, 200, 200, 200]
         result = evaluate(parent, candidate)
         self.assertEqual(result["metrics"][0]["parent"], 100)
         self.assertEqual(result["metrics"][2]["parent"], 110)
@@ -492,16 +562,16 @@ class PipelineTests(unittest.TestCase):
         expected = dict(combat_value=1200, trade_efficiency=1200 / 1350, army_value=700,
                         army_investment=1400, resource_collection_rate=1600)
         for name, value in expected.items():
-            self.assertAlmostEqual(report["metrics"][name][-1]["value"], value)
+            self.assertAlmostEqual(report["metrics"][name][-1], value)
         self.assertNotIn("army_value", report["coverage"]["missing_metrics"])
-        self.assertEqual(report["metrics"]["score.killed_value_units"][-1]["value"], 1000)
+        self.assertEqual(report["metrics"]["score.killed_value_units"][-1], 1000)
         path = Path(next(iter(self.batch["runs"].values()))) / "trace.jsonl"
         rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
         for row in rows:
             row.pop("score", None)
         path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
         legacy = next(iter(analyzer.analyze_batch(self.batch)["runs"].values()))
-        self.assertNotIn("combat_value", legacy["metrics"])
+        self.assertTrue(all(value is None for value in legacy["metrics"]["combat_value"]))
         self.assertIn("army_value", legacy["coverage"]["missing_metrics"])
 
     def investigation(self, policy="active"):
@@ -521,7 +591,7 @@ class PipelineTests(unittest.TestCase):
         _, job = self.investigation()
         analysis = load_batch_analysis(job["analyses"][0])
         stored = read_json(job["analyses"][0])
-        self.assertTrue(all(isinstance(path, str) for path in stored["runs"].values()))
+        self.assertTrue(all(set(reference) == {"source", "analysis"} for reference in stored["runs"].values()))
         expected = copy.deepcopy(analysis)
         with patch.object(Analyzer, "analyze_run", side_effect=AssertionError("Repeated analysis")):
             investigation = Investigation(job, self.root)
@@ -531,8 +601,8 @@ class PipelineTests(unittest.TestCase):
                     self.assertTrue(retriever.query_logs(kind, batch_id=self.batch["batch_id"], **params)["items"])
             self.assertFalse(retriever.records)
             trace = retriever.query_logs("trace", batch_id=self.batch["batch_id"], call_id="c1")
-            self.assertTrue(any(item.get("status") == "observed" for item in trace["items"]))
-            self.assertEqual(set(retriever.records), set(self.batch["runs"]))
+            self.assertTrue(any(item.get("data", {}).get("status") == "observed" for item in trace["items"]))
+            self.assertEqual(len(retriever.records), len(self.batch["runs"]))
         self.assertEqual(read_json(job["analyses"][0]), stored)
         self.assertEqual(retriever.batches[analysis["batch_id"]], expected)
         legacy_path = self.root / "legacy_analysis.json"
@@ -619,9 +689,9 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue(investigation.query("query_logs", kind="metrics", purpose="Distinguish the explanations",
                                             params=dict(names=["workers"]))["items"])
         self.assertTrue(investigation.query("read_reference", path="source/components/tasks/economy.py")["source"])
-        result = investigation.conclude(proposal())
-        self.assertEqual(result["conclusion"], proposal())
-        self.assertEqual(set(result["conclusion"]), {"change", "preserve", "verification", "code_targets"})
+        result = investigation.conclude(plan())
+        self.assertEqual(result["conclusion"], plan())
+        self.assertEqual(set(result["conclusion"]), {"tasks"})
         self.assertEqual(investigation.state["issue"], issue)
         self.assertNotIn("updated", investigation.state["queries"][0])
         self.assertNotIn("support_refs", investigation.state["hypotheses"][0])
@@ -658,11 +728,15 @@ class PipelineTests(unittest.TestCase):
         self.assertNotIn("runs", filters)
         self.assertNotIn("time", filters)
         investigation.query("query_logs", kind="metrics", purpose="Inspect a specific interval",
-                            params=dict(names=["workers"], time=[0, 20], runs="all"))
-        self.assertEqual(investigation.state["queries"][-1]["arguments"]["params"]["time"], [0, 20])
+                            params=dict(names=["workers"], frame=[0, 448], runs="all"))
+        self.assertEqual(investigation.state["queries"][-1]["arguments"]["params"]["frame"], [0, 448])
         investigation.update(issue=dict(issue, evidence=issue["evidence"] + ["Worker samples from 0-20 seconds"]))
-        with self.assertRaisesRegex(ValueError, "fixed"):
+        with self.assertRaisesRegex(ValueError, "reason"):
             investigation.update(issue=dict(issue, problem="Different problem"))
+        revised_issue = dict(issue, problem="Resources are not converted into army")
+        accepted = investigation.update(issue=revised_issue, reason="Production logs identify a different bottleneck")
+        self.assertEqual(accepted["issue"], revised_issue)
+        self.assertEqual(read_json(investigation.directory / "investigation.json")["issue"], revised_issue)
         with self.assertRaisesRegex(ValueError, "reason"):
             investigation.update(hypotheses=[dict(hypotheses[0], explanation="revised")])
         accepted = investigation.update(hypotheses=[dict(hypotheses[0], explanation="revised"),
@@ -677,7 +751,7 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(invalid["error"]["code"], "invalid_query")
         self.assertTrue(investigation.query("query_logs", kind="metrics", purpose="Corrected query",
                                             params=dict(names=["workers"]))["items"])
-        investigation.conclude(proposal())
+        investigation.conclude(plan())
 
     def test_conclusion_checks_required_fields_and_code_locations(self):
         investigation, _ = self.investigation()
@@ -689,9 +763,9 @@ class PipelineTests(unittest.TestCase):
                        dict(code_targets=["bot/components/tasks/missing.py"]),
                        dict(code_targets=["bot.components.tasks.economy::Missing.execute"])):
             with self.subTest(change=change), self.assertRaises(ValueError):
-                investigation.conclude(dict(proposal(), **change))
+                investigation.conclude(dict(tasks=[task(**change)]))
             self.assertIsNone(investigation.state["conclusion"])
-        conclusion = dict(proposal(), code_targets=["bot.components.tasks.economy::EconomyTask.execute"])
+        conclusion = dict(tasks=[task(code_targets=["bot.components.tasks.economy::EconomyTask.execute"])])
         self.assertEqual(investigation.conclude(conclusion)["conclusion"], conclusion)
 
     def test_query_budget_and_explicit_batch_selection(self):
@@ -705,7 +779,7 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(invalid["error"]["code"], "invalid_query")
         self.assertIn("batch_id", invalid["error"]["message"])
         valid = investigation.query("query_logs", kind="metrics", purpose="Explicit scope",
-            params=dict(batch_id=self.batch["batch_id"], names=["workers"], time=[0, 20]))
+            params=dict(batch_id=self.batch["batch_id"], names=["workers"], frame=[0, 448]))
         self.assertTrue(valid["items"])
         exhausted = investigation.query("read_reference", path="source/entry.py")
         self.assertEqual(exhausted["error"]["code"], "query_budget_exhausted")
@@ -761,7 +835,7 @@ class PipelineTests(unittest.TestCase):
 
     def test_editor_and_memory_keep_compact_context_and_full_query_records(self):
         issue = dict(problem="worker issue", evidence=["Run worker curve and source observations"])
-        conclusion = proposal()
+        conclusion = plan()
         hypothesis = dict(id="0", explanation="fixture", predictions=dict(support="a", refute="b"),
                           code_targets=["bot/components/tasks/economy.py"])
         queries = [dict(tool="query_logs", arguments=dict(kind="metrics", params=dict(names=["workers"]), purpose="Inspect workers"),
@@ -773,11 +847,12 @@ class PipelineTests(unittest.TestCase):
         write_json(self.root / "context/knowledge/fixture.json", dict(SCV={}))
         (self.root / "context/api").mkdir()
         write_json(self.root / "sessions/diagnosis/investigation.json", diagnosis)
-        job = editor_job(self.root / "candidate", diagnosis, feedback, context=self.root / "context")
+        job = editor_job(self.root / "candidate", diagnosis, task(), feedback, context=self.root / "context",
+                         evidence_path=self.root / "sessions/diagnosis/investigation.json")
         payload = job["task"]
         self.assertEqual(payload["issue"], issue)
-        self.assertEqual(payload["hypotheses"], diagnosis["hypotheses"])
-        self.assertEqual(payload["conclusion"], conclusion)
+        self.assertEqual(payload["hypotheses"], [hypothesis])
+        self.assertEqual(payload["task"], task())
         self.assertNotIn("proposal", payload)
         self.assertNotIn("x"*5000, json.dumps(job))
         full_evidence = read_json((self.root / "candidate" / payload["paths"]["evidence"]).resolve())
@@ -789,7 +864,7 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(len(payload["validator_feedback"]["checks"]), 1)
         self.assertEqual(len(payload["validator_feedback"]["checks"][0]["output"]), 4000)
         report = dict(iteration_id="fixture", parent=self.parent, status="inconclusive", conditions=dict(race="Zerg"), diagnosis=diagnosis,
-                      validation=feedback, changed_files=conclusion["code_targets"],
+                        validation=feedback, changed_files=conclusion["tasks"][0]["code_targets"],
                       artifacts=dict(diagnosis="diagnosis.json", patch="patch.diff", validation_0="validation_0.json", config="config.json"))
         record(self.root, report)
         memory = search(self.root, dict(race="Zerg"))[0]
@@ -834,12 +909,12 @@ class PipelineTests(unittest.TestCase):
         return project, config
 
     @staticmethod
-    def scripted_model(project, job, directory):
+    def scripted_model(project, job, directory, *, runtime=None):
         """Return a diagnosis or append a scoped change without any model endpoint."""
         write_json(directory / "job.json", job)
         if job["role"] == "diagnosis":
             value = dict(issue=dict(problem="fixture", evidence=["fixture logs"]),
-                         hypotheses=[], queries=[], conclusion=proposal())
+                         hypotheses=[], queries=[], conclusion=plan())
             write_json(directory / "investigation.json", value)
         else:
             path = project_path(job["workspace"]) / "bot/components/tasks/economy.py"
@@ -883,16 +958,17 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(preflight.call_count, 2)
         self.assertEqual(report["status"], "completed", report.get("reason"))
         self.assertEqual([r["status"] for r in report["iterations"]], ["accept", "reject", "accept"])
-        self.assertEqual([purpose for _, purpose, _ in calls], ["parent", "candidate", "candidate", "candidate"])
+        self.assertEqual([purpose for _, purpose, _ in calls], ["parent", "candidate_t01", "candidate_t01", "candidate_t01"])
         self.assertEqual(report["costs"]["matches"], 4)
         rounds = report["iterations"]
         self.assertEqual(rounds[1]["parent"], rounds[0]["candidate"])
-        self.assertEqual(rounds[2]["parent"], rounds[0]["candidate"])
-        self.assertEqual(rounds[1]["candidate"], rounds[2]["candidate"])
+        archive = read_json(project_path(report["archive"]))
+        self.assertEqual(len(archive["edges"]), 3)
+        self.assertIn(rounds[2]["parent"]["version"], archive["nodes"])
         self.assertEqual(report["current_parent"], rounds[2]["candidate"])
         for index in (1, 2):
             saved = read_json(project_path(rounds[index]["report"]))
-            self.assertIn(calls[1][2], saved["parent_batch"])
+            self.assertTrue(saved["parent_batch"].endswith("batch.json"))
             self.assertEqual(saved["costs"]["matches"], 1)
             self.assertEqual(len(saved["costs"]["sessions"]), 2)
         self.assertIn(calls[3][2], report["current_batch"])
@@ -917,11 +993,12 @@ class PipelineTests(unittest.TestCase):
             self.assertFalse(list(directory.glob("*_analysis.json")))
             self.assertEqual(len(read_json(directory / "memory.json")), index)
             job = read_json(project_path(iteration["artifacts"]["diagnosis_job"]))
-            self.assertEqual(project_path(job["context"]), roots[0] / "context")
+            self.assertEqual(project_path(job["context"]).parent, project / "runtime/rsi/refs")
+            self.assertEqual(project_path(job["context"]), project_path(report["context"]["source_root"]))
             self.assertEqual(project_path(job["memory"]), directory / "memory.json")
             memory = Retriever(job["parent"]["source_root"], job["context"], memory_path=job["memory"]).query_memory()
             self.assertEqual(len(memory["items"]), index)
-            editor = read_json(project_path(iteration["artifacts"]["editor_0_job"]))
+            editor = read_json(project_path(iteration["artifacts"]["editor_t01_0_job"]))
             evidence = project_path(editor["workspace"]) / editor["task"]["paths"]["evidence"]
             self.assertEqual(read_json(evidence.resolve()), read_json(project_path(iteration["artifacts"]["diagnosis"])))
         self.assertFalse((project / "runtime/rsi/current_version.json").exists())
@@ -934,7 +1011,7 @@ class PipelineTests(unittest.TestCase):
             def matches(project, version, conditions, directory, purpose, parallel, *, wall_budget=None):
                 batch = fixture_batch(project, version, conditions, directory, purpose, parallel)
                 calls.append(purpose)
-                if purpose == "candidate":
+                if purpose.startswith("candidate"):
                     path = Path(next(iter(batch["runs"].values()))) / "result.json"
                     write_json(path, dict(execution_status=status, termination="wall_timeout", outcome=None))
                 return batch
@@ -946,7 +1023,7 @@ class PipelineTests(unittest.TestCase):
                 report = run_experiment(project, config, rounds=3 if status == "unknown" else 1)
             self.assertEqual(report["iterations"][0]["status"], expected, report.get("reason"))
             self.assertEqual(len(report["iterations"]), 1)
-            self.assertEqual(calls, ["parent", "candidate"])
+            self.assertEqual(calls, ["parent", "candidate_t01"])
             self.assertEqual(model.call_count, 2)
             self.assertEqual(report["current_parent"], report["initial_parent"])
         with patch("rsi.run.preflight"), patch("rsi.run.load_settings", return_value=config["model"]), \
@@ -1004,10 +1081,14 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(config["parallel_matches"], 5)
         self.assertNotIn("batch", config)
         run = Run(ROOT, config, root=self.root / "five_matches")
+        candidate = self.versions.candidate(self.parent, self.root / "seed_candidate")
+        path = candidate / "bot/components/tasks/economy.py"
+        path.write_text(path.read_text(encoding="utf-8") + "\n# Distinct seed fixture.\n", encoding="utf-8")
+        child = self.versions.freeze(candidate)
         with patch("rsi.run.preflight"), patch("rsi.run.load_settings", return_value=config["model"]), \
                 patch("rsi.run.run_batch", side_effect=fixture_batch) as matches, \
-                patch.object(run, "_diagnose", return_value=dict(conclusion=proposal())), \
-                patch.object(run, "_edit_and_validate", return_value=(self.parent, dict(passed=True, checks=[]))):
+                patch.object(run, "_diagnose", return_value=dict(conclusion=plan())), \
+                patch.object(run, "_edit_and_validate", return_value=(child, dict(passed=True, checks=[]))):
             report = run.execute(self.parent).report
         self.assertEqual(report["status"], "reject", report.get("reason"))
         self.assertEqual(matches.call_count, 2)
@@ -1016,7 +1097,7 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(call.args[5], 5)
         self.assertEqual(report["costs"]["matches"], 10)
 
-    def test_role_llm_overrides_keep_shared_budget_and_saved_settings(self):
+    def test_role_llm_overrides_keep_independent_session_limits_and_saved_settings(self):
         project, config = self.experiment_fixture()
         config["model"]["diagnosis"] = dict(model="openai/diagnosis", base_url="https://diagnosis.invalid/v1",
                                             reasoning_effort="low", max_output_tokens=2048)
@@ -1024,10 +1105,13 @@ class PipelineTests(unittest.TestCase):
             reasoning_effort="high", max_output_tokens=4096, max_total_tokens=2000000, max_cost=10)
         jobs = []
 
-        def model(project, job, directory):
+        def model(project, job, directory, *, runtime=None):
             jobs.append(job)
             result = self.scripted_model(project, job, directory)
-            result["usage"] = dict(tokens=100, cost=0.25)
+            if job["role"] == "diagnosis":
+                result["value"]["conclusion"] = dict(tasks=[task("T1"), task("T2")])
+            result["usage"] = dict(tokens=job["model"]["max_total_tokens"] // 2,
+                                   cost=job["model"]["max_cost"] / 2)
             return result
 
         with patch.dict(os.environ, LLM_MODEL="openai/environment", LLM_BASE_URL="https://environment.invalid/v1"), \
@@ -1037,19 +1121,20 @@ class PipelineTests(unittest.TestCase):
             report = run_experiment(project, config)
         self.assertEqual(report["iterations"][0]["status"], "reject")
         self.assertEqual(preflight.call_count, 2)
-        self.assertEqual([job["model"]["model"] for job in jobs], ["openai/diagnosis", "openai/editor"])
+        self.assertEqual([job["model"]["model"] for job in jobs], ["openai/diagnosis", "openai/editor", "openai/editor"])
         for job in jobs:
             role = job["role"]
             for key in ("base_url", "reasoning_effort", "max_output_tokens"):
                 self.assertEqual(job["model"][key], config["model"][role][key])
             self.assertNotIn("diagnosis", job["model"])
             self.assertNotIn("editor", job["model"])
-        self.assertEqual(jobs[1]["model"]["max_total_tokens"], config["model"]["max_total_tokens"] - 100)
-        self.assertEqual(jobs[1]["model"]["max_cost"], config["model"]["max_cost"] - 0.25)
+            for key in ("max_total_tokens", "max_cost"):
+                self.assertEqual(job["model"][key], config["model"][role].get(key, config["model"][key]))
         iteration = read_json(project_path(report["iterations"][0]["report"]))
-        for name, job in zip(("diagnosis_job", "editor_0_job"), jobs):
+        self.assertGreater(sum(session["tokens"] for session in iteration["costs"]["sessions"]), config["model"]["max_total_tokens"])
+        for name, job in zip(("diagnosis_job", "editor_t01_0_job", "editor_t02_0_job"), jobs):
             self.assertEqual(read_json(project_path(iteration["artifacts"][name]))["model"], job["model"])
-        evaluation = read_json(project_path(iteration["artifacts"]["evaluation"]))
+        evaluation = read_json(project_path(iteration["artifacts"]["evaluation_t01"]))
         self.assertEqual(evaluation["rules"]["min_metric_improvement"], 0.05)
         self.assertEqual(evaluation["rules"]["min_improved_fraction"], 0.6)
 
@@ -1074,13 +1159,15 @@ class PipelineTests(unittest.TestCase):
         conclusion_type = tools[-1].action_type.model_fields["conclusion"].annotation.__args__[0]
         self.assertEqual(set(issue_type.model_fields), {"problem", "evidence"})
         self.assertEqual(set(hypothesis_type.model_fields), {"id", "explanation", "predictions", "code_targets"})
-        self.assertEqual(set(conclusion_type.model_fields), {"change", "preserve", "verification", "code_targets"})
+        self.assertEqual(set(conclusion_type.model_fields), {"tasks"})
+        task_type = conclusion_type.model_fields["tasks"].annotation.__args__[0]
+        self.assertEqual(set(task_type.model_fields), {"id", "hypothesis_ids", "change", "preserve", "verification", "code_targets"})
         issue = dict(problem="fixture", evidence=["Run one, worker curve near 60-150 seconds", "SCV knowledge entry"])
         self.assertEqual(issue_type(**issue).evidence, issue["evidence"])
         with self.assertRaises(ValidationError):
             issue_type(**issue, window=[0, 1])
         with self.assertRaises(ValidationError):
-            conclusion_type(**proposal(), expected_effect=[])
+            conclusion_type(**plan(), expected_effect=[])
         self.assertEqual(set(tools[2].action_type.model_fields), {"path", "lines", "key"})
         self.assertEqual(set(tools[3].action_type.model_fields), {"text"})
         self.assertNotIn("updates", tools[1].action_type.to_mcp_schema()["properties"])
@@ -1174,11 +1261,13 @@ class PipelineTests(unittest.TestCase):
         popen = subprocess.Popen
         directory = self.root / "relay"
         code = ("import json,sys; from pathlib import Path; "
-                "print('[diagnosis] evidence progress', flush=True); "
-                "print('SDK internal noise', file=sys.stderr); "
+                "job = Path(json.loads(sys.stdin.readline())); "
+                "(job.parent / 'stdout.txt').write_text('[diagnosis] evidence progress\\n', encoding='utf-8'); "
+                "(job.parent / 'stderr.txt').write_text('SDK internal noise', encoding='utf-8'); "
                 "response = Path(sys.argv[1]); investigation = response.parent / 'investigation.json'; "
                 "investigation.write_text(json.dumps(dict(queries=[], conclusion=None)), encoding='utf-8'); "
-                "response.write_text(json.dumps(dict(status='ok', result_path=str(investigation))), encoding='utf-8')")
+                "response.write_text(json.dumps(dict(status='ok', result_path=str(investigation))), encoding='utf-8'); "
+                "(job.parent / 'done').touch()")
 
         def worker(args, **kwargs):
             """Use a real local worker without calling any model endpoint."""
@@ -1200,7 +1289,8 @@ class PipelineTests(unittest.TestCase):
                 directory = self.root / ("worker_" + case)
                 with patch("rsi.tools.llm.subprocess.Popen") as popen, patch("rsi.tools.llm.stop_process") as stop:
                     process = popen.return_value
-                    process.wait.side_effect = KeyboardInterrupt if case == "interrupt" else None
+                    process.poll.return_value = 0 if case == "missing" else None
+                    process.wait.side_effect = [KeyboardInterrupt, None] if case == "interrupt" else None
                     timeout = 0 if case == "timeout" else 10
                     if case == "interrupt":
                         with self.assertRaises(KeyboardInterrupt):
@@ -1216,7 +1306,7 @@ class PipelineTests(unittest.TestCase):
     def test_sdk_tools_with_scripted_transport(self):
         from openhands.sdk.testing import TestLLM
         investigation, job = self.investigation()
-        query_params = dict(batch_id=self.batch["batch_id"], names=["workers"], time=[0, 2])
+        query_params = dict(batch_id=self.batch["batch_id"], names=["workers"], frame=[0, 44])
         job.update(role="diagnosis", model=self.config["model"], prompt="Offline fixture: use the prescribed tool sequence.")
         calls = [
             ("select_issue", dict(issue=dict(problem="fixture", evidence=["Fixture overview, worker counts"]),
@@ -1226,7 +1316,7 @@ class PipelineTests(unittest.TestCase):
             ("read_reference", dict(path="source/components/tasks/economy.py", lines=[1, 20])),
             ("read_reference", dict(path="knowledge/mechanics/economy.json", key="WORKER_SATURATION")),
             ("query_memory", dict(text="workers")),
-            ("conclude", dict(conclusion=proposal())),
+            ("conclude", dict(conclusion=plan())),
         ]
         # Reproduce the real failure: schema rejection emits ActionEvent(action=None).
         invalid_selection = copy.deepcopy(calls[0][1])
@@ -1240,7 +1330,7 @@ class PipelineTests(unittest.TestCase):
         with patch("openhands.sdk.agent.base.has_vision_profile_available", return_value=False), redirect_stdout(output):
             result = execute(directory / "job.json", llm_factory=lambda: TestLLM.from_messages(messages))
         self.assertEqual(result["status"], "ok", result.get("reason"))
-        self.assertEqual(result["value"]["conclusion"], proposal())
+        self.assertEqual(result["value"]["conclusion"], plan())
         saved = read_json(directory / "response.json")
         self.assertNotIn("value", saved)
         self.assertEqual(read_json(project_path(saved["result_path"])), result["value"])
@@ -1253,7 +1343,7 @@ class PipelineTests(unittest.TestCase):
         self.assertIn("Query memory: workers", output.getvalue())
         self.assertEqual(result["value"]["queries"][3]["result"]["key"], "WORKER_SATURATION")
         self.assertIn("Tool rejected:", output.getvalue())
-        self.assertIn("Conclusion validated: Fixture intervention", output.getvalue())
+        self.assertIn("Task T1: Fixture intervention", output.getvalue())
         self.assertIn("Tool rejected (select_issue):", output.getvalue())
         for failure, target in (("render", "rsi.tools.console._tool_progress"), ("write", "rsi.tools.console.print")):
             with self.subTest(failure=failure):
@@ -1263,7 +1353,7 @@ class PipelineTests(unittest.TestCase):
                         patch(target, side_effect=RuntimeError("Display failure"), create=True):
                     recovered = execute(failed_directory / "job.json", llm_factory=lambda: TestLLM.from_messages(messages))
                 self.assertEqual(recovered["status"], "ok", recovered.get("reason"))
-                self.assertEqual(recovered["value"]["conclusion"], proposal())
+                self.assertEqual(recovered["value"]["conclusion"], plan())
                 self.assertTrue((failed_directory / "usage.json").is_file())
                 self.assertTrue((failed_directory / "investigation.json").is_file())
 
@@ -1347,9 +1437,10 @@ class PipelineTests(unittest.TestCase):
             (TerminalTool.name, dict(command=test_command, timeout=60)),
         ]
         messages = sdk_messages(calls + [("finish", dict(message="Done."))])
-        job = editor_job(candidate, dict(conclusion=proposal(), queries=[]), context=context)
+        job = editor_job(candidate, dict(conclusion=plan(), queries=[]), task(), context=context,
+                         evidence_path=self.root / "investigation.json")
         payload = job["task"]
-        self.assertEqual(payload["conclusion"], proposal())
+        self.assertEqual(payload["task"], task())
         self.assertEqual((candidate / payload["paths"]["references"]).resolve(), context.resolve())
         self.assertIn((candidate / "bot/README.md").read_text(encoding="utf-8"), job["prompt"])
         self.assertIn((context / "knowledge/README.md").read_text(encoding="utf-8"), job["prompt"])

@@ -34,12 +34,18 @@ process so imports select that source rather than an already imported Bot.
 passed explicitly or loaded from the project's `environment.json`. `log=False`
 disables telemetry while retaining the manifest, result, and Replay.
 
-The returned object is identical to `result.json`. Required fields are
-`run_id`, `version`, `directory`, `execution_status`, `outcome`, `termination`,
-`duration_loops`, `error`, `summary`, and `replay_saved`. Unknown duration is
-`null`, not zero. Worker failures can add diagnostic fields such as `exit_code`.
-The manifest retains input conditions, source identity, environment, and the
-actual map hash and Bot game step when available.
+The returned object is identical to `result.json`. Format v3 stores `schema_version`,
+`execution_status`, `outcome`, `termination`, `last_frame`, `steps`, `phase`,
+`mean_step_ms`, `max_step_ms`, and `error`; worker failures may add `exit_code`.
+Unknown frame is null, not zero. Identity, version and directory are not copied
+into the result; the replay's existence is checked directly. Errors contain a
+stage/type/message and either a trace error reference or an infrastructure traceback.
+
+The manifest stores conditions (`game_time_limit` and `wall_timeout` are seconds),
+source identity, expected environment and recording settings. `actual` stores the
+observed map hash, SC2 build/game version and Bot game step when available.
+The worker derives its output directory from the manifest's parent directory.
+Detailed formats are documented in [Bot telemetry](../bot/README.md).
 
 `run_batch(project, version, conditions, directory, purpose, parallel=3,
 wall_budget=None)` schedules these same single matches. The optional budget
