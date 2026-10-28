@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import sys
+import warnings
 from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -144,8 +145,10 @@ async def export(config, header):
         try:
             await client.join_game(race=Race.Terran)
             ping = (await client.ping()).ping
-            if ping.base_build != config["sc2_build"]:
-                raise ValueError(f"Unexpected SC2 build: {ping.base_build}")
+            expected = config.get("sc2_build")
+            if expected is not None and ping.base_build != expected:
+                warnings.warn(f"Configured SC2 build {expected}, running {ping.base_build}",
+                              RuntimeWarning, stacklevel=2)
             response = await client._execute(data=sc2api_pb2.RequestData(unit_type_id=True, ability_id=True, upgrade_id=True))
             version = {name: getattr(ping, name) for name in ("game_version", "base_build", "data_build", "data_version")}
             payload = build_units(response.data, header, version, config["check_map"])

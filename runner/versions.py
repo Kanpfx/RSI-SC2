@@ -7,6 +7,10 @@ from pathlib import Path
 from .artifacts import path_reference, project_path
 
 
+class SnapshotError(ValueError):
+    """An immutable version is missing, unreadable or modified."""
+
+
 def source_paths(root):
     """Enumerate retained files without reading contents; reject links and caches."""
     # iterdir propagates access errors; rglob can silently return an empty inventory.
@@ -90,5 +94,9 @@ def bot_inventory(source):
 
 def verify_version(version):
     """Verify all retained snapshot files against the declared content hash."""
-    if source_hash(project_path(version["source_root"])) != version["version"]:
-        raise ValueError("Snapshot content does not match its version")
+    try:
+        actual = source_hash(project_path(version["source_root"]))
+    except (OSError, ValueError) as exc:
+        raise SnapshotError(f"Snapshot unavailable: {exc}") from exc
+    if actual != version["version"]:
+        raise SnapshotError("Snapshot content does not match its version")

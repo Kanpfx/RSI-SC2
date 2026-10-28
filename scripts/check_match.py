@@ -4,8 +4,9 @@ import os
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
+import warnings
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from runner.environment import load_environment
 
@@ -43,8 +44,10 @@ class SmokeBot(BotAI):
             "data_build": ping.data_build,
             "base_build": ping.base_build,
         }
-        if ping.base_build != CONFIG["sc2_build"]:
-            raise RuntimeError(f"Unexpected client build: {ping.base_build}")
+        expected = CONFIG.get("sc2_build")
+        if expected is not None and ping.base_build != expected:
+            warnings.warn(f"Configured SC2 build {expected}, running {ping.base_build}",
+                          RuntimeWarning, stacklevel=2)
 
     async def on_step(self, iteration):
         self.steps += 1

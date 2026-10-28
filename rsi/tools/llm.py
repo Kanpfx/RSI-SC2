@@ -1,6 +1,5 @@
 """Reuse OpenHands SDK sessions with process, token and observed-cost budgets."""
 import json
-import math
 import os
 import subprocess
 import sys
@@ -14,7 +13,6 @@ from runner.artifacts import path_reference, project_path, read_json, write_json
 from runner.console import write_console
 from .console import tool_progress
 from runner.processes import stop_process
-from ..workspace import allocate
 from .sandbox import editor_container, prepare_editor_job
 
 
@@ -55,12 +53,32 @@ def _read_usage(directory):
     return read_json(path) if path.exists() else {}
 
 
+class SessionError(RuntimeError):
+    """Carry a worker's stop decision without parsing its traceback."""
+
+    def __init__(self, reason, *, fatal=False):
+        super().__init__(reason)
+        self.fatal = fatal
+
+
+def fatal_model_error(error):
+    """Stop on authentication, billing and invalid API configuration errors."""
+    from openhands.sdk.llm.exceptions import LLMAuthenticationError
+    while error is not None:
+        if (isinstance(error, LLMAuthenticationError)
+                or getattr(error, "status_code", None) in {400, 401, 402, 403, 404, 422}):
+            return True
+        error = error.__cause__ or error.__context__
+    return False
+
+
 class ExperimentRuntime:
     """Own sequential SDK workers and the optional Editor container for one experiment."""
 
     def __init__(self, project, root):
         self.project, self.root = Path(project).resolve(), Path(root).resolve()
         self.workers = {}
+        self.worker_resources = {}
         self.counters = {}
         self.resources = ExitStack()
         self.closed = False
@@ -92,20 +110,30 @@ class ExperimentRuntime:
             stop_process(process)
 
     def _worker(self, job):
-        """Start at most one host worker and one Docker Editor worker, without retries."""
+        """Reuse live workers; replace terminated workers only for a subsequent job."""
         mode = job.get("execution", {}).get("mode", "local")
+        if mode in self.workers and self.workers[mode].poll() is not None:
+            self.worker_resources.pop(mode).close()
+            del self.workers[mode]
         if mode not in self.workers:
             self.root.mkdir(parents=True, exist_ok=True)
-            command = [sys.executable, "-u", "-B", "-m", "rsi.tools.llm", "--worker"]
-            if mode == "docker":
-                command = self.resources.enter_context(editor_container(self.project, job, self.root))
-            out = self.resources.enter_context((self.root / f"{mode}.stdout.txt").open("w", encoding="utf-8"))
-            err = self.resources.enter_context((self.root / f"{mode}.stderr.txt").open("w", encoding="utf-8"))
-            process = subprocess.Popen(command, cwd=self.project, stdin=subprocess.PIPE,
-                stdout=out, stderr=err, text=True, encoding="utf-8",
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
-                env=dict(os.environ, PYTHONIOENCODING="utf-8"))
-            self.resources.callback(self._stop, process)
+            resources = self.resources.enter_context(ExitStack())
+            self.worker_resources[mode] = resources
+            try:
+                command = [sys.executable, "-u", "-B", "-m", "rsi.tools.llm", "--worker"]
+                if mode == "docker":
+                    command = resources.enter_context(editor_container(self.project, job, self.root))
+                out = resources.enter_context((self.root / f"{mode}.stdout.txt").open("a", encoding="utf-8"))
+                err = resources.enter_context((self.root / f"{mode}.stderr.txt").open("a", encoding="utf-8"))
+                process = subprocess.Popen(command, cwd=self.project, stdin=subprocess.PIPE,
+                    stdout=out, stderr=err, text=True, encoding="utf-8",
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                    start_new_session=sys.platform != "win32",
+                    env=dict(os.environ, PYTHONIOENCODING="utf-8"))
+                resources.callback(self._stop, process)
+            except BaseException:
+                resources.close()
+                raise
             self.workers[mode] = process
         return self.workers[mode]
 
@@ -153,82 +181,35 @@ class ExperimentRuntime:
             response = dict(status="interrupted" if isinstance(exc, KeyboardInterrupt) else "error",
                 reason="model_session_interrupted" if isinstance(exc, KeyboardInterrupt) else
                        "model_session_wall_timeout" if isinstance(exc, subprocess.TimeoutExpired) else
-                       "model_worker_error: " + str(exc), usage=_read_usage(directory))
+                       "model_worker_error: " + str(exc), usage=_read_usage(directory),
+                fatal=isinstance(exc, (FileNotFoundError, PermissionError)))
             write_json(path, response)
             if not isinstance(exc, Exception):
                 raise
-        response = read_json(path)
-        if "result_path" in response:
-            response["value"] = read_json(project_path(response["result_path"]))
-        return response
+        return read_json(path)
 
 
-def call_session(project, job, directory, *, runtime=None):
-    """Use the experiment's worker, or own one worker for a standalone call."""
-    if runtime is not None:
-        return runtime.call_session(job, directory)
-    root = allocate(Path(project) / "runtime/rsi", "runtimes")
-    with ExperimentRuntime(project, root) as runtime:
-        return runtime.call_session(job, directory)
-
-
-def budgeted_llm_type(settings):
-    """Reserve estimated input plus maximum output before sending each SDK request."""
-    from openhands.sdk import LLM
-
-    class BudgetedLLM(LLM):
-        def check_request(self, messages, tools, security=False):
-            """Reject requests that cannot fit the remaining session token allowance."""
-            usage = self.metrics.accumulated_token_usage
-            spent = usage.prompt_tokens + usage.completion_tokens if usage else 0
-            estimate = self.get_token_count(messages, tools, security)
-            required = math.ceil(estimate * 1.15) + 1024 + self.max_output_tokens
-            if estimate <= 0:
-                raise ValueError("Token estimation failed; check SDK token counter and tool schemas")
-            if spent + required > settings["max_total_tokens"]:
-                raise ValueError("Next request cannot fit the token budget")
-
-        def completion(self, messages, tools=None, add_security_risk_prediction=False, **kwargs):
-            """Check the budget before delegating to SDK completion transport."""
-            self.check_request(messages, tools, add_security_risk_prediction)
-            return super().completion(messages, tools, add_security_risk_prediction, **kwargs)
-
-        def responses(self, messages, tools=None, **kwargs):
-            """Apply the same budget to SDK Responses transport."""
-            self.check_request(messages, tools, kwargs.get("add_security_risk_prediction", False))
-            return super().responses(messages, tools, **kwargs)
-
-    return BudgetedLLM
-
-
-def _session_tools(job, investigation):
-    """Select and register only the tools available to this session role."""
-    from openhands.sdk import Tool
-    from openhands.sdk.tool import register_tool
-
+def _session_tools(job, investigation, state):
+    """Create tool instances owned only by the current SDK conversation."""
     if investigation:
         from ..diagnosis.session import investigation_tools
-        definitions = investigation_tools(investigation)
-    elif job["role"] == "editor":
+        return investigation_tools(investigation)
+    if job["role"] == "editor":
         from ..editor import editor_tools
-        return editor_tools(job)
-    else:
-        definitions = []
-    selected = []
-    for definition in definitions:
-        register_tool(definition.name, definition)
-        selected.append(Tool(name=definition.name))
-    return selected
+        return editor_tools(job, state)
+    return []
 
 
 def _create_llm(job):
     """Construct the configured transport with per-request and session budgets."""
     from pydantic import SecretStr
+    from .sdk import BudgetedLLM
     settings = job["model"]
-    # SDK 1.41 counts total attempts: the initial request plus one retry.
-    return budgeted_llm_type(settings)(
+    # SDK 1.41 counts total attempts: the initial request plus two retries.
+    return BudgetedLLM(
+        token_budget=settings["max_total_tokens"],
         model=settings["model"], api_key=SecretStr(os.environ[settings["api_key_env"]]),
-        base_url=settings.get("base_url"), timeout=settings["request_timeout"], num_retries=2,
+        base_url=settings.get("base_url"), timeout=settings["request_timeout"], num_retries=3,
         max_output_tokens=settings["max_output_tokens"],
         reasoning_effort=settings.get("reasoning_effort", "high"),
         temperature=settings.get("temperature"), top_p=settings.get("top_p"),
@@ -253,6 +234,8 @@ def execute(job_path, llm_factory=None):
     if "workspace" in job:
         job["workspace"] = str(project_path(job["workspace"]))
     conversation = investigation = llm = None
+    selected = []
+    tools_attached = False
     response = {}
     try:
         from openhands.sdk import Agent
@@ -266,7 +249,6 @@ def execute(job_path, llm_factory=None):
         if job["role"] == "diagnosis":
             from ..diagnosis.session import prepare_session
             investigation, prompt = prepare_session(job, directory, prompt)
-        selected = _session_tools(job, investigation)
         llm = llm_factory() if llm_factory else _create_llm(job)
         write_json(directory / "llm.json", llm.model_dump(mode="json", include={
             "model", "base_url", "reasoning_effort", "temperature", "top_p", "top_k", "seed",
@@ -282,11 +264,14 @@ def execute(job_path, llm_factory=None):
 
         workspace = Path(job.get("workspace", directory / "readonly_session"))
         workspace.mkdir(parents=True, exist_ok=True)
-        conversation = LocalConversation(agent=Agent(llm=llm, tools=selected), workspace=str(workspace),
+        conversation = LocalConversation(agent=Agent(llm=llm, tools=[]), workspace=str(workspace),
             persistence_dir=str(directory / "conversation"), max_iteration_per_run=settings["max_iterations"],
             max_budget_per_run=settings["max_cost"],
             callbacks=[record_usage], visualizer=None)
         conversation.send_message(prompt)
+        selected = _session_tools(job, investigation, conversation.state)
+        conversation.agent.add_runtime_tools(selected)
+        tools_attached = True
         # SDK discovery skips LLM subclasses, including our token-budgeted transport.
         conversation.llm_registry.add(llm)
         conversation.run()
@@ -299,27 +284,39 @@ def execute(job_path, llm_factory=None):
         if (usage["tokens"] or 0) >= settings["max_total_tokens"]:
             raise ValueError("Model session token budget reached")
         if investigation:
-            value = investigation.result()
+            value = investigation.summary()
         else:
             from openhands.sdk.conversation.response_utils import get_agent_final_response
             value = get_agent_final_response(list(conversation.state.events)).strip()
         response = dict(status="ok", value=value, usage=usage)
-    except Exception:
+    except Exception as exc:
         response = dict(status="error", reason=traceback.format_exc(),
-                        usage=_read_usage(directory))
+                        usage=_read_usage(directory), fatal=fatal_model_error(exc))
     finally:
         if conversation:
             response["execution_status"] = conversation.state.execution_status.value
             try:
                 conversation.close()
             except Exception as exc:
+                tools_attached = False
                 response["cleanup_error"] = str(exc)
-                response.update(status="error", reason="model_session_cleanup_failed")
-        saved = dict(response)
-        if investigation and "value" in saved:
-            saved.pop("value")
-            saved["result_path"] = path_reference(directory / "investigation.json")
-        write_json(directory / "response.json", saved)
+                response["fatal"] = True
+                if response.get("status") == "ok":
+                    response.update(status="error", reason="model_session_cleanup_failed")
+        # SDK owns attached executors; failed setup must close unattached ones here.
+        for tool in (() if tools_attached else selected):
+            try:
+                tool.executor.close()
+            except Exception as exc:
+                response.setdefault("cleanup_error", str(exc))
+                response["fatal"] = True
+                if response.get("status") == "ok":
+                    response.update(status="error", reason="model_session_cleanup_failed")
+        if investigation:
+            investigation.close()
+            if "value" in response:
+                response["result_path"] = path_reference(directory / "investigation.json")
+        write_json(directory / "response.json", response)
     return response
 
 
@@ -353,7 +350,7 @@ def serve():
             write_json(job_path.parent / "worker.json", dict(pid=os.getpid()))
             response = execute(job_path)
         (job_path.parent / "done").touch()
-        if response["status"] != "ok":
+        if response.get("fatal"):
             return
 
 

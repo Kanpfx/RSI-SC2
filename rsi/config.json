@@ -1,8 +1,8 @@
 {
   "max_matches": 24,
-  "max_wall_seconds": 7200,
+  "max_wall_seconds": 3600,
   "parallel_matches": 5,
-  "max_repairs": 2,
+  "max_repairs": 1,
   "editor_execution": {
     "mode": "local"
   },
@@ -10,11 +10,11 @@
     "api_key_env": "LLM_API_KEY",
     "reasoning_effort": "high",
     "max_total_tokens": 1500000,
-    "max_cost": 2.0,
+    "max_cost": 0.3,
     "max_iterations": 80,
     "max_output_tokens": 8192,
     "request_timeout": 180,
-    "wall_timeout": 1200,
+    "wall_timeout": 600,
     "diagnosis": {},
     "editor": {}
   },

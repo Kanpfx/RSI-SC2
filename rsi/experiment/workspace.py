@@ -57,9 +57,9 @@ def preflight_storage(root):
             shutil.rmtree(directory)
 
 
-def create_workspace(versions, parent, iteration, task_id, *, root=None, name=None):
+def create_workspace(versions, parent, iteration, task_id, *, root, name):
     """Copy one parent and record ownership outside the candidate's source tree."""
-    directory = allocate(root if root is not None else versions.root, "work", name=name)
+    directory = allocate(root, "work", name=name)
     directory.mkdir()
     write_json(directory / "workspace.json", dict(iteration=path_reference(iteration), task_id=task_id,
                                                  parent=parent["version"]))

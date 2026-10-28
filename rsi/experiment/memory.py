@@ -10,26 +10,24 @@ def record(root, report):
     if report.get("purpose") == "holdout":
         raise ValueError("Holdout data cannot enter development memory")
     item = {key: report.get(key) for key in
-            ("iteration_id", "status", "reason", "conditions", "changed_files")}
+            ("iteration_id", "status", "reason", "conditions")}
     item["parent"] = (report.get("parent") or {}).get("version")
     diagnosis = report.get("diagnosis", {})
     item["issue"] = diagnosis.get("issue")
     item["conclusion"] = diagnosis.get("conclusion")
-    validation, evaluation = report.get("validation", {}), report.get("evaluation", {})
-    item["validation"] = dict(passed=validation.get("passed"))
-    item["evaluation"] = {key: evaluation.get(key) for key in ("decision", "reason")}
     if "branches" in report:
         item["branches"] = [{key: branch[key] for key in
                              ("task_id", "status", "reason", "validation_passed", "promoted", "patch", "evaluation", "promotion")
                              if key in branch}
                             for branch in report["branches"]]
-        item.pop("validation")
-        item.pop("evaluation")
         item["changed_files"] = sorted({name for branch in report["branches"]
                                          for name in branch.get("changed_files", [])})
+    branch_paths = {branch[key] for branch in item.get("branches", [])
+                    for key in ("patch", "evaluation", "promotion") if key in branch}
     item["artifacts"] = {key: value for key, value in report.get("artifacts", {}).items()
-                         if key in {"diagnosis", "patch", "evaluation"}
-                         or key.startswith(("validation_", "evaluation_", "promotion_"))}
+                         if (key == "diagnosis"
+                             or key.startswith(("validation_", "evaluation_", "promotion_")))
+                         and value not in branch_paths}
     write_json(Path(root) / "memory" / f"{report['iteration_id']}.json", item)
 
 

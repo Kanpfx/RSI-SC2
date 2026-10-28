@@ -21,7 +21,7 @@ from bot.core.units import UnitControl
 from bot.spatial import Spatial
 from bot.spatial.placement import Placement
 from bot.telemetry.logger import Logger
-from rsi.logs import read_records
+from rsi.analysis.logs import read_records
 from bot.components.behaviors.combat.attack_move import AttackMove
 from bot.components.behaviors.economy.mining import Mining
 from bot.components.behaviors.production.build_structure import BuildStructure

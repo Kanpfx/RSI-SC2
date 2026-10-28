@@ -2,7 +2,7 @@
 import json
 from statistics import mean
 
-from .analyzer import metric_summary
+from .analysis.analyzer import metric_summary
 
 
 MIN_COVERAGE = 0.95

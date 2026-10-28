@@ -11,8 +11,8 @@ from runner.artifacts import project_path
 from runner.versions import hash_files, inventory
 
 
-def freeze_context(project, directory, *, shared=False):
-    """Freeze references, optionally reusing a verified content-addressed snapshot."""
+def freeze_context(project, directory):
+    """Freeze references in a verified content-addressed snapshot."""
     directory = Path(directory)
     files = {"knowledge/" + name: data for name, data in inventory(Path(project) / "knowledge").items()}
     spec = importlib.util.find_spec("sc2")
@@ -29,10 +29,6 @@ def freeze_context(project, directory, *, shared=False):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
 
-    if not shared:
-        directory.mkdir(parents=True, exist_ok=False)
-        write(directory)
-        return directory
     identity = hash_files(files)
     target = directory / identity
     directory.mkdir(parents=True, exist_ok=True)

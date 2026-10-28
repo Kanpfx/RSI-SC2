@@ -1,19 +1,18 @@
 """Check shared execution contracts without starting SC2 or calling a model."""
 import hashlib
+import os
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from runner.artifacts import path_reference, project_path, read_json, write_json
 from runner.matches import run_batch, run_match, worker
-from runner.versions import Versions, bot_inventory, hash_files, source_hash, write_diff
-
-
-ROOT = Path(__file__).resolve().parents[2]
+from runner.processes import stop_process
+from runner.versions import Versions, bot_inventory, hash_files, source_hash
 
 
 class RunnerTests(unittest.TestCase):
@@ -30,6 +29,52 @@ class RunnerTests(unittest.TestCase):
         write_json(self.source / "environment.json", self.environment)
         self.conditions = dict(map="AbyssalReefLE", race="Zerg", difficulty="Easy", seed=1,
                                game_time_limit=150, wall_timeout=10)
+
+    def test_batch_interrupt_cancels_active_and_queued_matches(self):
+        parent = Versions(self.source, self.root / "versions").freeze(self.source)
+        from threading import Event
+        first_done, second_started = Event(), Event()
+        started = []
+        conditions = [dict(self.conditions, seed=seed) for seed in range(1, 5)]
+        directory = self.root / "interrupted_batch"
+
+        def match(project, version, condition, path, purpose, batch_id, *, cancel):
+            if cancel.is_set():
+                return dict(execution_status="unknown", outcome=None, termination="cancelled",
+                            run_id=path.name, directory=path_reference(path))
+            started.append(condition["seed"])
+            if condition["seed"] == 1:
+                result = dict(execution_status="normal", outcome="win", termination="game_result")
+                write_json(path / "result.json", result)
+                first_done.set()
+            else:
+                second_started.set()
+                self.assertTrue(cancel.wait(5), "Batch failed to signal cancellation before pool shutdown")
+                result = dict(execution_status="unknown", outcome=None, termination="cancelled")
+                write_json(path / "result.json", result)
+            return dict(result, run_id=path.name, directory=path_reference(path))
+
+        delays = []
+
+        def delay(seconds):
+            delays.append(seconds)
+            if len(delays) == 1:
+                self.assertTrue(first_done.wait(5))
+            elif len(delays) == 2:
+                self.assertTrue(second_started.wait(5))
+            else:
+                raise KeyboardInterrupt
+
+        with patch("runner.matches.run_match", side_effect=match), \
+                patch("runner.matches.time.sleep", side_effect=delay):
+            with self.assertRaises(KeyboardInterrupt):
+                run_batch(self.source, parent, conditions, directory, "parent", parallel=1)
+        batch = read_json(directory / "batch.json")
+        self.assertEqual(started, [1, 2])
+        self.assertEqual(batch["status"], "interrupted")
+        self.assertEqual([r["termination"] for r in batch["results"]],
+                         ["game_result", "cancelled", "cancelled", "cancelled"])
+        self.assertEqual(batch["results"][0]["outcome"], "win")
 
     def test_hash_matches_the_previous_snapshot_format(self):
         legacy = hashlib.sha256()
@@ -48,14 +93,36 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(reference, "runtime/result.json")
         self.assertEqual(project_path(reference, root=self.source), path)
 
-    def test_diff_ignores_line_endings_and_writes_lf(self):
-        output = self.root / "patch.diff"
-        before = {"file.py": b"keep\nold\nend\n"}
-        write_diff(before, {"file.py": b"keep\r\nold\r\nend\r\n"}, ["file.py"], output)
-        self.assertEqual(output.read_bytes(), b"")
-        write_diff(before, {"file.py": b"keep\r\nnew\r\nend\r\n"}, ["file.py"], output)
-        self.assertEqual(output.read_bytes(),
-                         b"--- a/file.py\n+++ b/file.py\n@@ -1,3 +1,3 @@\n keep\n-old\n+new\n end\n")
+    def test_environment_accepts_native_linux_and_windows_layouts(self):
+        from scripts import check_environment
+        (self.source / "pyproject.toml").write_text('[project]\ndependencies=[]\n', encoding="utf-8")
+        for platform, executable in (("Linux", "SC2_x64"), ("Windows", "SC2_x64.exe")):
+            game = self.root / platform
+            binary = game / "Versions/Base1" / executable
+            binary.parent.mkdir(parents=True)
+            binary.touch()
+            config = dict(sc2_path=str(game), check_map="fixture")
+            if platform == "Windows":
+                (game / ".build.info").write_text("Active!DEC:1|Version!STRING:0\n1|1.0\n", encoding="utf-8")
+                config.update(sc2_build=2, installed_game_version="2.0")
+            with patch.dict(os.environ), patch.object(check_environment, "ROOT", self.source), \
+                    patch.object(check_environment, "CONFIG", config), patch("sc2.paths.PF", platform), \
+                    patch("sc2.maps.get", return_value=SimpleNamespace(path=binary)):
+                report = check_environment.inspect_environment()
+            self.assertEqual(report["sc2"]["build"], 1)
+            self.assertEqual(bool(report["notes"]), platform == "Windows")
+            self.assertEqual(report["sc2"]["installed_versions"], ["1.0"] if platform == "Windows" else [])
+
+    def test_posix_cleanup_targets_the_worker_group_even_after_exit(self):
+        for exited in (None, 0):
+            for error in (None, ProcessLookupError()):
+                process = Mock(pid=123, poll=Mock(return_value=exited))
+                with patch("runner.processes.sys.platform", "linux"), \
+                        patch("runner.processes.signal.SIGKILL", 9, create=True), \
+                        patch("runner.processes.os.killpg", side_effect=error, create=True) as kill:
+                    stop_process(process)
+                kill.assert_called_once_with(123, 9)
+                process.wait.assert_called_once_with(timeout=15)
 
     def test_source_and_snapshot_runs_share_the_result_contract(self):
         snapshot = Versions(self.source, self.root / "versions").freeze(self.source)
@@ -77,6 +144,7 @@ class RunnerTests(unittest.TestCase):
                 self.assertNotIn("output_dir", manifest)
                 self.assertEqual(manifest["environment"], self.environment)
                 self.assertEqual(popen.call_args.args[0][3], "runner.matches")
+                self.assertEqual(popen.call_args.kwargs["start_new_session"], sys.platform != "win32")
 
     def test_cancelled_and_timed_out_runs_keep_the_same_required_fields(self):
         required = {"schema_version", "execution_status", "outcome", "termination", "last_frame",
@@ -98,23 +166,6 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(set(result), required)
         self.assertEqual(result["termination"], "wall_timeout")
         self.assertIsNone(result["last_frame"])
-
-    def test_standalone_cli_delegates_to_the_same_runner(self):
-        from bot.run import main
-        output = self.root / "cli"
-        with patch("sys.argv", ["bot.run", "--output", str(output), "--no-log"]), \
-                patch("runner.matches.run_match", return_value=dict(execution_status="normal")) as run, \
-                patch("builtins.print"):
-            self.assertEqual(main(), 0)
-        self.assertEqual(run.call_args.args[:2], (ROOT, ROOT))
-        self.assertEqual(run.call_args.args[2], dict(map="AbyssalReefLE", race="Zerg", difficulty="Easy",
-                                                   seed=1, game_time_limit=150, wall_timeout=600))
-        self.assertFalse(run.call_args.kwargs["log"])
-        with patch("sys.argv", ["bot.run", "--difficulty", "CheatInsane"]), \
-                patch("runner.matches.run_match", return_value=dict(execution_status="normal")) as run, \
-                patch("builtins.print"):
-            self.assertEqual(main(), 0)
-        self.assertEqual(run.call_args.args[2]["difficulty"], "CheatInsane")
 
     def test_batch_keeps_existing_startup_reserve_and_worker_timeout(self):
         source = dict(version="fixture", source_root=str(self.source))

@@ -13,7 +13,7 @@ from runner.artifacts import read_json, write_json
 from rsi.tools.llm import ExperimentRuntime
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 
 SDK_WORKER = r'''
 import json
@@ -27,6 +27,8 @@ import rsi.tools.llm as worker
 
 def scripted_llm(job):
     marker = job['prompt']
+    if marker == 'FAIL':
+        raise ValueError('Recoverable fixture failure')
     calls = [
         ('file_editor', dict(command='create', path='bot/components/tasks/created.py', file_text=marker)),
         ('terminal', dict(command='python -B -c "from pathlib import Path; Path(\'terminal.txt\').write_text(Path(\'marker.txt\').read_text())"', timeout=15)),
@@ -96,6 +98,10 @@ class RuntimeTests(unittest.TestCase):
                 self.assertIn('Command result: exit_code=0', (directory / 'stdout.txt').read_text(encoding='utf-8'))
                 self.assertIsNone(self.runtime.workers['local'].poll())
                 directories.append(directory)
+                if marker == 'FIRST_CANDIDATE':
+                    failed = self.runtime.call_session(dict(job, prompt='FAIL'), self.runtime.root / 'sessions/failure')
+                    self.assertEqual(failed['status'], 'error')
+                    self.assertFalse(failed['fatal'])
             self.assertEqual(start_worker.call_count, 1)
             self.assertEqual(read_json(directories[0] / 'worker.json'), read_json(directories[1] / 'worker.json'))
             histories = [next((directory / 'conversation').iterdir()) for directory in directories]
@@ -123,10 +129,12 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(result['usage'], dict(tokens=7, cost=None))
         self.assertIsNotNone(self.runtime.workers['local'].poll())
         self.assertEqual(read_json(directory / 'response.json'), result)
-        with patch('rsi.tools.llm.subprocess.Popen') as start:
+        old = self.runtime.workers['local']
+        with patch('rsi.tools.llm.subprocess.Popen', side_effect=self.start_file_worker) as start:
             result = self.runtime.call_session(dict(model=dict(wall_timeout=2)), self.runtime.root / 'sessions/next')
-        self.assertEqual(result['status'], 'error')
-        start.assert_not_called()
+        self.assertEqual(result['status'], 'ok', result.get('reason'))
+        start.assert_called_once()
+        self.assertIsNot(self.runtime.workers['local'], old)
 
     def test_docker_worker_reuses_container_and_mounts_across_candidates(self):
         refs = self.root / 'refs'
@@ -155,8 +163,14 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(command[:2], ['docker', 'run'])
             name = command[command.index('--name') + 1]
             docker.assert_not_called()
-            self.runtime.close()
+            self.runtime.workers['docker'].kill()
+            self.runtime.workers['docker'].wait(timeout=5)
+            result = self.runtime.call_session(job, self.runtime.root / 'sessions/replacement')
+            self.assertEqual(result['status'], 'ok', result.get('reason'))
+            self.assertEqual(start.call_count, 2)
             docker.assert_called_once_with(['rm', '--force', name])
+            self.runtime.close()
+            self.assertEqual(docker.call_count, 2)
 
     def test_container_is_removed_if_worker_start_fails(self):
         refs = self.root / 'refs'

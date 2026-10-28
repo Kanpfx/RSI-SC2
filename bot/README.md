@@ -30,4 +30,4 @@ Logs use native `game_loop`, named `frame`; one observation is captured at the s
 - `state.jsonl`: native observation columns. The header declares `frame_step` (currently 2); each block stores only `start_frame` and value arrays. Index `i` maps to `start_frame + i * frame_step`; gaps start a new block. Enemy observations include visible enemies only.
 - `events.jsonl`: native unit/building callbacks.
 - `trace.jsonl`: every module call, request/status record, and exception. Module definitions and request parameters are written once; IDs link later records. JSONL headers declare the version and compact row columns.
-- `analysis.json`: derived arrays sharing the state frame axis, derived events, configuration, and quality. Missing values are null; check quality before drawing conclusions.
+- `analysis.json`: derived arrays sharing the state frame axis, derived events, configuration, and quality. The `view` field caches scalar observations, frame coordinates, counts, native events and execution summaries for queries; unit snapshots and call histories remain in the source logs. Missing values are null; check quality before drawing conclusions.

@@ -34,21 +34,26 @@ def inspect_environment():
     else:
         raise RuntimeError("Legacy sc2 distribution must not coexist with burnysc2")
 
-    sc2_path = Path(CONFIG["sc2_path"])
+    sc2_path = Path(CONFIG["sc2_path"]).expanduser().resolve()
     os.environ["SC2PATH"] = str(sc2_path)
     os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
     os.environ["OPENHANDS_SUPPRESS_BANNER"] = "1"
-    with (sc2_path / ".build.info").open(encoding="utf-8-sig") as stream:
-        rows = list(csv.DictReader(stream, delimiter="|"))
-    active = [row for row in rows if row.get("Active!DEC:1") == "1"]
-    versions = sorted({row["Version!STRING:0"] for row in active})
+    versions = []
+    build_info = sc2_path / ".build.info"
+    if build_info.is_file():
+        with build_info.open(encoding="utf-8-sig") as stream:
+            rows = csv.DictReader(stream, delimiter="|")
+            versions = sorted({row["Version!STRING:0"] for row in rows if row.get("Active!DEC:1") == "1"})
+    from sc2.paths import BINPATH, PF
     builds = sorted(int(p.name[4:]) for p in (sc2_path / "Versions").glob("Base*")
-                    if (p / "SC2_x64.exe").is_file())
+                    if (p / BINPATH[PF]).is_file())
     if not builds:
         raise RuntimeError(f"No SC2 executable found under {sc2_path}")
     notes = []
-    if builds[-1] != CONFIG["sc2_build"] or versions != [CONFIG["installed_game_version"]]:
-        notes.append("SC2 version changed; update the configuration before comparison experiments")
+    if ((CONFIG.get("sc2_build") is not None and builds[-1] != CONFIG["sc2_build"])
+            or (CONFIG.get("installed_game_version") and versions
+                and versions != [CONFIG["installed_game_version"]])):
+        notes.append("SC2 differs from the configured version hint; using the installed client")
 
     from sc2 import maps
     smoke_map = Path(maps.get(CONFIG["check_map"]).path)

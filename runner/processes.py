@@ -1,4 +1,6 @@
 """Supervise subprocesses without interpreting their domain results."""
+import os
+import signal
 import subprocess
 import sys
 import time
@@ -6,13 +8,17 @@ import time
 
 def stop_process(process):
     """Terminate only a worker process tree created by this runner."""
-    if process.poll() is None:
-        if sys.platform == "win32":
+    if sys.platform == "win32":
+        if process.poll() is None:
             subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
                            capture_output=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
-        else:
-            process.kill()
-        process.wait(timeout=15)
+    else:
+        # Workers start their own sessions; retain this group ID even if the leader exits.
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    process.wait(timeout=15)
 
 
 def wait_process(process, timeout, *, cancel=None, on_poll=None):

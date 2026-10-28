@@ -76,7 +76,7 @@ def docker_command(project, job, root, name):
     mounts = [(root / "work", "/work", False), (root / "sessions", "/sessions", False),
               (root / "inputs", "/inputs", True), (project_path(job["context"]), "/refs", True),
               (project / "rsi", "/app/rsi", True), (project / "runner", "/app/runner", True),
-              (project / "scripts/test", "/tests", True)]
+              (project / "tests", "/tests", True)]
     for source, target, readonly in mounts:
         if not source.exists():
             raise ValueError(f"Editor mount unavailable: {source}")

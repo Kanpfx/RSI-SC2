@@ -1,5 +1,9 @@
 """Prepare one diagnosis conversation; issue selection and investigation share its context."""
-from ..experiments import diagnosis_prompt
+from functools import partial
+from typing import Any, Literal
+from openhands.sdk.tool import Action
+from pydantic import BaseModel, ConfigDict, Field
+
 from runner.artifacts import path_reference, project_path
 from ..tools.sdk import make_tool, reference_tool
 
@@ -29,6 +33,40 @@ If evidence is inconclusive, gains are weak, or budget runs out, omit conclusion
 """
 
 
+def diagnosis_prompt(prompt, options):
+    """Append explicit experiment rules without depending on the base prompt's wording."""
+    hypotheses = "at least two competing hypotheses" if options["competing_hypotheses"] else "one hypothesis"
+    rules = [f"Start with select_issue: record one issue and {hypotheses}."]
+    if options["query_policy"] == "fixed":
+        rules.append("Use only the predeclared evidence pack; do not call query_logs, read_reference or query_memory.")
+    else:
+        rules.extend((
+            "Query evidence to test hypotheses.",
+            "Log, reference and memory queries share max_queries; keep reads focused.",
+        ))
+    rules.append("Revise the issue or hypotheses with select_issue as evidence changes; explain revisions in reason.")
+    return "\n\n".join((prompt.rstrip(), "\n".join(rules)))
+
+
+def fixed_pack(retriever, batches, max_queries):
+    """Read a predeclared evidence schedule for the fixed-policy ablation."""
+    queries = []
+    schedule = []
+    for batch in batches:
+        for kind, params in (("overview", {}),
+                             ("metrics", {"names": ["minerals", "vespene", "supply_left", "workers"]}),
+                             ("events", {})):
+            schedule.append(("query_logs", dict(kind=kind, purpose="Predeclared fixed schedule",
+                                               params=dict(batch_id=batch["batch_id"], **params))))
+    for path in ("components/tactics/bc_rush.py", "components/tasks/economy.py", "components/tasks/tech.py"):
+        schedule.append(("read_reference", dict(path="source/" + path)))
+    for tool, arguments in schedule[:max_queries]:
+        result = (retriever.query_logs(arguments["kind"], **arguments["params"]) if tool == "query_logs"
+                  else retriever.read_reference(**arguments))
+        queries.append(dict(tool=tool, arguments=arguments, result=result))
+    return queries
+
+
 def make_job(project, parent, batches, overview, context, config, *, analysis_paths, memory_path):
     """Pass the saved overview unchanged, alongside role instructions and short guides."""
     options = config["diagnosis"]
@@ -43,50 +81,68 @@ def make_job(project, parent, batches, overview, context, config, *, analysis_pa
                 diagnosis=options, analyses=analysis_paths, task=overview, prompt=prompt)
 
 
+class Issue(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    problem: str
+    evidence: list[str]
+
+
+class Predictions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    support: str
+    refute: str
+
+
+class Hypothesis(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    explanation: str
+    predictions: Predictions
+    code_targets: list[str] = Field(default_factory=list)
+
+
+class Task(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")
+    hypothesis_ids: list[str] = Field(min_length=1)
+    change: str
+    preserve: str
+    verification: str
+    code_targets: list[str] = Field(description="Editable bot/... files or bot.* modules; optional ::Class.method. Not source/... aliases.")
+
+
+class Conclusion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tasks: list[Task] = Field(min_length=1)
+
+
+class SelectInput(Action):
+    model_config = ConfigDict(extra="forbid")
+    issue: Issue | None = None
+    hypotheses: list[Hypothesis] = Field(default_factory=list)
+    reason: str = ""
+
+
+class LogInput(Action):
+    model_config = ConfigDict(extra="forbid")
+    query_kind: Literal["overview", "metrics", "events", "trace", "state", "compare"] = Field(alias="kind")
+    params: dict[str, Any] = Field(default_factory=dict)
+    purpose: str
+
+
+class MemoryInput(Action):
+    model_config = ConfigDict(extra="forbid")
+    text: str = ""
+
+
+class ConcludeInput(Action):
+    model_config = ConfigDict(extra="forbid")
+    conclusion: Conclusion | None = None
+    reason: str = ""
+
+
 def investigation_tools(investigation):
     """Expose ordinary investigation functions as tools within one SDK conversation."""
-    from functools import partial
-    from typing import Any, Literal
-
-    from openhands.sdk.tool import Action
-    from pydantic import BaseModel, ConfigDict, Field
-
-    class Issue(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-        problem: str
-        evidence: list[str]
-
-    class Predictions(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-        support: str
-        refute: str
-
-    class Hypothesis(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-        id: str
-        explanation: str
-        predictions: Predictions
-        code_targets: list[str] = Field(default_factory=list)
-
-    class Task(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-        id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")
-        hypothesis_ids: list[str] = Field(min_length=1)
-        change: str
-        preserve: str
-        verification: str
-        code_targets: list[str] = Field(description="Editable bot/... files or bot.* modules; optional ::Class.method. Not source/... aliases.")
-
-    class Conclusion(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-        tasks: list[Task] = Field(min_length=1)
-
-    class SelectInput(Action):
-        model_config = ConfigDict(extra="forbid")
-        issue: Issue | None = None
-        hypotheses: list[Hypothesis] = Field(default_factory=list)
-        reason: str = ""
-
     select_description = """Record one issue and its hypotheses before querying.
 - issue.evidence: checkable sources, e.g. "run_01: workers flat at 20 over frame 2688-4032".
 - hypotheses: mechanisms with predictions.support/refute describing evidence for/against each.
@@ -94,23 +150,16 @@ def investigation_tools(investigation):
   omitted hypotheses stay unchanged.
 Returns the issue and all current hypotheses. Full revisions remain in the investigation."""
 
-    class LogInput(Action):
-        model_config = ConfigDict(extra="forbid")
-        query_kind: Literal["overview", "metrics", "events", "trace", "state", "compare"] = Field(alias="kind")
-        params: dict[str, Any] = Field(default_factory=dict)
-        purpose: str
-
     log_description = """Query match logs. purpose briefly states what the query should clarify.
 params defaults: the only available batch, all runs/frames, detail="summary", offset=0.
 - Scope: batch_id (required with multiple batches), runs=[run_id,...] or "all", frame=[start,end] in native game_loop frames (inclusive).
-- overview: conditions, outcomes, metric/event summaries, available metric names and exception counts.
+- overview: conditions, outcomes, metric/event summaries and exception counts.
 - metrics: names=[metric,...]; events: types=[event_kind,...].
 - trace: module, call_id, request_id, status; includes linked calls and later action results.
 New logs retain every module call at its original frame. Linked trace results include ancestors and later action statuses.
-Historical v2 module summaries retain only whole-window counts; their per-call frames cannot be recovered.
 - compare: reference_batch (required), names (optional); returns one row per run on each side, labeled by batch_id.
 - state: native observations, including unit snapshots. Trace contains only execution facts.
-- detail="raw" adds metric arrays (frame/values), or detailed overview/module statistics.
+- detail="raw" adds metric arrays (frame/values), or detailed overview/module statistics and available metric_names.
 Returns items and whole-run quality indexed by batch_id then run_id. All temporal coordinates are native frames.
 Events use {frame,kind,data}, with optional exclusive end_frame for intervals. Raw overview action lifecycles are scoped by proposal frame;
 module totals and event counts follow the requested frame window. Missing metric samples are null.
@@ -119,22 +168,14 @@ next_offset means more pages: reuse it with the same query. truncated/detail_omi
 reason explains missing data; error={code,message} reports failures. Missing data is not zero.
 Example: kind="metrics", purpose="Check worker growth", params={"names":["workers"],"frame":[1344,4032]}."""
 
-    class MemoryInput(Action):
-        model_config = ConfigDict(extra="forbid")
-        text: str = ""
-
     memory_description = """Read this iteration's frozen development experiences.
 text: case-insensitive substring filter; omit for all available items.
 Returns stored items: iteration_id, parent, conditions, issue, conclusion, changed_files,
-validation/evaluation summaries and artifact paths. Older records may use proposal for conclusion.
+validation/evaluation summaries and artifact paths. Multi-task records keep paths within branches;
+artifacts contains the remaining references. Unperformed stages are omitted.
 History is context, not current match evidence; inconclusive results establish neither success nor failure.
 reason explains no matches; truncated means narrow text, e.g. by iteration_id.
 Disabled when use_memory=false; shares the log/reference query budget."""
-
-    class ConcludeInput(Action):
-        model_config = ConfigDict(extra="forbid")
-        conclusion: Conclusion | None = None
-        reason: str = ""
 
     conclude_description = """Finish with conclusion={tasks:[...]}, or omit conclusion and explain reason.
 Each task: unique id, known hypothesis_ids, change (what/why), preserve, verification, code_targets.
@@ -162,7 +203,6 @@ def prepare_session(job, directory, prompt):
     """Prepare the diagnosis state and optional fixed evidence in the same conversation."""
     import json
     from .investigate import Investigation
-    from ..experiments import fixed_pack
     investigation = Investigation(job, directory)
     if job["diagnosis"]["query_policy"] == "fixed":
         pack = fixed_pack(investigation.retriever, job["batches"], job["diagnosis"]["max_queries"])

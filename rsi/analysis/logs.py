@@ -1,4 +1,4 @@
-"""Read Bot telemetry v3 and existing v1/v2 recordings without rewriting source files."""
+"""Decode the current Bot telemetry format without rewriting source files."""
 import json
 from pathlib import Path
 
@@ -7,41 +7,32 @@ def read_records(directory, run_id, *, files=("trace", "state", "events")):
     records, problems = [], []
     directory = Path(directory)
     modules, calls, requests, errors = {}, {}, {}, {}
-    version = 1
     for name in files:
         path = directory / f"{name}.jsonl"
         if not path.exists():
-            if name == "trace" or version >= 3 or name == "state" and version == 2:
-                problems.append("missing_" + name)
+            problems.append("missing_" + name)
             continue
         previous = -1
-        schema = {}
         with path.open(encoding="utf-8") as stream:
-            for number, line in enumerate(stream, 1):
+            try:
+                schema = json.loads(stream.readline())
+                if schema["kind"] != "schema" or schema["version"] != 3:
+                    raise ValueError("Unsupported schema")
+            except (ValueError, TypeError, KeyError):
+                problems.append("invalid_schema:" + name)
+                continue
+            for number, line in enumerate(stream, 2):
                 ref = f"{run_id}:{name}:L{number}"
                 try:
                     row = json.loads(line)
                     if not isinstance(row, dict):
                         raise ValueError("Expected object")
-                    if row.get("kind") == "schema":
-                        if number != 1 or row.get("version") != 3:
-                            raise ValueError("Unsupported schema")
-                        schema = row
-                        if name == "trace":
-                            version = 3
-                            records.append(dict(event="trace_format", frame=0, version=3))
-                        continue
-                    if isinstance(row.get("frame"), list) or "start_frame" in row:
-                        if name != "state" or not schema:
-                            raise ValueError("Unexpected column block")
-                        if "start_frame" in row:
-                            start, step = row["start_frame"], schema["frame_step"]
-                            if type(start) is not int or start < 0 or type(step) is not int or step < 1:
-                                raise ValueError("Invalid frame origin or step")
-                            frames = range(start, start + len(row["minerals"]) * step, step)
-                        else:
-                            frames = row["frame"]
-                        columns = {k: v for k, v in row.items() if k not in {"frame", "start_frame", "score"}}
+                    if name == "state":
+                        start, step = row["start_frame"], schema["frame_step"]
+                        if type(start) is not int or start < 0 or type(step) is not int or step < 1:
+                            raise ValueError("Invalid frame origin or step")
+                        frames = range(start, start + len(row["minerals"]) * step, step)
+                        columns = {k: v for k, v in row.items() if k not in {"start_frame", "score"}}
                         if any(not isinstance(v, list) or len(v) != len(frames) for v in columns.values()):
                             raise ValueError("Misaligned columns")
                         if any(len(v) != len(frames) for v in row["score"].values()):
@@ -62,7 +53,7 @@ def read_records(directory, run_id, *, files=("trace", "state", "events")):
                                 sample.pop("score")
                             expanded.append(dict(event="state", frame=frame, **sample,
                                                  source_ref=f"{ref}#{index}"))
-                    elif "kind" in row:
+                    else:
                         frame, kind, data = row["frame"], row["kind"], row["data"]
                         expanded = []
                         if kind == "module":
@@ -97,16 +88,6 @@ def read_records(directory, run_id, *, files=("trace", "state", "events")):
                             expanded.append(dict(event="action", frame=frame, **data))
                         else:
                             expanded.append(dict(event=kind, frame=frame, **data))
-                    else:
-                        if row.get("event") == "trace_format":
-                            version = row["version"]
-                        elif row.get("event") == "module":
-                            modules[row["id"]] = {k: row[k] for k in ("module_id", "module_path", "path")}
-                        elif row.get("event") == "module_call" and "module_ref" in row:
-                            row.update(modules[row["module_ref"]])
-                        elif row.get("event") == "module_summary":
-                            row["modules"] = [dict(modules[item["module_ref"]], **item) for item in row["modules"]]
-                        expanded = [row]
                     for item in expanded:
                         if type(item.get("frame")) is not int or not isinstance(item.get("event"), str):
                             raise ValueError("Invalid event")
@@ -117,9 +98,8 @@ def read_records(directory, run_id, *, files=("trace", "state", "events")):
                         records.append(dict(item, source_ref=item.get("source_ref", ref)))
                 except (ValueError, TypeError, KeyError, IndexError, AttributeError):
                     problems.append(f"corrupt_line:{name}:{number}")
-    if version == 3:
-        for call in calls.values():
-            if call.get("parent_id") is not None and call["parent_id"] not in calls:
-                problems.append(f"unresolved_parent:trace:{call['call_id']}")
+    for call in calls.values():
+        if call["parent_id"] is not None and call["parent_id"] not in calls:
+            problems.append(f"unresolved_parent:trace:{call['call_id']}")
     records.sort(key=lambda row: row["frame"])
     return records, problems

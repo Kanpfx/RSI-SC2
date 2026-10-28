@@ -68,7 +68,8 @@ def run_match(project, source, conditions, directory, purpose="standalone", batc
             (directory / "stderr.txt").open("w", encoding="utf-8") as err:
         process = subprocess.Popen([sys.executable, "-B", "-m", "runner.matches",
                                     "--worker", str(directory / "manifest.json")],
-                                   cwd=project, stdout=out, stderr=err, creationflags=flags)
+                                   cwd=project, stdout=out, stderr=err, creationflags=flags,
+                                   start_new_session=sys.platform != "win32")
         try:
             if not wait_process(process, conditions["wall_timeout"], cancel=cancel):
                 stop_process(process)
@@ -162,7 +163,7 @@ def worker(spec_path):
         from sc2.main import run_game
         from sc2.player import Bot, Computer
         logger = Logger(directory if spec.get("log", True) else None, frame_step=GAME_STEP)
-        bot = ResearchBot(logger=logger, sc2_build=spec["environment"]["sc2_build"])
+        bot = ResearchBot(logger=logger, sc2_build=spec["environment"].get("sc2_build"))
         stage = "map"
         settings = maps.get(spec["map"])
         spec.setdefault("actual", {}).update(map_sha256=hashlib.sha256(settings.data).hexdigest(), game_step=GAME_STEP)

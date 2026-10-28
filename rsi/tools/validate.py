@@ -34,8 +34,12 @@ def validate(parent, candidate, timeout=30, *, patch_path=None):
         checks.append(dict(name="syntax", passed=True))
         checks.append(_check_imports(candidate, timeout))
     except (ValueError, SyntaxError, OSError, subprocess.TimeoutExpired) as exc:
-        checks.append(dict(name="validation_error", passed=False, error=str(exc), error_type=type(exc).__name__,
-                           file=getattr(exc, "filename", None), line=getattr(exc, "lineno", None)))
+        error = dict(name="validation_error", passed=False, error=str(exc), error_type=type(exc).__name__)
+        for key, attribute in (("file", "filename"), ("line", "lineno")):
+            value = getattr(exc, attribute, None)
+            if value is not None:
+                error[key] = value
+        checks.append(error)
     return dict(passed=all(c["passed"] for c in checks), checks=checks)
 
 

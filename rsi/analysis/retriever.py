@@ -1,16 +1,17 @@
 """Unified bounded queries over static analysis, raw traces and frozen references."""
 import json
-from collections import Counter
+from collections import Counter, defaultdict
 
-from .analyzer import metric_statistics, metric_summary, read_records, execution_summary
-from .references import References
+from .analyzer import metric_statistics, metric_summary, execution_summary
+from .logs import read_records
+from ..references import References
 from runner.artifacts import project_path, read_json
 
 
 class Retriever:
     def __init__(self, source_root, context, max_chars=16000, *, analyses=(), max_items=40, memory_path=None):
         """Bind static batch reports and one parent snapshot with frozen references."""
-        self.context, self.max_chars = project_path(context), max_chars
+        self.max_chars = max_chars
         self.memory_path = project_path(memory_path) if memory_path is not None else None
         self.references = References(source_root, context, max_chars=max_chars)
         self.max_items = max_items
@@ -24,10 +25,14 @@ class Retriever:
         log_path = report["log_path"]
         key = (log_path, source)
         if key not in self.records:
-            # Old recordings mixed observations into trace, so state queries include both files.
-            files = ("trace", "state") if source == "state" else ("trace",)
-            self.records[key], _ = read_records(project_path(log_path).parent, report["run_id"], files=files)
+            rows, _ = read_records(project_path(log_path).parent, report["run_id"], files=(source,))
+            self.records[key] = rows
         return self.records[key]
+
+    def close(self):
+        """Release this diagnosis's loaded analyses and detailed log records."""
+        self.records.clear()
+        self.batches.clear()
 
     def query_logs(self, kind, batch_id, runs="all", **filters):
         """Return summaries by default; paginate explicit raw data with bounded references."""
@@ -102,12 +107,12 @@ class Retriever:
             if len(kept) == self.max_items:
                 has_more = True
                 break
-            item = compact_refs(row)
+            item = row
             size = len(json.dumps(item, ensure_ascii=False))
             if size > self.max_chars:
                 item = {key: item[key] for key in ("run_id", "event", "frame", "kind", "end_frame",
-                                                  "name", "batch_id", "call_id", "request_id", "status", "source_ref", "source_refs",
-                                                  "source_ref_count")
+                                                  "name", "batch_id", "call_id", "request_id", "status", "source_ref",
+                                                  "metric_names")
                         if key in item}
                 item.update(detail_omitted=True, hint="Narrow runs/frame or use kind-specific filters to request less data")
                 size = len(json.dumps(item, ensure_ascii=False))
@@ -134,12 +139,14 @@ class Retriever:
             execution_status=report["outcome"].get("execution_status"),
             frame=list(window) if window[1] != float("inf") else [window[0], report["coverage"]["last_frame"]],
             metrics={n: metric_summary(n, report, window) for n in names},
-            metric_names=sorted(set(report["metrics"]) | set(report["counts"])),
             module_exceptions=sum(window[0] <= frame <= window[1] for frame in report["counts"]["module_exceptions"]),
             events=dict(Counter(e["kind"] for e in self._events(report, window, None))))
         if detail == "raw":
             execution = self._execution(report, window)
-            item.update(modules=execution["modules"], actions=execution["actions"], result=report["outcome"])
+            item.update(modules=execution["modules"], actions=execution["actions"],
+                        metric_names=sorted(set(report["metrics"]) | set(report["counts"])),
+                        result={key: value for key, value in report["outcome"].items()
+                                if key not in {"outcome", "termination", "execution_status"}})
         yield item
 
     def _metrics(self, report, window, names, detail):
@@ -183,8 +190,6 @@ class Retriever:
     def _execution(self, report, window):
         if window[0] == 0 and window[1] >= report["coverage"]["last_frame"]:
             return report
-        if not report["analysis"]["quality"]["trace"]["exact_calls"]:
-            raise ValueError("Historical v2 module totals are run-wide; query trace for the original window summaries")
         return execution_summary(self._records(report), report["coverage"]["last_frame"],
                                  report["analysis"]["config"], window)
 
@@ -199,12 +204,15 @@ class Retriever:
             selected &= {cid for cid, row in calls.items() if row["status"] == filters["status"]}
         if filters.get("request_id"):
             selected = {r.get("call_id") for r in rows if r.get("request_id") == filters["request_id"]}
-        descendants = set(selected)
-        for _ in range(len(calls)):
-            added = {cid for cid, r in calls.items() if r.get("parent_id") in descendants} - descendants
-            if not added:
-                break
-            descendants.update(added)
+        children = defaultdict(list)
+        for cid, call in calls.items():
+            children[call["parent_id"]].append(cid)
+        descendants, pending = set(selected), list(selected)
+        while pending:
+            for cid in children[pending.pop()]:
+                if cid not in descendants:
+                    descendants.add(cid)
+                    pending.append(cid)
         linked = set(descendants)
         for cid in list(descendants):
             parent = calls.get(cid, {}).get("parent_id")
@@ -217,12 +225,6 @@ class Retriever:
         if filters.get("status") and filters["status"] not in {"invoked_true", "invoked_false", "skipped", "exception"}:
             request_ids &= {r.get("request_id") for r in rows if r.get("status") == filters["status"]}
         for row in rows:
-            if (row["event"] == "module_summary" and not filters.get("call_id") and not filters.get("request_id")
-                    and row["start_frame"] <= window[1] and row["frame"] >= window[0]):
-                for item in row["modules"]:
-                    if (not filters.get("module") or filters["module"] in (item["module_id"], item["module_path"], item["path"])) \
-                            and (not filters.get("status") or item.get(filters["status"], 0)):
-                        yield dict(kind="module_summary", frame=row["start_frame"], end_frame=row["frame"], data=item)
             if ((row["event"] == "module_call" and row["call_id"] in linked)
                     or (row["event"] == "action" and row.get("request_id") in request_ids)
                     or (row["event"] == "action" and not row.get("request_id")
@@ -231,7 +233,7 @@ class Retriever:
                         and not any(filters.get(key)
                         for key in ("module", "call_id", "request_id")))):
                 yield dict(frame=row["frame"], kind=row["event"], data={key: value for key, value in row.items()
-                           if key not in {"frame", "event", "source_ref"}})
+                           if key not in {"frame", "event", "source_ref", "module_ref"}})
 
     def read_reference(self, path, lines=None, key=None):
         """Route reference queries through the shared reader with this query's output limit."""
@@ -253,19 +255,3 @@ class Retriever:
             kept.append(value)
             size += length
         return dict(items=kept) if kept else dict(items=[], reason="No matching experiences")
-
-
-
-def compact_refs(value):
-    """Keep representative evidence references in responses; full lists remain in artifacts."""
-    if isinstance(value, list):
-        return [compact_refs(item) for item in value]
-    if not isinstance(value, dict):
-        return value
-    result = {key: compact_refs(item) for key, item in value.items() if key != "source_refs"}
-    if "source_refs" in value:
-        references = value["source_refs"]
-        result["source_refs"] = references if len(references) <= 3 else references[:2] + references[-1:]
-        if len(references) > 3:
-            result["source_ref_count"] = len(references)
-    return result

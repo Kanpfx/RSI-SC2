@@ -3,15 +3,17 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from bot.telemetry.logger import Logger, SCORE_FIELDS
-from rsi.analyzer import Analyzer, load_batch_analysis, run_view, save_batch_analysis
-from rsi.logs import read_records
-from rsi.retriever import Retriever
+from rsi.analysis.analyzer import Analyzer, execution_summary
+from rsi.analysis.evidence import analyze_batch, load_batch_analysis, save_batch_analysis
+from rsi.analysis.logs import read_records
+from rsi.analysis.retriever import Retriever
 from runner.artifacts import read_json, write_json
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def sample(frame, *, unknown=False):
@@ -85,7 +87,7 @@ class TelemetryTests(unittest.TestCase):
             logger.emit("state", **sample(frame, unknown=frame == 2))
         logger.close()
         analysis = Analyzer(ROOT, dict(event_frames=4)).analyze_run(self.root)
-        self.assertEqual(set(analysis), {"schema_version", "config", "series", "events", "quality"})
+        self.assertEqual(set(analysis), {"schema_version", "config", "series", "events", "quality", "view"})
         self.assertNotIn("frame", analysis)
         self.assertNotIn("minerals", analysis["series"])
         self.assertFalse(any(name.startswith("score.") for name in analysis["series"]))
@@ -102,22 +104,34 @@ class TelemetryTests(unittest.TestCase):
         for frame in (0, 2, 4):
             logger.emit("state", **sample(frame))
         logger.close()
-        write_json(source / "manifest.json", dict(map="fixture", race="Zerg", difficulty="Easy", seed=1))
+        write_json(source / "manifest.json", dict(map="fixture", race="Zerg", difficulty="Easy", seed=1, actual={}))
         write_json(source / "result.json", dict(schema_version=3, execution_status="normal", outcome="win", last_frame=4, steps=3))
         history = {path.name: path.read_bytes() for path in source.iterdir()}
         batch = dict(batch_id="new_batch", version="fixture", purpose="parent", runs={"run_01": str(source)})
-        analysis = Analyzer(ROOT).analyze_batch(batch)
+        with patch("rsi.analysis.analyzer.execution_summary", wraps=execution_summary) as summarize:
+            analysis = analyze_batch(Analyzer(ROOT), batch)
+        self.assertEqual(summarize.call_count, 1)
         save_batch_analysis(output / "analysis.json", analysis)
         self.assertEqual({path.name: path.read_bytes() for path in source.iterdir()}, history)
         stored = read_json(output / "run_01/analysis.json")
-        self.assertEqual(set(stored), {"schema_version", "config", "series", "events", "quality"})
-        restored = load_batch_analysis(output / "analysis.json")
+        self.assertEqual(set(stored), {"schema_version", "config", "series", "events", "quality", "view"})
+        with patch("rsi.analysis.analyzer.read_records", side_effect=AssertionError("Repeated raw-log read")), \
+                patch("rsi.analysis.analyzer.execution_summary", side_effect=AssertionError("Repeated execution summary")):
+            restored = load_batch_analysis(output / "analysis.json")
         self.assertEqual(restored, analysis)
         retriever = Retriever(ROOT, ROOT, analyses=[restored])
         response = retriever.query_logs("metrics", batch_id="new_batch", names=["minerals", "workers"], detail="raw", frame=[0, 2])
         points = next(row for row in response["items"] if row["name"] == "minerals" and "values" in row)
         self.assertEqual(points["frame"], [0, 2])
         self.assertEqual(points["values"], [600, 602])
+        with patch("rsi.analysis.retriever.read_records", wraps=read_records) as read:
+            retriever.query_logs("trace", batch_id="new_batch")
+            retriever.query_logs("state", batch_id="new_batch")
+            retriever.query_logs("state", batch_id="new_batch")
+        self.assertEqual([call.kwargs["files"] for call in read.call_args_list], [("trace",), ("state",)])
+        retriever.close()
+        self.assertFalse(retriever.records)
+        self.assertFalse(retriever.batches)
 
     def test_corrupt_columns_and_unresolved_requests_are_reported_by_source(self):
         logger = Logger(self.root)
@@ -133,6 +147,27 @@ class TelemetryTests(unittest.TestCase):
         analysis = Analyzer(ROOT).analyze_run(self.root)
         self.assertIn("corrupt_line:state:2", analysis["quality"]["state"]["problems"])
         self.assertIn("corrupt_line:trace:2", analysis["quality"]["trace"]["problems"])
+
+    def test_trace_keeps_subtree_ancestors_and_later_confirmation(self):
+        logger = Logger(self.root)
+        calls = [dict(frame=0, call_id=f"call{number}", parent_id=parent,
+                      module_id=name, module_path="fixture", path=path, priority=30, status="invoked_true")
+                 for number, parent, name, path in (
+                     (1, "", "Root", "Root"), (2, "call1", "Child", "Root/Child"),
+                     (3, "call2", "Leaf", "Root/Child/Leaf"), (4, "call1", "Sibling", "Root/Sibling"))]
+        request = dict(frame=0, call_id="call3", request_id="request1", unit_tag=1,
+                       ability="MOVE", target=[1, 1], product=None, queue=False,
+                       status="proposed", reason="")
+        logger._execution(0, calls, [request, dict(request, status="submitted")])
+        logger._execution(10, [], [dict(request, frame=10, status="observed")])
+        logger.close()
+        retriever = Retriever(ROOT, ROOT)
+        report = dict(run_id="run_01", log_path=str(self.root / "trace.jsonl"))
+        rows = list(retriever._trace(report, [0, 0], dict(module="Child")))
+        self.assertEqual({row["data"]["call_id"] for row in rows if row["kind"] == "module_call"}, {1, 2, 3})
+        self.assertEqual([row["data"]["status"] for row in rows if row["kind"] == "action"],
+                         ["proposed", "submitted", "observed"])
+        self.assertEqual(rows[-1]["frame"], 10)
 
 
 if __name__ == "__main__":

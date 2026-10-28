@@ -1,10 +1,9 @@
 """Derive aligned columns and frame-based events; keep original facts in their source files."""
 from collections import Counter, defaultdict
 import hashlib
-from pathlib import Path
 from statistics import mean
 
-from runner.artifacts import path_reference, project_path, read_json, write_json
+from runner.artifacts import project_path, read_json
 from runner.environment import LOOPS_PER_SECOND as LOOPS
 from .logs import read_records
 
@@ -14,42 +13,6 @@ BASES = {"COMMANDCENTER", "ORBITALCOMMAND", "PLANETARYFORTRESS", "NEXUS", "HATCH
 PRODUCERS = BASES | {"BARRACKS", "FACTORY", "STARPORT", "GATEWAY", "WARPGATE", "STARGATE", "ROBOTICSFACILITY"}
 DEFAULTS = dict(sample_gap_frames=2, event_frames=224, float_minerals=500, float_vespene=300,
                 loss_window_frames=224, worker_loss_count=3, army_loss_count=3, block_count=5)
-
-
-def save_batch_analysis(path, analysis):
-    """Persist derived data once; the batch contains only run references and aggregates."""
-    path = Path(path)
-    runs = {}
-    for run_id, report in analysis["runs"].items():
-        source = project_path(report["log_path"]).parent
-        run_path = path.parent / run_id / "analysis.json"
-        write_json(run_path, report["analysis"])
-        runs[run_id] = dict(source=path_reference(source), analysis=path_reference(run_path))
-    write_json(path, dict(analysis, runs=runs))
-
-
-def load_batch_analysis(path):
-    analysis = read_json(project_path(path))
-    runs = {}
-    for run_id, reference in analysis["runs"].items():
-        if isinstance(reference, dict) and "source" in reference:
-            directory = project_path(reference["source"])
-            stored = read_json(project_path(reference["analysis"]))
-        elif isinstance(reference, str):
-            run_path = project_path(reference)
-            stored = read_json(run_path)
-            directory = run_path.parent
-        else:
-            stored = reference
-            directory = project_path(stored["log_path"]).parent
-            if "analysis" in stored:
-                runs[run_id] = run_view(directory, run_id, stored["analysis"])
-                continue
-        if stored.get("schema_version") != 3:
-            raise ValueError("Legacy analysis format: re-analyze the original batch to create frame-based analysis")
-        runs[run_id] = run_view(directory, run_id, stored)
-    analysis["runs"] = runs
-    return analysis
 
 
 def state_columns(samples):
@@ -92,53 +55,25 @@ def metric_summary(name, report, window=None):
                 first=numbers[0], last=numbers[-1])
 
 
-def run_view(directory, run_id, analysis, rows=None):
-    """Join source data in memory for queries/evaluation; this joined view is never serialized."""
-    directory = project_path(directory)
-    read_problems = []
-    if rows is None:
-        rows, read_problems = read_records(directory, run_id)
+def observation_view(rows, actions, events):
+    """Keep scalar observations and summaries, excluding unit snapshots and call histories."""
     samples = [row for row in rows if row["event"] == "state"]
-    if any(len(values) != len(samples) for values in analysis["series"].values()):
-        raise ValueError("State observation count differs from the saved analysis; re-analyze the original batch")
-    manifest, result = read_json(directory / "manifest.json"), read_json(directory / "result.json")
-    last_frame = result.get("last_frame", result.get("duration_loops"))
-    last_frame = last_frame if last_frame is not None else max((row["frame"] for row in rows), default=0)
-    actions = execution_summary(rows, last_frame, analysis["config"])
-    metrics = dict(state_columns(samples), **analysis["series"])
     counts = dict(actions["counts"])
     counts["module_exceptions"] = [row["frame"] for row in rows
                                    if row["event"] == "module_call" and row["status"] == "exception"]
-    events = list(analysis["events"])
+    native_events = []
     for row in rows:
         if row["event"] in {"unit_created", "construction_started", "construction_complete"}:
-            events.append(dict(frame=row["frame"], kind=row["event"],
+            native_events.append(dict(frame=row["frame"], kind=row["event"],
                                data={k: v for k, v in row.items() if k not in {"frame", "event", "source_ref"}}))
         if row["event"] == "unit_created":
             counts.setdefault("units_produced." + row["type"], []).append(row["frame"])
-    for event in analysis["events"]:
+    for event in events:
         if event["kind"] == "unit_loss":
             counts.setdefault(event["data"]["category"] + "_losses", []).append(event["frame"])
-    quality = analysis["quality"]
-    problems = [problem for source in ("state", "trace", "events") for problem in quality[source]["problems"]]
-    problems.extend(problem for problem in read_problems if problem not in problems)
-    if result.get("execution_status") != "normal":
-        problems.append("run_not_normal")
-    if result.get("schema_version") == 3 and result.get("steps", 0) != len(samples):
-        problems.append("state_step_count_mismatch")
-    actual = manifest.get("actual", {})
-    coverage = dict(last_frame=last_frame, sampled_frames=quality["state"]["covered_frames"],
-        sample_ratio=min(1, quality["state"]["covered_frames"] / last_frame) if last_frame else None,
-        integrity="partial" if problems else "complete", problems=problems,
-        missing_metrics=quality["missing_metrics"], unattributed_deaths=quality["unattributed_deaths"])
-    return dict(run_id=run_id, log_path=path_reference(directory / "trace.jsonl"),
-        conditions={key: manifest.get(key) for key in ("map", "race", "difficulty", "seed")},
-        environment=dict(map_sha256=actual.get("map_sha256", manifest.get("map_sha256")),
-                         environment=manifest.get("environment"), actual=actual,
-                         game_time_limit=manifest.get("game_time_limit")),
-        outcome=result, coverage=coverage, frame=[row["frame"] for row in samples], metrics=metrics, counts=counts,
-        events=sorted(events, key=lambda event: event["frame"]), modules=actions["modules"],
-        actions=actions["actions"], analysis=analysis)
+    return dict(frame=[row["frame"] for row in samples], observations=state_columns(samples),
+                last_frame=max((row["frame"] for row in rows), default=0), counts=counts,
+                events=native_events, modules=actions["modules"], actions=actions["actions"])
 
 
 def execution_summary(rows, duration, config, window=None):
@@ -150,23 +85,14 @@ def execution_summary(rows, duration, config, window=None):
         rows = [row for row in rows if (row["event"] == "action" and row.get("request_id") in origin_requests)
                 or (row["event"] != "action" and window[0] <= row["frame"] <= window[1])]
         duration = max(0, min(duration, window[1]) - window[0])
-    calls, requests, modules = {}, defaultdict(list), defaultdict(Counter)
+    requests, modules = defaultdict(list), defaultdict(Counter)
     series, events = defaultdict(list), []
-    compact = any(row["event"] == "trace_format" and row.get("version") == 2 for row in rows)
     for row in rows:
         if row["event"] == "module_call":
-            calls[row["call_id"]] = row
             key = row["module_path"] + ":" + row["path"]
             module = modules[key]
-            if not compact:
-                module["calls"] += 1
-                module[row["status"]] += 1
-        elif row["event"] == "module_summary":
-            for item in row["modules"]:
-                module = modules[item["module_path"] + ":" + item["path"]]
-                module.update({key: item[key] for key in
-                               ("calls", "invoked_true", "invoked_false", "skipped", "exception")
-                               if item.get(key)})
+            module["calls"] += 1
+            module[row["status"]] += 1
         elif row["event"] == "action" and row.get("request_id"):
             requests[row["request_id"]].append(row)
     blocked = []
@@ -214,7 +140,7 @@ def execution_summary(rows, duration, config, window=None):
         item = {name: count for name, count in counters.items() if not name.startswith("blocked:")}
         for name in ("calls", "skipped", "invoked_true", "invoked_false", "requests"):
             item.setdefault(name, 0)
-        item["exceptions"] = counters.get("exception", 0)
+        item["exceptions"] = item.pop("exception", 0)
         item["blocked_by_reason"] = {name.removeprefix("blocked:"): count for name, count in counters.items()
                                      if name.startswith("blocked:")}
         module_stats[key] = item
@@ -250,10 +176,7 @@ class Analyzer:
 
     def _analyze(self, rows, problems):
         samples = [row for row in rows if row["event"] == "state"]
-        modern = any(row["event"] == "trace_format" and row.get("version") == 3 for row in rows)
         config = dict(self.config, knowledge_sha256=self.knowledge_hash)
-        if not modern:
-            config["sample_gap_frames"] = 32
         series, events = self._analyze_samples(samples, config)
         losses, unattributed = self._analyze_losses(rows)
         events.extend(losses)
@@ -261,10 +184,6 @@ class Analyzer:
         events.extend(actions["events"])
         quality = {source: dict(problems=[p for p in problems if source in p])
                    for source in ("state", "trace", "events")}
-        if not modern:
-            for name in ("game_started", "game_ended"):
-                if not any(row["event"] == name for row in rows):
-                    quality["trace"]["problems"].append("missing_" + name)
         frames = [sample["frame"] for sample in samples]
         gaps = [[a, b] for a, b in zip(frames, frames[1:]) if b - a > config["sample_gap_frames"]]
         quality["state"].update(samples=len(samples), first_frame=frames[0] if frames else None,
@@ -272,7 +191,6 @@ class Analyzer:
             covered_frames=sum(b - a for a, b in zip(frames, frames[1:]) if 0 < b - a <= config["sample_gap_frames"]))
         if not samples:
             quality["state"]["problems"].append("no_state_samples")
-        quality["trace"]["exact_calls"] = not any(row["event"] == "module_summary" for row in rows)
         quality["unattributed_deaths"] = unattributed
         quality["missing_metrics"] = dict(mineral_income="Separate mineral income is not derived",
             gas_income="Separate gas income is not derived", upgrade_state="Upgrade state is not recorded")
@@ -282,6 +200,7 @@ class Analyzer:
             if not any(value is not None for value in series.get(name, [])):
                 quality["missing_metrics"][name] = "Required native score is unavailable"
         return dict(schema_version=3, config=config, series=series,
+                    view=observation_view(rows, actions, events),
                     events=sorted(events, key=lambda event: event["frame"]), quality=quality)
 
     def _analyze_samples(self, samples, config):
@@ -365,20 +284,3 @@ class Analyzer:
                       if event["kind"] == "unit_loss" and event["data"]["category"] == category]
             clusters(deaths, category + "_loss_spike", self.config[category + "_loss_count"], events, self.config)
         return events, unattributed
-
-    def analyze_batch(self, batch):
-        if batch["purpose"] == "holdout":
-            raise ValueError("Holdout is unavailable to the development Analyzer")
-        reports = {}
-        for run_id, path in batch["runs"].items():
-            rows, problems = read_records(project_path(path), run_id)
-            reports[run_id] = run_view(path, run_id, self._analyze(rows, problems), rows)
-        summary = dict(outcomes=dict(Counter(report["outcome"].get("outcome") or "unknown" for report in reports.values())),
-                       event_counts=dict(Counter(event["kind"] for report in reports.values() for event in report["events"])))
-        return dict(batch_id=batch["batch_id"], version=batch["version"], purpose=batch["purpose"], runs=reports, summary=summary)
-
-
-def analyze_evidence(analyzer, batch, batch_path, analysis_path):
-    analysis = analyzer.analyze_batch(batch)
-    save_batch_analysis(analysis_path, analysis)
-    return dict(batch=batch, analysis=analysis, batch_path=path_reference(batch_path), analysis_path=path_reference(analysis_path))

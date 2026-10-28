@@ -1,6 +1,7 @@
 """The sole game loop: observe, run strategy, resolve actions, consume telemetry."""
 from time import perf_counter
 import traceback
+import warnings
 
 from sc2.bot_ai import BotAI
 
@@ -16,8 +17,8 @@ GAME_STEP = 2
 
 
 class ResearchBot(BotAI):
-    def __init__(self, *, logger=None, sc2_build=98370):
-        """Configure the expected game build, passive logger and persistent root Tactics."""
+    def __init__(self, *, logger=None, sc2_build=None):
+        """Configure an optional expected build, passive logger and persistent root Tactics."""
         super().__init__()
         self.unit_command_uses_self_do = True
         self.logger = logger if logger is not None else Logger()
@@ -31,13 +32,14 @@ class ResearchBot(BotAI):
         self.max_step_seconds = 0
 
     async def on_start(self):
-        """Verify the native build, set game_step and construct shared frame services."""
+        """Record the native build, set game_step and construct shared frame services."""
         self.client.game_step = GAME_STEP
         ping = (await self.client.ping()).ping
         self.logger.emit("game_started", 0, game_version=ping.game_version,
                          sc2_build=ping.base_build, game_step=GAME_STEP)
-        if ping.base_build != self.sc2_build:
-            raise RuntimeError(f"Expected SC2 build {self.sc2_build}, got {ping.base_build}")
+        if self.sc2_build is not None and ping.base_build != self.sc2_build:
+            warnings.warn(f"Configured SC2 build {self.sc2_build}, running {ping.base_build}",
+                          RuntimeWarning, stacklevel=2)
         units, spatial = UnitControl(), Spatial(self)
         actions = Actions(self, units, spatial.placement)
         self.frame = Frame(self, spatial, units, actions)

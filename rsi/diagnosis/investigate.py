@@ -2,8 +2,8 @@
 import ast
 import re
 
-from ..retriever import Retriever
-from ..analyzer import load_batch_analysis
+from ..analysis.retriever import Retriever
+from ..analysis.evidence import load_batch_analysis
 from runner.artifacts import project_path, write_json
 from ..tools.validate import editable
 
@@ -125,6 +125,19 @@ class Investigation:
             self.state.setdefault("reason", "Session ended without an actionable conclusion")
             self.save()
         return self.state
+
+    def summary(self):
+        """Return the editing handoff without copying query records or hypothesis revisions."""
+        state = self.result()
+        return dict(issue=state["issue"], conclusion=state["conclusion"], reason=state.get("reason"),
+                    hypotheses=[{k: v for k, v in hypothesis.items() if k not in {"revisions", "introduced_reason"}}
+                                for hypothesis in state["hypotheses"]],
+                    query_count=len(state["queries"]))
+
+    def close(self):
+        """Release loaded evidence and investigation history after the session is saved."""
+        self.retriever.close()
+        self.state.clear()
 
     def save(self):
         """Persist the investigation after successful state transitions."""
