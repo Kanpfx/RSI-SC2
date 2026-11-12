@@ -1,0 +1,34 @@
+{
+  "max_matches": 65,
+  "max_wall_seconds": 10800,
+  "trials": 5,
+  "match_parallelism": 2,
+  "max_analyses": 16,
+  "max_repairs": 1,
+  "model": {
+    "api_key_env": "LLM_API_KEY",
+    "reasoning_effort": "high",
+    "max_total_tokens": 1500000,
+    "max_cost": 0.3,
+    "max_iterations": 80,
+    "max_output_tokens": 8192,
+    "request_timeout": 180,
+    "wall_timeout": 600
+  },
+  "matches": {
+    "map": "AcropolisAIE",
+    "opponent_race": "T",
+    "game_time_limit": 1800,
+    "wall_timeout": 600,
+    "difficulty": "Hard"
+  },
+  "max_research_steps": 12,
+  "resolution_max_tasks": 3,
+  "use_memory": true,
+  "evaluation_styles": [
+    "Macro",
+    "Timing",
+    "Rush"
+  ],
+  "selection_seed": 1
+}

@@ -1,0 +1,64 @@
+services:
+  experiment:
+    image: aiarena/arenaclient-sc2:v0.8.0
+    pull_policy: never
+    platform: linux/amd64
+    working_dir: /app
+    entrypoint: [/opt/rsi/python/bin/python3, -u, -B, -m, rsi]
+    command: [--rounds, "5"]
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp
+    environment:
+      SC2PATH: /root/StarCraftII
+      PATH: /opt/rsi/python/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      PYTHONPATH: /app
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONIOENCODING: utf-8
+      LITELLM_LOCAL_MODEL_COST_MAP: "True"
+      OPENHANDS_SUPPRESS_BANNER: "1"
+      HOME: /tmp
+      XDG_CACHE_HOME: /tmp/.cache
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - type: volume
+        source: python
+        target: /opt/rsi
+        read_only: true
+      - type: bind
+        source: ./bot
+        target: /app/bot
+        read_only: true
+      - type: bind
+        source: ./rsi
+        target: /app/rsi
+        read_only: true
+      - type: bind
+        source: ./runtime
+        target: /app/runtime
+        read_only: true
+      - type: bind
+        source: ./knowledge
+        target: /app/knowledge
+        read_only: true
+      - type: bind
+        source: ./tests
+        target: /app/tests
+        read_only: true
+      - type: bind
+        source: ./pyproject.toml
+        target: /app/pyproject.toml
+        read_only: true
+      - type: bind
+        source: ./outputs
+        target: /app/outputs
+
+volumes:
+  python:
+    name: rsi-sc2-python
+    external: true

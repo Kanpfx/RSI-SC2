@@ -1,0 +1,117 @@
+"""Engine-validated placement with mineral access and addon reservations."""
+from sc2.position import Point2
+from sc2.ids.unit_typeid import UnitTypeId as U
+
+
+def overlaps(a, b):
+    """Test rectangle overlap; (left, bottom, right, top) edges may touch."""
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+class Placement:
+    """Validate build sites and retain request or structure footprint reservations."""
+
+    def __init__(self, game, map_data):
+        """Cache mineral corridors and initialize request/structure reservations."""
+        self.game, self.map = game, map_data
+        self.reserved = {}
+        self._owners = {}
+        self.corridors = []
+        for resource in self.map.resources:
+            base = min(self.map.expansions, key=lambda p: p.distance_to(resource), default=None)
+            if base is not None and base.distance_to(resource) < 12:
+                self.corridors.extend(base.towards(resource, base.distance_to(resource) * fraction)
+                                      for fraction in (.25, .5, .75))
+
+    def footprint(self, product, position, addon_space=False):
+        """Return a building rectangle, optionally extended to the right for an addon."""
+        half = self.game.game_data.units[product.value].footprint_radius
+        x, y = position
+        return x - half, y - half, x + half + (2 if addon_space else 0), y + half
+
+    def begin(self):
+        """Release retained space when its structure disappears, lifts or moves."""
+        structures = {b.tag: b for b in self.game.structures}
+        for tag, position in list(self._owners.items()):
+            owner = structures.get(tag)
+            if owner is None or owner.is_flying or owner.position != position:
+                self.release(tag)
+
+    def conflicts(self, footprint, *, ignore=None):
+        """Check reservations, optionally ignoring the addon's owning structure."""
+        return any(key != ignore and overlaps(footprint, rectangle)
+                   for key, rectangle in self.reserved.items())
+
+    def reserve(self, request_id, footprint):
+        """Retain an accepted construction footprint until Actions releases its request."""
+        self.reserved[request_id] = footprint
+
+    def retain(self, structure, footprint):
+        """Keep extra space with its owning structure after construction ends."""
+        self.reserved[structure.tag] = footprint
+        self._owners[structure.tag] = structure.position
+
+    def release(self, request_id):
+        """Release a request or structure reservation; repeated releases are harmless."""
+        self.reserved.pop(request_id, None)
+        self._owners.pop(request_id, None)
+
+    def clear_access(self, product, position, addon_space=False):
+        """Filter sites by build grid, reservations, mineral access and ramp clearance.
+
+        Command Centers may overlap mineral corridors. The engine validates sites.
+        """
+        rectangle = self.footprint(product, position, addon_space)
+        left, bottom, right, top = rectangle
+        height, width = self.map.buildable.shape
+        if not (0 <= left < right < width and 0 <= bottom < top < height):
+            return False
+        if not self.map.buildable[int(bottom):int(top+.999), int(left):int(right+.999)].all():
+            return False
+        if self.conflicts(rectangle):
+            return False
+        for resource in self.map.resources:
+            nearest = Point2((min(max(resource.x, left), right),
+                              min(max(resource.y, bottom), top)))
+            if nearest.distance_to(resource) < 1.5:
+                return False
+        if product != U.COMMANDCENTER and any(
+                left-1 < point.x < right+1 and bottom-1 < point.y < top+1 for point in self.corridors):
+            return False
+        return position.distance_to(self.map.ramp) > 3
+
+    async def find(self, product, near, *, addon_space=False, max_distance=16, exact=False):
+        """Find an engine-validated site near an anchor, or None.
+
+        exact tests only the snapped anchor; addon_space also checks the addon site.
+        Only accepted construction requests reserve space.
+        """
+        near = Point2(near)
+        half = self.game.game_data.units[product.value].footprint_radius
+        offset = half % 1
+        center = Point2((round(near.x - offset) + offset, round(near.y - offset) + offset))
+        candidates = [center] if exact else [
+            Point2((center.x+dx, center.y+dy))
+            for dy in range(-max_distance, max_distance+1, 2)
+            for dx in range(-max_distance, max_distance+1, 2)]
+        candidates.sort(key=lambda p: (p.distance_to(near), p.x, p.y))
+        # Test a batch through the engine rather than one RPC per candidate.
+        candidates = iter(candidates)
+        while True:
+            batch = []
+            for position in candidates:
+                if self.clear_access(product, position, addon_space):
+                    batch.append(position)
+                    if len(batch) == 32:
+                        break
+            if not batch:
+                break
+            legal = await self.game.can_place(product, batch)
+            for position, valid in zip(batch, legal):
+                if valid:
+                    if addon_space:
+                        if not await self.game.can_place_single(U.SUPPLYDEPOT,
+                                position + Point2((2.5, -.5))):
+                            continue
+                    return position
+        return None

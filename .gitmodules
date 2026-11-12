@@ -1,0 +1,8 @@
+# local-play-bootstrap a5b8198
+[submodule "local-play-bootstrap"]
+	path = runtime/matches/local-play-bootstrap
+	url = https://github.com/aiarena/local-play-bootstrap.git
+# burnysc2 7.1.3
+[submodule "python-sc2"]
+	path = knowledge/python-sc2
+	url = https://github.com/BurnySc2/python-sc2.git
